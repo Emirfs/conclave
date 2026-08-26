@@ -50,6 +50,82 @@ export namespace domain {
 	        this.body = source["body"];
 	    }
 	}
+	export class CardRun {
+	    id: number;
+	    status: string;
+	    step_name?: string;
+	    exit_code: number;
+	    output?: string;
+	    started_at: string;
+	    finished_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CardRun(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.status = source["status"];
+	        this.step_name = source["step_name"];
+	        this.exit_code = source["exit_code"];
+	        this.output = source["output"];
+	        this.started_at = source["started_at"];
+	        this.finished_at = source["finished_at"];
+	    }
+	}
+	export class CardStep {
+	    name: string;
+	    command: string;
+	    timeout_seconds?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CardStep(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.command = source["command"];
+	        this.timeout_seconds = source["timeout_seconds"];
+	    }
+	}
+	export class LoopConfig {
+	    mode: string;
+	    interval_seconds: number;
+	    steps: CardStep[];
+	    notify_on_failure: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new LoopConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.interval_seconds = source["interval_seconds"];
+	        this.steps = this.convertValues(source["steps"], CardStep);
+	        this.notify_on_failure = source["notify_on_failure"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ChatResponse {
 	    id: number;
 	    turn_id: number;
@@ -121,8 +197,9 @@ export namespace domain {
 	    turns: ChatTurn[];
 	    project_path?: string;
 	    access?: string;
-	    test_command?: string;
-	    test_rounds?: number;
+	    loop: LoopConfig;
+	    loop_running: boolean;
+	    runs?: CardRun[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Conversation(source);
@@ -138,8 +215,9 @@ export namespace domain {
 	        this.turns = this.convertValues(source["turns"], ChatTurn);
 	        this.project_path = source["project_path"];
 	        this.access = source["access"];
-	        this.test_command = source["test_command"];
-	        this.test_rounds = source["test_rounds"];
+	        this.loop = this.convertValues(source["loop"], LoopConfig);
+	        this.loop_running = source["loop_running"];
+	        this.runs = this.convertValues(source["runs"], CardRun);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -222,6 +300,9 @@ export namespace domain {
 	        this.body = source["body"];
 	    }
 	}
+	
+	
+	
 	
 	
 	

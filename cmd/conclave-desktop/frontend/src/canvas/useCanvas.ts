@@ -12,7 +12,8 @@ import {
   PickProjectDirectory,
   SetProject,
   SendTurn,
-  SetTestLoop,
+  SetLoop,
+  SetLoopRunning,
   UnlinkNodes,
   UpdateLink,
 } from '../../wailsjs/go/main/App'
@@ -94,6 +95,7 @@ export function useCanvas(connected: boolean) {
       let working = false
       for (const item of canvas.conversations ?? []) {
         conversations.set(item.id, item)
+        if (item.loop_running) working = true
         for (const turn of item.turns ?? []) {
           for (const response of turn.responses ?? []) {
             if (response.status === 'queued' || response.status === 'running') working = true
@@ -262,10 +264,22 @@ export function useCanvas(connected: boolean) {
     [load],
   )
 
-  const configureTestLoop = useCallback(
-    async (conversationID: number, command: string, rounds: number) => {
+  const saveLoop = useCallback(
+    async (conversationID: number, config: domain.LoopConfig) => {
       try {
-        await SetTestLoop(conversationID, command, rounds)
+        await SetLoop(conversationID, config)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  const toggleLoop = useCallback(
+    async (conversationID: number, running: boolean) => {
+      try {
+        await SetLoopRunning(conversationID, running)
         await load()
       } catch (cause) {
         setError(String(cause))
@@ -329,10 +343,10 @@ export function useCanvas(connected: boolean) {
     () => ({
       nodes, setNodes, edges, error, loaded, load, patch,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
-      pickProject, setAccess, pair, configureLink, configureTestLoop,
+      pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
     }),
     [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
-     configureTestLoop],
+     saveLoop, toggleLoop],
   )
 }

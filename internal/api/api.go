@@ -51,7 +51,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/canvas/links", s.createLink)
 	mux.HandleFunc("PATCH /v1/canvas/links/{id}", s.updateLink)
 	mux.HandleFunc("DELETE /v1/canvas/links/{id}", s.deleteLink)
-	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/test-loop", s.setTestLoop)
+	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/loop", s.setLoop)
+	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/loop/running", s.setLoopRunning)
 	return s.authenticate(mux)
 }
 
@@ -460,21 +461,47 @@ func (s *Server) updateLink(response http.ResponseWriter, request *http.Request)
 	response.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) setTestLoop(response http.ResponseWriter, request *http.Request) {
+func (s *Server) setLoop(response http.ResponseWriter, request *http.Request) {
 	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
 		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
 		return
 	}
-	var input domain.TestLoopRequest
-	if !decodeJSON(response, request, 8<<10, &input) {
+	var input domain.LoopConfig
+	if !decodeJSON(response, request, 64<<10, &input) {
 		return
 	}
-	if utf8.RuneCountInString(input.Command) > 500 {
-		writeError(response, http.StatusBadRequest, errors.New("command is limited to 500 characters"))
+	for _, step := range input.Steps {
+		if utf8.RuneCountInString(step.Command) > 2000 {
+			writeError(response, http.StatusBadRequest, errors.New("a step command is limited to 2000 characters"))
+			return
+		}
+	}
+	err = s.store.SetLoop(request.Context(), id, input)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusNotFound, errors.New("conversation does not exist"))
 		return
 	}
-	err = s.store.SetConversationTestLoop(request.Context(), id, input.Command, input.Rounds)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) setLoopRunning(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	var input struct {
+		Running bool `json:"running"`
+	}
+	if !decodeJSON(response, request, 4<<10, &input) {
+		return
+	}
+	err = s.store.SetLoopRunning(request.Context(), id, input.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(response, http.StatusNotFound, errors.New("conversation does not exist"))
 		return
@@ -669,9 +696,14 @@ func (c *Client) UpdateLink(ctx context.Context, id int64, options domain.LinkOp
 		options, nil, http.StatusNoContent)
 }
 
-func (c *Client) SetTestLoop(ctx context.Context, conversationID int64, input domain.TestLoopRequest) error {
-	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/test-loop"
+func (c *Client) SetLoop(ctx context.Context, conversationID int64, input domain.LoopConfig) error {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/loop"
 	return c.do(ctx, http.MethodPut, path, input, nil, http.StatusNoContent)
+}
+
+func (c *Client) SetLoopRunning(ctx context.Context, conversationID int64, running bool) error {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/loop/running"
+	return c.do(ctx, http.MethodPut, path, map[string]bool{"running": running}, nil, http.StatusNoContent)
 }
 
 func (c *Client) DeleteLink(ctx context.Context, id int64) error {

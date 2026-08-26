@@ -4,6 +4,7 @@ import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import { providerStyle } from '../providers'
 import { CloseButton } from './CloseButton'
 import { Changes } from './Changes'
+import { LoopPanel } from './LoopPanel'
 import { domain } from '../../wailsjs/go/models'
 import type { ConversationNodeData } from './useCanvas'
 
@@ -13,14 +14,15 @@ type Props = NodeProps & {
     onClose: (id: string) => void
     onPickProject: (conversationID: number, current: string) => Promise<void>
     onToggleAccess: (conversationID: number, project: string, access: string) => Promise<void>
-    onConfigureTests: (conversationID: number, command: string, rounds: number) => Promise<void>
+    onSaveLoop: (conversationID: number, config: domain.LoopConfig) => Promise<void>
+    onToggleLoop: (conversationID: number, running: boolean) => Promise<void>
   }
 }
 
 type Tab = 'chat' | 'changes' | 'tests'
 
 export const ConversationNode = memo(function ConversationNode({ id, data, selected }: Props) {
-  const { conversation, onSend, onClose, onPickProject, onToggleAccess, onConfigureTests } = data
+  const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop } = data
   const project = conversation.project_path ?? ''
   const access = conversation.access ?? 'edit'
   const [tab, setTab] = useState<Tab>('chat')
@@ -139,18 +141,20 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
             disabled={!project}
             title={project ? 'Her turdan sonra çalışacak komut' : 'Önce bir proje seç'}
           >
-            test{conversation.test_rounds ? ' ●' : ''}
+            döngü{conversation.loop_running ? ' ●' : ''}
           </button>
         </span>
       </div>
 
       {tab === 'tests' ? (
         <div className="node__body nowheel">
-          <TestLoop
+          <LoopPanel
             conversationID={conversation.id}
-            command={conversation.test_command ?? ''}
-            rounds={conversation.test_rounds ?? 0}
-            onSave={onConfigureTests}
+            loop={conversation.loop}
+            running={conversation.loop_running ?? false}
+            runs={conversation.runs ?? []}
+            onSave={onSaveLoop}
+            onToggleRunning={onToggleLoop}
           />
         </div>
       ) : tab === 'changes' ? (
@@ -281,68 +285,6 @@ function toolLabel(tool: string): string {
     WebSearch: 'web araması',
   }
   return known[tool] ?? tool
-}
-
-/** Runs after every turn; a failure comes back to this card as its next
- *  message, so the card can iterate until the command passes. */
-function TestLoop({
-  conversationID,
-  command,
-  rounds,
-  onSave,
-}: {
-  conversationID: number
-  command: string
-  rounds: number
-  onSave: (conversationID: number, command: string, rounds: number) => Promise<void>
-}) {
-  const [draft, setDraft] = useState(command)
-  const [count, setCount] = useState(rounds || 3)
-
-  const enabled = rounds > 0 && command !== ''
-  return (
-    <div className="testloop">
-      <label className="testloop__label">Her turdan sonra çalıştır</label>
-      <input
-        className="testloop__input nodrag"
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => event.stopPropagation()}
-        placeholder="go test ./..."
-        spellCheck={false}
-      />
-      <div className="testloop__row">
-        <span className="testloop__label">en fazla</span>
-        {[1, 2, 3, 5].map((value) => (
-          <button
-            key={value}
-            className={`testloop__choice${count === value ? ' testloop__choice--active' : ''}`}
-            onClick={() => setCount(value)}
-          >
-            {value}
-          </button>
-        ))}
-        <span className="testloop__label">deneme</span>
-      </div>
-      <div className="testloop__row">
-        <button
-          className="testloop__save"
-          onClick={() => void onSave(conversationID, draft.trim(), draft.trim() ? count : 0)}
-        >
-          Kaydet
-        </button>
-        {enabled && (
-          <button className="testloop__off" onClick={() => void onSave(conversationID, '', 0)}>
-            Kapat
-          </button>
-        )}
-      </div>
-      <p className="testloop__hint">
-        Komut kabuk üzerinden değil, doğrudan çalıştırılır. Başarısız olursa çıktısı bu karta
-        yeni bir mesaj olarak döner.
-      </p>
-    </div>
-  )
 }
 
 /** Long paths do not fit a card header; the tail is the informative part. */

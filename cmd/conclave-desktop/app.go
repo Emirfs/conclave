@@ -186,16 +186,26 @@ func (a *App) UpdateLink(id int64, mode string, rounds int) error {
 	return client.UpdateLink(ctx, id, domain.LinkOptions{Mode: mode, MaxRounds: rounds})
 }
 
-// SetTestLoop configures the command a card runs after each turn. An empty
-// command or zero rounds turns the loop off.
-func (a *App) SetTestLoop(conversationID int64, command string, rounds int) error {
+// SetLoop replaces a card's step list and how its cycle repeats.
+func (a *App) SetLoop(conversationID int64, config domain.LoopConfig) error {
 	client, err := a.client()
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
-	return client.SetTestLoop(ctx, conversationID, domain.TestLoopRequest{Command: command, Rounds: rounds})
+	return client.SetLoop(ctx, conversationID, config)
+}
+
+// SetLoopRunning arms or disarms a card's cycle.
+func (a *App) SetLoopRunning(conversationID int64, running bool) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.SetLoopRunning(ctx, conversationID, running)
 }
 
 func (a *App) UnlinkNodes(id int64) error {

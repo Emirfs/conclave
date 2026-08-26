@@ -27,9 +27,11 @@ export function ProjectChanges(arg1:number):Promise<vcs.Status>;
 
 export function SendTurn(arg1:number,arg2:string):Promise<void>;
 
-export function SetProject(arg1:number,arg2:string,arg3:string):Promise<void>;
+export function SetLoop(arg1:number,arg2:domain.LoopConfig):Promise<void>;
 
-export function SetTestLoop(arg1:number,arg2:string,arg3:number):Promise<void>;
+export function SetLoopRunning(arg1:number,arg2:boolean):Promise<void>;
+
+export function SetProject(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function Snapshot():Promise<domain.Snapshot>;
 

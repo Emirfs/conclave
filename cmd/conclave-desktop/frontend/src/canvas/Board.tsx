@@ -35,7 +35,7 @@ export function Board({ canvas }: { canvas: BoardHandle }) {
 
 function BoardSurface({ canvas }: { canvas: BoardHandle }) {
   const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink,
-    pickProject, setAccess, pair, configureLink, configureTestLoop } = canvas
+    pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
 
   // Closing removes the node and, for a conversation, its history with it.
@@ -57,11 +57,12 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
                 onClose: close,
                 onPickProject: pickProject,
                 onToggleAccess: setAccess,
-                onConfigureTests: configureTestLoop,
+                onSaveLoop: saveLoop,
+                onToggleLoop: toggleLoop,
               },
             },
       ),
-    [nodes, setNoteBody, send, close, pickProject, setAccess, configureTestLoop],
+    [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop],
   )
 
   const onNodesChange = useCallback(

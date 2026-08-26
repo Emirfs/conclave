@@ -162,6 +162,36 @@ ALTER TABLE conversations ADD COLUMN test_command TEXT NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN test_rounds INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE chat_turns ADD COLUMN test_round INTEGER NOT NULL DEFAULT 0;
 `,
+	// 8: a card runs an ordered list of steps rather than one command, and the
+	// loop can keep going instead of stopping at the first success. This is
+	// what a hardware cycle needs: flash, listen, check, repeat.
+	`
+CREATE TABLE card_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    command TEXT NOT NULL,
+    timeout_seconds INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(conversation_id, position)
+);
+ALTER TABLE conversations ADD COLUMN loop_mode TEXT NOT NULL DEFAULT 'off';
+ALTER TABLE conversations ADD COLUMN loop_interval_seconds INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE conversations ADD COLUMN loop_running INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE conversations ADD COLUMN loop_due_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE conversations ADD COLUMN loop_last_signature TEXT NOT NULL DEFAULT '';
+CREATE TABLE card_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    step_name TEXT NOT NULL DEFAULT '',
+    exit_code INTEGER NOT NULL DEFAULT 0,
+    output TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX card_runs_conversation_idx ON card_runs(conversation_id, id DESC);
+`,
 }
 
 func (s *Store) init() error {
@@ -727,6 +757,16 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 			return canvas, err
 		}
 		conversations[index].Turns = turns
+		steps, err := s.loopSteps(ctx, conversations[index].ID)
+		if err != nil {
+			return canvas, err
+		}
+		conversations[index].Loop.Steps = steps
+		runs, err := s.recentCardRuns(ctx, conversations[index].ID)
+		if err != nil {
+			return canvas, err
+		}
+		conversations[index].Runs = runs
 	}
 	canvas.Conversations = conversations
 	nodes, err := s.listCanvasNodes(ctx)
@@ -745,7 +785,9 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, title, kind, created_at, project_path, access,
-		        COALESCE(test_command, ''), COALESCE(test_rounds, 0)
+		        COALESCE(test_rounds, 0),
+		        COALESCE(loop_mode, 'off'), COALESCE(loop_interval_seconds, 5),
+		        COALESCE(loop_running, 0)
 		 FROM conversations ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -755,12 +797,17 @@ func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, e
 	for rows.Next() {
 		var item domain.Conversation
 		var created string
+		var loopRunning int
+		var notify int
 		if err := rows.Scan(&item.ID, &item.Title, &item.Kind, &created,
-			&item.ProjectPath, &item.Access, &item.TestCommand, &item.TestRounds); err != nil {
+			&item.ProjectPath, &item.Access, &notify,
+			&item.Loop.Mode, &item.Loop.IntervalSeconds, &loopRunning); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		item.Loop.NotifyOnFailure = notify != 0
+		item.LoopRunning = loopRunning != 0
 		item.Providers = []string{}
 		index[item.ID] = len(conversations)
 		conversations = append(conversations, item)
@@ -1241,98 +1288,4 @@ func (s *Store) SetConversationProject(ctx context.Context, conversationID int64
 	return nil
 }
 
-// TestLoop describes a card's after-each-turn command.
-type TestLoop struct {
-	Command string
-	Rounds  int
-	Project string
-	// Round is how many times the current chain has already retried.
-	Round int
-}
 
-// ConversationTestLoop reports the command a card should run after the given
-// turn, or ok=false when the card has no loop or the budget is spent.
-func (s *Store) ConversationTestLoop(ctx context.Context, turnID int64) (TestLoop, bool, error) {
-	var loop TestLoop
-	err := s.db.QueryRowContext(ctx, `
-SELECT COALESCE(c.test_command, ''), COALESCE(c.test_rounds, 0),
-       COALESCE(c.project_path, ''), t.test_round
-FROM chat_turns t JOIN conversations c ON c.id = t.conversation_id
-WHERE t.id = ?`, turnID).Scan(&loop.Command, &loop.Rounds, &loop.Project, &loop.Round)
-	if errors.Is(err, sql.ErrNoRows) {
-		return loop, false, nil
-	}
-	if err != nil {
-		return loop, false, err
-	}
-	if strings.TrimSpace(loop.Command) == "" || loop.Rounds <= 0 || loop.Project == "" {
-		return loop, false, nil
-	}
-	if loop.Round >= loop.Rounds {
-		return loop, false, nil
-	}
-	return loop, true, nil
-}
-
-// CreateTestFailureTurn asks the same card to fix what the command reported.
-func (s *Store) CreateTestFailureTurn(ctx context.Context, turnID int64, prompt string) error {
-	var conversationID int64
-	var round int
-	err := s.db.QueryRowContext(ctx,
-		"SELECT COALESCE(conversation_id, 0), test_round FROM chat_turns WHERE id = ?", turnID).
-		Scan(&conversationID, &round)
-	if err != nil {
-		return err
-	}
-	if conversationID == 0 {
-		return nil
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	providers, err := conversationProviders(ctx, tx, conversationID)
-	if err != nil {
-		return err
-	}
-	if len(providers) == 0 {
-		return nil
-	}
-	newTurn, err := insertTurn(ctx, tx, conversationID, prompt, providers)
-	if err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		"UPDATE chat_turns SET test_round = ? WHERE id = ?", round+1, newTurn); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// SetConversationTestLoop configures the command a card runs after each turn.
-func (s *Store) SetConversationTestLoop(ctx context.Context, conversationID int64, command string, rounds int) error {
-	if rounds < 0 {
-		rounds = 0
-	}
-	if rounds > maxTestRounds {
-		rounds = maxTestRounds
-	}
-	result, err := s.db.ExecContext(ctx,
-		"UPDATE conversations SET test_command = ?, test_rounds = ? WHERE id = ?",
-		strings.TrimSpace(command), rounds, conversationID)
-	if err != nil {
-		return err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed == 0 {
-		return sql.ErrNoRows
-	}
-	return nil
-}
-
-// maxTestRounds caps retries so a card that cannot fix a failure stops asking.
-const maxTestRounds = 10

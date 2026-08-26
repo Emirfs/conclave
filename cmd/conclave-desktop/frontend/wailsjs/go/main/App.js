@@ -50,12 +50,16 @@ export function SendTurn(arg1, arg2) {
   return window['go']['main']['App']['SendTurn'](arg1, arg2);
 }
 
-export function SetProject(arg1, arg2, arg3) {
-  return window['go']['main']['App']['SetProject'](arg1, arg2, arg3);
+export function SetLoop(arg1, arg2) {
+  return window['go']['main']['App']['SetLoop'](arg1, arg2);
 }
 
-export function SetTestLoop(arg1, arg2, arg3) {
-  return window['go']['main']['App']['SetTestLoop'](arg1, arg2, arg3);
+export function SetLoopRunning(arg1, arg2) {
+  return window['go']['main']['App']['SetLoopRunning'](arg1, arg2);
+}
+
+export function SetProject(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetProject'](arg1, arg2, arg3);
 }
 
 export function Snapshot() {

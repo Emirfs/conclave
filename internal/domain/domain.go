@@ -131,16 +131,12 @@ type Conversation struct {
 	ProjectPath string `json:"project_path,omitempty"`
 	// Access is "read" or "edit"; see provider.Access.
 	Access string `json:"access,omitempty"`
-	// TestCommand runs in the project after every turn. Empty disables the
-	// loop. TestRounds bounds how many times a failure is fed back.
-	TestCommand string `json:"test_command,omitempty"`
-	TestRounds  int    `json:"test_rounds,omitempty"`
-}
-
-// TestLoopRequest configures a card's after-each-turn command.
-type TestLoopRequest struct {
-	Command string `json:"command"`
-	Rounds  int    `json:"rounds"`
+	// Loop is the card's step cycle and how it repeats.
+	Loop LoopConfig `json:"loop"`
+	// LoopRunning reports whether the cycle is currently armed.
+	LoopRunning bool `json:"loop_running"`
+	// Runs are the most recent cycle results, newest first.
+	Runs []CardRun `json:"runs,omitempty"`
 }
 
 // CanvasNode is presentation state the daemon owns so a layout survives a
@@ -254,4 +250,90 @@ type Canvas struct {
 	Conversations []Conversation `json:"conversations"`
 	Nodes         []CanvasNode   `json:"nodes"`
 	Links         []CanvasLink   `json:"links"`
+}
+
+// Loop modes for a card's step list.
+const (
+	// LoopOff never runs the steps.
+	LoopOff = "off"
+	// LoopUntilPass runs after each turn and stops once every step succeeds.
+	LoopUntilPass = "until_pass"
+	// LoopContinuous keeps cycling regardless of the outcome. This is what a
+	// hardware rig needs: flash, listen, check, wait, repeat.
+	LoopContinuous = "continuous"
+)
+
+// CardStep is one command in a card's cycle. Commands are argument arrays and
+// never reach a shell.
+type CardStep struct {
+	Name string `json:"name"`
+	// Command is a command line split on whitespace, honouring quotes.
+	Command string `json:"command"`
+	// TimeoutSeconds bounds a step that would otherwise never exit, such as a
+	// serial listener. Zero falls back to the daemon's stage timeout.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+}
+
+// LoopConfig is how a card's cycle is set up.
+type LoopConfig struct {
+	Mode            string     `json:"mode"`
+	IntervalSeconds int        `json:"interval_seconds"`
+	Steps           []CardStep `json:"steps"`
+	// NotifyOnFailure feeds a failing step's output back to the card.
+	NotifyOnFailure bool `json:"notify_on_failure"`
+}
+
+// CardRun is one completed cycle of a card's steps.
+type CardRun struct {
+	ID         int64  `json:"id"`
+	Status     Status `json:"status"`
+	StepName   string `json:"step_name,omitempty"`
+	ExitCode   int    `json:"exit_code"`
+	Output     string `json:"output,omitempty"`
+	StartedAt  string `json:"started_at"`
+	FinishedAt string `json:"finished_at,omitempty"`
+}
+
+// maxLoopSteps and the interval bounds keep a mistyped configuration from
+// turning into an unbounded workload.
+const (
+	maxLoopSteps       = 20
+	maxLoopInterval    = 3600
+	maxStepTimeoutSecs = 3600
+)
+
+// Normalised clamps a loop configuration into supported ranges.
+func (c LoopConfig) Normalised() LoopConfig {
+	switch c.Mode {
+	case LoopUntilPass, LoopContinuous:
+	default:
+		c.Mode = LoopOff
+	}
+	if c.IntervalSeconds < 0 {
+		c.IntervalSeconds = 0
+	}
+	if c.IntervalSeconds > maxLoopInterval {
+		c.IntervalSeconds = maxLoopInterval
+	}
+	if len(c.Steps) > maxLoopSteps {
+		c.Steps = c.Steps[:maxLoopSteps]
+	}
+	cleaned := make([]CardStep, 0, len(c.Steps))
+	for _, step := range c.Steps {
+		if step.Command == "" {
+			continue
+		}
+		if step.TimeoutSeconds < 0 {
+			step.TimeoutSeconds = 0
+		}
+		if step.TimeoutSeconds > maxStepTimeoutSecs {
+			step.TimeoutSeconds = maxStepTimeoutSecs
+		}
+		cleaned = append(cleaned, step)
+	}
+	c.Steps = cleaned
+	if len(c.Steps) == 0 {
+		c.Mode = LoopOff
+	}
+	return c
 }

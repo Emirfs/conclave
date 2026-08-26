@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -60,6 +59,13 @@ func (d *Daemon) Run(ctx context.Context) {
 			d.chatWorker(ctx)
 		}()
 	}
+	// Card cycles get their own worker: a hardware loop can hold a step open
+	// for a long time and must not starve chat or pipelines.
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		d.loopWorker(ctx)
+	}()
 	<-ctx.Done()
 	workers.Wait()
 }
@@ -122,7 +128,7 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 	if _, err := d.store.RelayTurn(persist, job.TurnID); err != nil {
 		return err
 	}
-	return d.runTestLoop(persist, ctx, job.TurnID)
+	return nil
 }
 
 
@@ -161,32 +167,6 @@ type chatResult struct {
 // executeChat runs a provider and reads its stdout line by line so a streaming
 // format can report the answer while it is still being written. progress is
 // called with the text so far.
-// runTestLoop runs the card's command after a turn has settled. A failure is
-// handed back to the same card as its next message, which is what lets a card
-// iterate until its tests pass.
-func (d *Daemon) runTestLoop(persist, cancellable context.Context, turnID int64) error {
-	loop, ok, err := d.store.ConversationTestLoop(persist, turnID)
-	if err != nil || !ok {
-		return err
-	}
-	// The turn must be finished, not merely this one provider's response.
-	if _, ready, err := d.store.RelayPayload(persist, turnID); err != nil || !ready {
-		return err
-	}
-	command := splitCommand(loop.Command)
-	if len(command) == 0 {
-		return nil
-	}
-	exitCode, output := d.execute(cancellable, loop.Project, command)
-	if exitCode == 0 {
-		return nil
-	}
-	prompt := fmt.Sprintf(
-		"Proje dizininde `%s` komutu %d koduyla başarısız oldu. Çıktı:\n\n%s\n\nSorunu bul ve düzelt.",
-		loop.Command, exitCode, strings.TrimSpace(output))
-	return d.store.CreateTestFailureTurn(persist, turnID, prompt)
-}
-
 // splitCommand turns a typed command line into an argument array. Quoting is
 // honoured so a path with spaces survives, but nothing is evaluated: there is
 // no shell here, and no expansion of any kind.
