@@ -37,6 +37,7 @@ export namespace domain {
 	    status: string;
 	    content?: string;
 	    error?: string;
+	    activity?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ChatResponse(source);
@@ -50,6 +51,7 @@ export namespace domain {
 	        this.status = source["status"];
 	        this.content = source["content"];
 	        this.error = source["error"];
+	        this.activity = source["activity"];
 	    }
 	}
 	export class ChatTurn {

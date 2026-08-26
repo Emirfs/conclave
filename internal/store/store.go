@@ -122,6 +122,10 @@ CREATE TABLE provider_quota (
     updated_at TEXT NOT NULL
 );
 `,
+	// 4: what a provider is busy with while a response is still running.
+	`
+ALTER TABLE chat_responses ADD COLUMN activity TEXT NOT NULL DEFAULT '';
+`,
 }
 
 func (s *Store) init() error {
@@ -327,7 +331,7 @@ ORDER BY t.id DESC LIMIT 8`, turnID, provider, conversationID, turnID, turnID, d
 
 func (s *Store) FinishChatResponse(ctx context.Context, id int64, status domain.Status, content, failure string) error {
 	_, err := s.db.ExecContext(ctx, `
-UPDATE chat_responses SET status = ?, content = ?, error = ?, updated_at = ? WHERE id = ?`,
+UPDATE chat_responses SET status = ?, content = ?, error = ?, activity = '', updated_at = ? WHERE id = ?`,
 		status, content, failure, time.Now().UTC().Format(time.RFC3339Nano), id)
 	return err
 }
@@ -378,7 +382,7 @@ WHERE conversation_id = ? ORDER BY id DESC LIMIT ?`, conversationID, limit)
 
 func (s *Store) chatResponses(ctx context.Context, turnID int64) ([]domain.ChatResponse, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, turn_id, provider, status, content, error
+SELECT id, turn_id, provider, status, content, error, activity
 FROM chat_responses WHERE turn_id = ? ORDER BY id`, turnID)
 	if err != nil {
 		return nil, err
@@ -387,7 +391,8 @@ FROM chat_responses WHERE turn_id = ? ORDER BY id`, turnID)
 	var responses []domain.ChatResponse
 	for rows.Next() {
 		var response domain.ChatResponse
-		if err := rows.Scan(&response.ID, &response.TurnID, &response.Provider, &response.Status, &response.Content, &response.Error); err != nil {
+		if err := rows.Scan(&response.ID, &response.TurnID, &response.Provider,
+			&response.Status, &response.Content, &response.Error, &response.Activity); err != nil {
 			return nil, err
 		}
 		responses = append(responses, response)
@@ -828,11 +833,11 @@ func (s *Store) DeleteCanvasNode(ctx context.Context, id int64) error {
 // UpdateChatResponseContent stores partial output while a provider is still
 // answering. It refuses to touch a response that is no longer running, so a
 // late write cannot overwrite a finished answer or revive a requeued one.
-func (s *Store) UpdateChatResponseContent(ctx context.Context, id int64, content string) error {
+func (s *Store) UpdateChatResponseContent(ctx context.Context, id int64, content, activity string) error {
 	_, err := s.db.ExecContext(ctx, `
-UPDATE chat_responses SET content = ?, updated_at = ?
+UPDATE chat_responses SET content = ?, activity = ?, updated_at = ?
 WHERE id = ? AND status = ?`,
-		content, time.Now().UTC().Format(time.RFC3339Nano), id, domain.StatusRunning)
+		content, activity, time.Now().UTC().Format(time.RFC3339Nano), id, domain.StatusRunning)
 	return err
 }
 

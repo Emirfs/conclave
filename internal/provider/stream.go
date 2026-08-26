@@ -40,6 +40,10 @@ type StreamUpdate struct {
 	Failure string
 	// Quota is the provider's remaining-allowance report, when it offers one.
 	Quota *Quota
+	// Activity is a stable machine token describing what the provider is doing
+	// right now: "requesting", "thinking", "writing", or "tool:<name>". It is
+	// deliberately not human text, so the client owns the wording.
+	Activity string
 }
 
 // DecodeStreamLine interprets a single line of provider output. Unrecognised
@@ -73,14 +77,21 @@ func decodeClaude(payload map[string]any) StreamUpdate {
 	switch text(payload, "type") {
 	case "stream_event":
 		event, _ := payload["event"].(map[string]any)
-		if text(event, "type") != "content_block_delta" {
-			return StreamUpdate{}
+		switch text(event, "type") {
+		case "content_block_delta":
+			delta, _ := event["delta"].(map[string]any)
+			if text(delta, "type") != "text_delta" {
+				return StreamUpdate{}
+			}
+			return StreamUpdate{Delta: text(delta, "text"), Activity: "writing"}
+		case "content_block_start":
+			block, _ := event["content_block"].(map[string]any)
+			if text(block, "type") == "tool_use" {
+				return StreamUpdate{Activity: "tool:" + text(block, "name")}
+			}
+			return StreamUpdate{Activity: "writing"}
 		}
-		delta, _ := event["delta"].(map[string]any)
-		if text(delta, "type") != "text_delta" {
-			return StreamUpdate{}
-		}
-		return StreamUpdate{Delta: text(delta, "text")}
+		return StreamUpdate{}
 	case "result":
 		update := StreamUpdate{Final: text(payload, "result"), SessionID: text(payload, "session_id")}
 		if failed, _ := payload["is_error"].(bool); failed {
@@ -91,6 +102,13 @@ func decodeClaude(payload map[string]any) StreamUpdate {
 			}
 		}
 		return update
+	case "system":
+		if text(payload, "subtype") == "status" {
+			if status := text(payload, "status"); status != "" {
+				return StreamUpdate{Activity: status}
+			}
+		}
+		return StreamUpdate{}
 	case "rate_limit_event":
 		info, _ := payload["rate_limit_info"].(map[string]any)
 		windows, _ := info["unifiedWindows"].(map[string]any)
@@ -113,13 +131,20 @@ func decodeCodex(payload map[string]any) StreamUpdate {
 	switch text(payload, "type") {
 	case "thread.started":
 		return StreamUpdate{SessionID: text(payload, "thread_id")}
-	case "item.completed":
+	case "turn.started":
+		return StreamUpdate{Activity: "thinking"}
+	case "item.started", "item.completed":
 		item, _ := payload["item"].(map[string]any)
-		if text(item, "type") != "agent_message" {
-			return StreamUpdate{}
+		kind := text(item, "type")
+		if kind != "agent_message" {
+			// Not the answer, but it still says what codex is busy with.
+			return StreamUpdate{Activity: codexActivity(kind)}
+		}
+		if text(payload, "type") == "item.started" {
+			return StreamUpdate{Activity: "writing"}
 		}
 		// Codex emits the whole message at once rather than in deltas.
-		return StreamUpdate{Final: text(item, "text")}
+		return StreamUpdate{Final: text(item, "text"), Activity: "writing"}
 	case "error":
 		return StreamUpdate{Failure: text(payload, "message")}
 	}
@@ -132,7 +157,15 @@ func decodeAntigravity(payload map[string]any) StreamUpdate {
 		return StreamUpdate{SessionID: text(payload, "conversation_id")}
 	case "step_update":
 		step, _ := payload["step_update"].(map[string]any)
-		return StreamUpdate{Delta: text(step, "text_delta")}
+		update := StreamUpdate{Delta: text(step, "text_delta")}
+		if tool := text(step, "tool_name"); tool != "" {
+			if text(step, "state") == "ACTIVE" {
+				update.Activity = "tool:" + tool
+			}
+		} else if text(step, "step_type") == "agent_response" {
+			update.Activity = "writing"
+		}
+		return update
 	case "result":
 		result, _ := payload["result"].(map[string]any)
 		update := StreamUpdate{
@@ -162,4 +195,22 @@ func number(payload map[string]any, key string) float64 {
 	}
 	value, _ := payload[key].(float64)
 	return value
+}
+
+// codexActivity maps a codex item type onto the shared activity vocabulary.
+func codexActivity(kind string) string {
+	switch kind {
+	case "reasoning":
+		return "thinking"
+	case "command_execution":
+		return "tool:command"
+	case "file_change", "patch_apply":
+		return "tool:edit"
+	case "web_search":
+		return "tool:search"
+	case "":
+		return ""
+	default:
+		return "tool:" + kind
+	}
 }

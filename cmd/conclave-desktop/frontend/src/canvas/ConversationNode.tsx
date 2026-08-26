@@ -67,7 +67,7 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
         lineClassName="node__resize-line"
         handleClassName="node__resize-handle"
       />
-      <header className="node__header">
+      <header className="node__header node__grip">
         <span className="node__badges">
           {providers.map((name) => {
             const style = providerStyle(name)
@@ -137,20 +137,23 @@ function Response({ response, showName }: { response: domain.ChatResponse; showN
       {showName && <span className="reply__name">{style.label}</span>}
       {response.error ? (
         <p className="reply__error">{response.error}</p>
-      ) : working && partial === '' ? (
-        <Waiting status={response.status} />
       ) : (
-        <p className={working ? 'reply__text reply__text--streaming' : 'reply__text'}>
-          {partial}
-        </p>
+        <>
+          {working && <Activity status={response.status} activity={response.activity} />}
+          {partial !== '' && (
+            <p className={working ? 'reply__text reply__text--streaming' : 'reply__text'}>
+              {partial}
+            </p>
+          )}
+        </>
       )}
     </div>
   )
 }
 
-/** Shown only until the first characters arrive; after that the growing answer
- *  is the activity indicator, with a caret marking that it is still coming. */
-function Waiting({ status }: { status: string }) {
+/** What the provider is doing right now. The daemon stores a machine token; the
+ *  wording lives here. */
+function Activity({ status, activity }: { status: string; activity?: string }) {
   return (
     <p className="reply__working">
       <span className="reply__pips">
@@ -158,7 +161,49 @@ function Waiting({ status }: { status: string }) {
         <i />
         <i />
       </span>
-      {status === 'queued' ? 'sırada' : 'düşünüyor'}
+      {activityLabel(status, activity)}
     </p>
   )
+}
+
+function activityLabel(status: string, activity?: string): string {
+  if (status === 'queued') return 'sırada'
+  if (activity?.startsWith('tool:')) {
+    const tool = activity.slice(5)
+    return `araç çalıştırıyor: ${toolLabel(tool)}`
+  }
+  switch (activity) {
+    case 'requesting':
+      return 'modele soruyor'
+    case 'thinking':
+      return 'düşünüyor'
+    case 'writing':
+      return 'yazıyor'
+    default:
+      return 'çalışıyor'
+  }
+}
+
+/** Tool names come straight from the provider, so unknown ones pass through. */
+function toolLabel(tool: string): string {
+  const known: Record<string, string> = {
+    command: 'komut',
+    edit: 'dosya düzenleme',
+    search: 'web araması',
+    write_to_file: 'dosya yazma',
+    view_file: 'dosya okuma',
+    grep_search: 'arama',
+    list_dir: 'dizin listeleme',
+    run_command: 'komut',
+    read_url_content: 'sayfa okuma',
+    Read: 'dosya okuma',
+    Edit: 'dosya düzenleme',
+    Write: 'dosya yazma',
+    Bash: 'komut',
+    Grep: 'arama',
+    Glob: 'dosya arama',
+    WebFetch: 'sayfa okuma',
+    WebSearch: 'web araması',
+  }
+  return known[tool] ?? tool
 }

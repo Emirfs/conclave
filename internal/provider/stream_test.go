@@ -117,3 +117,48 @@ func TestUnknownLinesAreIgnored(t *testing.T) {
 		}
 	}
 }
+
+// Activity must be reported even by events that carry no answer text: a
+// provider running a tool is busy but silent.
+func TestClaudeReportsToolActivity(t *testing.T) {
+	update := DecodeStreamLine(StreamClaude,
+		`{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"Read"}}}`)
+	if update.Activity != "tool:Read" {
+		t.Fatalf("activity = %q", update.Activity)
+	}
+	if update.Delta != "" {
+		t.Fatalf("a tool block must not add text, got %q", update.Delta)
+	}
+}
+
+func TestClaudeReportsRequestStatus(t *testing.T) {
+	update := DecodeStreamLine(StreamClaude, `{"type":"system","subtype":"status","status":"requesting"}`)
+	if update.Activity != "requesting" {
+		t.Fatalf("activity = %q", update.Activity)
+	}
+}
+
+func TestAntigravityReportsActiveTool(t *testing.T) {
+	active := DecodeStreamLine(StreamAntigravity,
+		`{"event":"step_update","step_update":{"step_type":"tool","state":"ACTIVE","tool_name":"write_to_file"}}`)
+	if active.Activity != "tool:write_to_file" {
+		t.Fatalf("activity = %q", active.Activity)
+	}
+	// A finished tool step is not what it is busy with any more.
+	done := DecodeStreamLine(StreamAntigravity,
+		`{"event":"step_update","step_update":{"step_type":"tool","state":"DONE","tool_name":"write_to_file"}}`)
+	if done.Activity != "" {
+		t.Fatalf("a DONE step reported activity %q", done.Activity)
+	}
+}
+
+func TestCodexReportsReasoningActivity(t *testing.T) {
+	update := DecodeStreamLine(StreamCodex,
+		`{"type":"item.completed","item":{"id":"item_1","type":"reasoning","text":"..."}}`)
+	if update.Activity != "thinking" {
+		t.Fatalf("activity = %q", update.Activity)
+	}
+	if update.Final != "" {
+		t.Fatalf("reasoning leaked into the answer: %q", update.Final)
+	}
+}

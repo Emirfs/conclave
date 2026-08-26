@@ -166,7 +166,7 @@
 .node__note-text {
   flex: 1;
   width: 100%;
-  padding: 12px;
+  padding: 10px 12px 12px;
   border: 0;
   outline: none;
   resize: none;
@@ -382,4 +382,50 @@
   100% {
     opacity: 0;
   }
+}
+
+/* ---------- drag handle ---------- */
+
+.node__grip {
+  cursor: grab;
+}
+
+.node__grip:active {
+  cursor: grabbing;
+}
+
+/* A note is one big textarea, so it needs a strip of its own to be grabbed. */
+.node__grip--note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex: none;
+  height: 22px;
+  padding: 0 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--note-accent) 22%, transparent);
+}
+
+.node__grip-dots {
+  flex: 1;
+  height: 100%;
+  /* Two rows of faint dots read as "grab here" without adding an icon. */
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--note-accent) 55%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 6px 6px;
+  background-position: center;
+  opacity: 0.5;
+}
+
+/* The note's close button sits inside the strip now, not over the corner. */
+.node--note .node__close {
+  position: static;
+}
+
+/* The activity line stays above the text as it streams in. */
+.reply__working + .reply__text {
+  margin-top: 4px;
 }

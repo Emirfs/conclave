@@ -82,6 +82,9 @@ type ChatResponse struct {
 	Status   Status `json:"status"`
 	Content  string `json:"content,omitempty"`
 	Error    string `json:"error,omitempty"`
+	// Activity is a machine token for what the provider is doing right now,
+	// empty once the response is finished. See provider.StreamUpdate.Activity.
+	Activity string `json:"activity,omitempty"`
 }
 
 type ChatTurn struct {

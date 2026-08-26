@@ -110,24 +110,24 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 // chatProgress persists partial provider output so the answer appears while it
 // is still being produced. Writes are throttled: a token-by-token provider
 // would otherwise turn one answer into thousands of UPDATE statements.
-func (d *Daemon) chatProgress(ctx context.Context, responseID int64) func(string) {
+func (d *Daemon) chatProgress(ctx context.Context, responseID int64) func(string, string) {
 	var mutex sync.Mutex
 	var last time.Time
-	return func(partial string) {
+	var lastActivity string
+	return func(partial, activity string) {
 		mutex.Lock()
-		if time.Since(last) < progressInterval {
+		// An activity change is worth reporting immediately: it is the only
+		// signal a user gets while a provider works without emitting text.
+		if activity == lastActivity && time.Since(last) < progressInterval {
 			mutex.Unlock()
 			return
 		}
 		last = time.Now()
+		lastActivity = activity
 		mutex.Unlock()
-		text := strings.TrimSpace(partial)
-		if text == "" {
-			return
-		}
 		// A failure here only costs a frame of liveness; the final write is
 		// what makes the answer durable.
-		_ = d.store.UpdateChatResponseContent(ctx, responseID, text)
+		_ = d.store.UpdateChatResponseContent(ctx, responseID, strings.TrimSpace(partial), activity)
 	}
 }
 
@@ -142,7 +142,7 @@ type chatResult struct {
 // executeChat runs a provider and reads its stdout line by line so a streaming
 // format can report the answer while it is still being written. progress is
 // called with the text so far.
-func (d *Daemon) executeChat(parent context.Context, invocation provider.Invocation, progress func(string)) chatResult {
+func (d *Daemon) executeChat(parent context.Context, invocation provider.Invocation, progress func(string, string)) chatResult {
 	workdir, err := os.MkdirTemp("", "conclave-chat-")
 	if err != nil {
 		return chatResult{failure: err.Error()}
@@ -199,10 +199,11 @@ func (d *Daemon) executeChat(parent context.Context, invocation provider.Invocat
 // consumeStream reads provider output to completion. It must drain the pipe
 // even after hitting the size cap, otherwise the provider blocks on a full pipe
 // and the run never ends.
-func (d *Daemon) consumeStream(stdout io.Reader, format provider.StreamFormat, progress func(string)) chatResult {
+func (d *Daemon) consumeStream(stdout io.Reader, format provider.StreamFormat, progress func(string, string)) chatResult {
 	var result chatResult
 	var accumulated strings.Builder
 	var final string
+	activity := ""
 	capped := false
 
 	scanner := bufio.NewScanner(stdout)
@@ -221,16 +222,21 @@ func (d *Daemon) consumeStream(stdout io.Reader, format provider.StreamFormat, p
 		if update.Final != "" {
 			final = update.Final
 		}
+		if update.Activity != "" {
+			activity = update.Activity
+		}
 		if update.Delta != "" && !capped {
 			if accumulated.Len()+len(update.Delta) > maxOutputBytes {
 				capped = true
 				accumulated.WriteString("\n[output truncated]")
 			} else {
 				accumulated.WriteString(update.Delta)
-				if progress != nil {
-					progress(accumulated.String())
-				}
 			}
+		}
+		// Report on every event, not only on text: a provider running a tool
+		// produces no text but is very much busy.
+		if progress != nil && (update.Delta != "" || update.Activity != "") {
+			progress(accumulated.String(), activity)
 		}
 	}
 	// A scanner error still leaves whatever arrived before it usable.

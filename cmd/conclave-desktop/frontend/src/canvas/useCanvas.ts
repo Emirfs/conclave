@@ -43,6 +43,9 @@ function toBoardNode(
     width: node.width,
     height: node.height,
     zIndex: node.z,
+    // Dragging only from the grip. Node bodies hold selectable transcripts and
+    // editable text, where a press must mean "select", not "move the card".
+    dragHandle: '.node__grip',
   }
   if (node.kind === 'note') {
     return {

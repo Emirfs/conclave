@@ -34,7 +34,10 @@ export const NoteNode = memo(function NoteNode({ id, data, selected }: Props) {
         lineClassName="node__resize-line"
         handleClassName="node__resize-handle"
       />
-      <CloseButton onClose={() => onClose(id)} label="Notu sil" />
+      <div className="node__grip node__grip--note">
+        <span className="node__grip-dots" aria-hidden="true" />
+        <CloseButton onClose={() => onClose(id)} label="Notu sil" />
+      </div>
       <textarea
         className="node__note-text nodrag nowheel"
         value={data.body}
