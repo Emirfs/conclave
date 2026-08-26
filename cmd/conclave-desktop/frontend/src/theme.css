@@ -1,0 +1,106 @@
+/* Conclave design tokens.
+   Dark by default: the canvas is a deep, slightly blue near-black so provider
+   accents stay saturated without glowing. Every colour used by a component is
+   defined here, never inline. */
+
+:root {
+  /* Surfaces, from furthest back to closest to the reader. */
+  --surface-void: #08090d;
+  --surface-base: #0b0d12;
+  --surface-raised: #12151d;
+  --surface-overlay: #171b25;
+  --surface-input: #1c2029;
+
+  /* Hairlines and separators. */
+  --line-subtle: #1e222c;
+  --line: #2a3040;
+  --line-strong: #3a4256;
+
+  /* Text. */
+  --text-primary: #e4e8f2;
+  --text-secondary: #98a1b8;
+  --text-muted: #6b7488;
+  --text-inverse: #08090d;
+
+  /* Semantic. */
+  --accent: #7aa8ff;
+  --accent-soft: rgba(122, 168, 255, 0.14);
+  --positive: #5fd7a4;
+  --negative: #ff7a90;
+  --warning: #f2c55c;
+
+  /* Provider identity. Used for node borders, badges and activity dots. */
+  --provider-claude: #f2a17a;
+  --provider-openai: #5be8b4;
+  --provider-gemini: #7aa8ff;
+  --provider-ollama: #c79bff;
+  --provider-unknown: #6b7488;
+
+  /* Geometry. */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --titlebar-height: 38px;
+  --rail-width: 232px;
+
+  /* Depth. */
+  --shadow-panel: 0 8px 28px rgba(0, 0, 0, 0.55);
+  --shadow-float: 0 18px 48px rgba(0, 0, 0, 0.65);
+
+  --font-ui: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", "Consolas", ui-monospace, monospace;
+
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  /* The webview must not offer a text cursor or selection on chrome. */
+  user-select: none;
+  cursor: default;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--line-strong);
+  background-clip: content-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

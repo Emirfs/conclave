@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -22,6 +20,7 @@ import (
 	"github.com/Emirfs/conclave/internal/api"
 	"github.com/Emirfs/conclave/internal/daemon"
 	"github.com/Emirfs/conclave/internal/domain"
+	"github.com/Emirfs/conclave/internal/statedir"
 	"github.com/Emirfs/conclave/internal/store"
 )
 
@@ -62,7 +61,7 @@ func runDaemon(arguments []string) error {
 	workers := flags.Int("workers", 2, "maximum concurrent pipelines")
 	chatWorkers := flags.Int("chat-workers", 4, "maximum concurrent provider chats")
 	timeout := flags.Duration("stage-timeout", 20*time.Minute, "per-stage timeout")
-	stateDirectory := flags.String("state-dir", defaultStateDirectory(), "state directory")
+	stateDirectory := flags.String("state-dir", statedir.Default(), "state directory")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -84,7 +83,7 @@ func runDaemon(arguments []string) error {
 		return errors.New("another daemon owns this state directory")
 	}
 	defer stateLock.Unlock()
-	token, err := loadOrCreateToken(filepath.Join(*stateDirectory, "token"))
+	token, err := statedir.LoadOrCreateToken(filepath.Join(*stateDirectory, "token"))
 	if err != nil {
 		return err
 	}
@@ -131,11 +130,11 @@ func runStatus(arguments []string) error {
 	flags := flag.NewFlagSet("status", flag.ContinueOnError)
 	jsonOutput := flags.Bool("json", false, "emit JSON")
 	address := flags.String("address", defaultAddress, "daemon address")
-	tokenFile := flags.String("token-file", defaultTokenFile(), "daemon token file")
+	tokenFile := flags.String("token-file", statedir.TokenPath(), "daemon token file")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
-	token, err := readToken(*tokenFile)
+	token, err := statedir.ReadToken(*tokenFile)
 	if err != nil {
 		return err
 	}
@@ -164,7 +163,7 @@ func submitRun(arguments []string) error {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	project := flags.String("project", ".", "project directory")
 	address := flags.String("address", defaultAddress, "daemon address")
-	tokenFile := flags.String("token-file", defaultTokenFile(), "daemon token file")
+	tokenFile := flags.String("token-file", statedir.TokenPath(), "daemon token file")
 	var stages stageFlags
 	flags.Var(&stages, "stage", "name=executable,arg,... (repeatable)")
 	if err := flags.Parse(arguments); err != nil {
@@ -188,7 +187,7 @@ func submitRun(arguments []string) error {
 		}
 		request.Stages = append(request.Stages, domain.StageSpec{Name: name, Command: parts})
 	}
-	token, err := readToken(*tokenFile)
+	token, err := statedir.ReadToken(*tokenFile)
 	if err != nil {
 		return err
 	}
@@ -203,7 +202,7 @@ func submitRun(arguments []string) error {
 func submitChat(arguments []string) error {
 	flags := flag.NewFlagSet("chat", flag.ContinueOnError)
 	address := flags.String("address", defaultAddress, "daemon address")
-	tokenFile := flags.String("token-file", defaultTokenFile(), "daemon token file")
+	tokenFile := flags.String("token-file", statedir.TokenPath(), "daemon token file")
 	var providers stageFlags
 	flags.Var(&providers, "provider", "provider name (repeatable; default: all available)")
 	if err := flags.Parse(arguments); err != nil {
@@ -213,7 +212,7 @@ func submitChat(arguments []string) error {
 	if prompt == "" {
 		return errors.New("chat message is required")
 	}
-	token, err := readToken(*tokenFile)
+	token, err := statedir.ReadToken(*tokenFile)
 	if err != nil {
 		return err
 	}
@@ -237,61 +236,6 @@ func submitChat(arguments []string) error {
 	}
 	fmt.Printf("chat turn #%d queued for %s\n", id, strings.Join(providers, ", "))
 	return nil
-}
-
-func defaultStateDirectory() string {
-	if directory := os.Getenv("LOCALAPPDATA"); directory != "" {
-		return filepath.Join(directory, "conclave")
-	}
-	directory, err := os.UserConfigDir()
-	if err != nil {
-		return ".conclave"
-	}
-	return filepath.Join(directory, "conclave")
-}
-
-func defaultTokenFile() string { return filepath.Join(defaultStateDirectory(), "token") }
-
-func loadOrCreateToken(path string) (string, error) {
-	token, err := readToken(path)
-	if err == nil {
-		return token, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	random := make([]byte, 32)
-	if _, err := rand.Read(random); err != nil {
-		return "", err
-	}
-	token = hex.EncodeToString(random)
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return readToken(path)
-		}
-		return "", err
-	}
-	if _, err := file.WriteString(token); err != nil {
-		file.Close()
-		return "", err
-	}
-	if err := file.Close(); err != nil {
-		return "", err
-	}
-	return token, nil
-}
-
-func readToken(path string) (string, error) {
-	value, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	token := strings.TrimSpace(string(value))
-	if len(token) != 64 {
-		return "", errors.New("daemon token is invalid")
-	}
-	return token, nil
 }
 
 func isLoopbackAddress(address string) bool {

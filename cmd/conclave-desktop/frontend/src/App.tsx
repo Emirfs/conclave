@@ -1,0 +1,204 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+
+import { EnsureDaemon, Snapshot } from '../wailsjs/go/main/App'
+import { Quit, WindowMinimise, WindowToggleMaximise } from '../wailsjs/runtime/runtime'
+import type { domain } from '../wailsjs/go/models'
+import { providerStyle } from './providers'
+
+type Connection = 'connecting' | 'online' | 'offline'
+
+const POLL_INTERVAL = 1500
+
+export function App() {
+  const [snapshot, setSnapshot] = useState<domain.Snapshot | null>(null)
+  const [connection, setConnection] = useState<Connection>('connecting')
+  const [error, setError] = useState<string | null>(null)
+  const [starting, setStarting] = useState(false)
+  // Guards against a slow response from a previous poll overwriting a newer one.
+  const generation = useRef(0)
+
+  const poll = useCallback(async () => {
+    const current = ++generation.current
+    try {
+      const next = await Snapshot()
+      if (current !== generation.current) return
+      setSnapshot(next)
+      setConnection('online')
+      setError(null)
+    } catch (cause) {
+      if (current !== generation.current) return
+      setConnection('offline')
+      setError(String(cause))
+    }
+  }, [])
+
+  useEffect(() => {
+    void poll()
+    const timer = window.setInterval(() => void poll(), POLL_INTERVAL)
+    return () => window.clearInterval(timer)
+  }, [poll])
+
+  const startDaemon = useCallback(async () => {
+    setStarting(true)
+    setError(null)
+    setConnection('connecting')
+    try {
+      await EnsureDaemon()
+      await poll()
+    } catch (cause) {
+      setConnection('offline')
+      setError(String(cause))
+    } finally {
+      setStarting(false)
+    }
+  }, [poll])
+
+  const providers = (snapshot?.providers ?? []).filter((item) => item.kind !== 'memory')
+  const memory = (snapshot?.providers ?? []).filter((item) => item.kind === 'memory')
+
+  return (
+    <div className="shell">
+      <TitleBar connection={connection} version={snapshot?.version} />
+      <div className="body">
+        <aside className="rail">
+          <ProviderGroup heading="Sağlayıcılar" providers={providers} />
+          {memory.length > 0 && <ProviderGroup heading="Bellek" providers={memory} />}
+        </aside>
+        <main className="stage">
+          <Stage
+            connection={connection}
+            error={error}
+            starting={starting}
+            onStart={startDaemon}
+          />
+        </main>
+      </div>
+    </div>
+  )
+}
+
+function TitleBar({ connection, version }: { connection: Connection; version?: string }) {
+  const label =
+    connection === 'online'
+      ? `daemon ${version ?? ''}`.trim()
+      : connection === 'connecting'
+        ? 'bağlanıyor'
+        : 'daemon kapalı'
+
+  return (
+    <header className="titlebar">
+      <span className="titlebar__mark">Conclave</span>
+      <span className={`pill pill--${connection}`}>
+        <span className="pill__dot" />
+        {label}
+      </span>
+      <span className="titlebar__spacer" />
+      <div className="titlebar__controls">
+        <button className="titlebar__button" onClick={WindowMinimise} title="Küçült">
+          <CaptionIcon d="M2 8h12" />
+        </button>
+        <button className="titlebar__button" onClick={WindowToggleMaximise} title="Büyüt">
+          <CaptionIcon d="M3.5 3.5h9v9h-9z" />
+        </button>
+        <button
+          className="titlebar__button titlebar__button--close"
+          onClick={Quit}
+          title="Kapat"
+        >
+          <CaptionIcon d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
+        </button>
+      </div>
+    </header>
+  )
+}
+
+function CaptionIcon({ d }: { d: string }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="1.1" />
+    </svg>
+  )
+}
+
+function ProviderGroup({
+  heading,
+  providers,
+}: {
+  heading: string
+  providers: domain.Provider[]
+}) {
+  return (
+    <section className="rail__group">
+      <h2 className="rail__heading">{heading}</h2>
+      {providers.length === 0 ? (
+        <p className="provider__kind" style={{ padding: '0 8px' }}>
+          Henüz keşfedilmedi
+        </p>
+      ) : (
+        providers.map((item) => <ProviderRow key={item.name} provider={item} />)
+      )}
+    </section>
+  )
+}
+
+function ProviderRow({ provider }: { provider: domain.Provider }) {
+  const style = providerStyle(provider.name)
+  return (
+    <div
+      className={`provider provider--${provider.available ? 'online' : 'offline'}`}
+      title={provider.command ?? 'bulunamadı'}
+    >
+      <span
+        className="provider__badge"
+        style={{ ['--badge-accent' as string]: style.accent }}
+      >
+        {style.glyph}
+      </span>
+      <span>
+        <span className="provider__name">{style.label}</span>
+        <br />
+        <span className="provider__kind">{provider.kind}</span>
+      </span>
+      <span className="provider__state">{provider.available ? 'hazır' : 'yok'}</span>
+    </div>
+  )
+}
+
+function Stage({
+  connection,
+  error,
+  starting,
+  onStart,
+}: {
+  connection: Connection
+  error: string | null
+  starting: boolean
+  onStart: () => void
+}) {
+  if (connection === 'online') {
+    return (
+      <div className="stage__inner">
+        <p className="stage__title">Zemin hazır</p>
+        <p className="stage__hint">
+          Sonsuz canvas bir sonraki aşamada buraya gelecek: sürüklenebilir konuşma
+          node&apos;ları ve sticky note&apos;lar.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="stage__inner">
+      <p className="stage__title">
+        {connection === 'connecting' ? 'Daemon aranıyor' : 'Daemon çalışmıyor'}
+      </p>
+      <p className="stage__hint">
+        Conclave durumu daemon&apos;da tutar. Arayüz yalnızca ona bağlanan bir istemci.
+      </p>
+      {error && <p className="stage__error">{error}</p>}
+      <button className="button" onClick={onStart} disabled={starting}>
+        {starting ? 'Başlatılıyor…' : 'Daemon’u başlat'}
+      </button>
+    </div>
+  )
+}
