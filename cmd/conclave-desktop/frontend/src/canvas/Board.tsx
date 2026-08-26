@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Background,
   BackgroundVariant,
@@ -7,6 +7,7 @@ import {
   ReactFlow,
   Panel,
   ReactFlowProvider,
+  SelectionMode,
   applyNodeChanges,
   useReactFlow,
   type Connection,
@@ -93,10 +94,12 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
     [patch, remove, setNodes],
   )
 
+  const selected = useMemo(() => nodes.filter((node) => node.selected), [nodes])
+
   // Selecting exactly two cards offers pairing, which links them both ways.
   const selectedCards = useMemo(
-    () => nodes.filter((node) => node.selected && node.data.kind === 'conversation'),
-    [nodes],
+    () => selected.filter((node) => node.data.kind === 'conversation'),
+    [selected],
   )
 
   const onConnect = useCallback(
@@ -118,6 +121,48 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
     },
     [unlink],
   )
+
+  // Ctrl+A selects every card and note, the way a canvas is expected to behave.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'a') return
+      const target = event.target as HTMLElement | null
+      // Not while the user is typing in a card.
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+      event.preventDefault()
+      setNodes((current) => current.map((node) => ({ ...node, selected: true })))
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [setNodes])
+
+  const clearSelection = useCallback(
+    () => setNodes((current) => current.map((node) => ({ ...node, selected: false }))),
+    [setNodes],
+  )
+
+  // Tidy the selection into a row so a bulk move lands somewhere readable.
+  const arrange = useCallback(() => {
+    const ordered = [...selected].sort((left, right) => left.position.x - right.position.x)
+    if (ordered.length < 2) return
+    const originX = ordered[0].position.x
+    const originY = ordered[0].position.y
+    let cursor = originX
+    setNodes((current) =>
+      current.map((node) => {
+        const index = ordered.findIndex((item) => item.id === node.id)
+        if (index === -1) return node
+        const position = { x: cursor, y: originY }
+        cursor += (node.width ?? 420) + 32
+        patch({ id: Number(node.id), x: position.x, y: position.y } as domain.CanvasNodePatch)
+        return { ...node, position }
+      }),
+    )
+  }, [patch, selected, setNodes])
+
+  const closeSelected = useCallback(() => {
+    for (const node of selected) void remove(node.id)
+  }, [remove, selected])
 
   const onDoubleClick = useCallback(
     (event: React.MouseEvent) => {
@@ -144,22 +189,56 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
         proOptions={{ hideAttribution: true }}
         minZoom={0.2}
         maxZoom={2}
+        // A generous snap radius: the ports are small targets, and a link
+        // should land when the pointer is merely near one.
+        connectionRadius={70}
+        connectOnClick
         defaultViewport={{ x: 0, y: 0, zoom: 0.9 }}
         panOnScroll
         selectionOnDrag
-        deleteKeyCode={['Delete', 'Backspace']}
+        selectionMode={SelectionMode.Partial}
+        // Left drag draws a selection box; panning moves to the middle and
+        // right buttons. With the default panOnDrag the box never appears.
+        panOnDrag={[1, 2]}
+        multiSelectionKeyCode={['Control', 'Meta']}
+        selectionKeyCode="Shift"
+        // Backspace is left out on purpose: it is a typing key, and deleting a
+        // whole selection by mistake is not recoverable.
+        deleteKeyCode={['Delete']}
         elevateNodesOnSelect
       >
         <Panel position="top-left" className="boardpanel">
-          {selectedCards.length === 2 && (
-            <button
-              className="boardpanel__action"
-              onClick={() =>
-                void pair(selectedCards[0].id, selectedCards[1].id, 'dialogue', 3)
-              }
-            >
-              Seçili iki kartı eşleştir (karşılıklı)
-            </button>
+          {selected.length > 1 && (
+            <div className="selectionbar">
+              <span className="selectionbar__count">{selected.length} seçili</span>
+              {selectedCards.length === 2 && (
+                <>
+                  <button
+                    className="boardpanel__action"
+                    onClick={() => void pair(selectedCards[0].id, selectedCards[1].id, 'dialogue', 3)}
+                    title="İki kart birbirine cevap verir"
+                  >
+                    karşılıklı bağla
+                  </button>
+                  <button
+                    className="boardpanel__action"
+                    onClick={() => void link(selectedCards[0].id, selectedCards[1].id)}
+                    title="Soldaki kartın cevabı sağdakine aktarılır"
+                  >
+                    tek yönlü bağla
+                  </button>
+                </>
+              )}
+              <button className="boardpanel__action" onClick={arrange}>
+                yan yana diz
+              </button>
+              <button className="boardpanel__action selectionbar__close" onClick={closeSelected}>
+                kapat
+              </button>
+              <button className="boardpanel__action" onClick={clearSelection}>
+                seçimi bırak
+              </button>
+            </div>
           )}
           {selectedEdge && (
             <LinkPanel

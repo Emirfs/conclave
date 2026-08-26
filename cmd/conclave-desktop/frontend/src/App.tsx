@@ -104,7 +104,9 @@ export function App() {
               Not
             </button>
             <p className="rail__hint">
-              Sağlayıcıya tıkla: o sağlayıcıyla tekil konuşma. Boş zemine çift tıkla: o noktaya not.
+              Sağlayıcıya tıkla: tekil konuşma. Boş zemine çift tıkla: not.
+              Boş zeminde sürükle: toplu seç. Ctrl+A: hepsi. Orta/sağ tuş: panoyu kaydır.
+              İki kart seç, bağlama düğmeleri çıksın.
             </p>
           </section>
           {memory.length > 0 && <ProviderGroup heading="Bellek" providers={memory} />}

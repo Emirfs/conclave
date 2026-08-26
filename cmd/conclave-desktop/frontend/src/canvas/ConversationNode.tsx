@@ -175,9 +175,13 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
       </div>
       )}
 
-      {/* Left accepts a relayed answer, right sends this card's answers on. */}
-      <Handle type="target" position={Position.Left} className="node__port" />
-      <Handle type="source" position={Position.Right} className="node__port" />
+      {/* Left accepts a relayed answer, right sends this card's answers on.
+          The third handle covers the whole card and only becomes a drop target
+          while a link is being drawn, so releasing anywhere on a card connects
+          it instead of demanding a hit on the small port. */}
+      <Handle type="target" position={Position.Left} id="in" className="node__port" />
+      <Handle type="source" position={Position.Right} id="out" className="node__port" />
+      <Handle type="target" position={Position.Left} id="anywhere" className="node__dropzone" />
 
       <div className="node__composer">
         <textarea
