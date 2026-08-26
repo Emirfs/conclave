@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,6 +21,7 @@ import (
 	"github.com/Emirfs/conclave/internal/domain"
 	"github.com/Emirfs/conclave/internal/provider"
 	"github.com/Emirfs/conclave/internal/store"
+	"github.com/Emirfs/conclave/internal/vcs"
 )
 
 const Version = "0.1.0"
@@ -43,6 +45,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/canvas/notes", s.createNote)
 	mux.HandleFunc("PATCH /v1/canvas/nodes", s.patchCanvasNode)
 	mux.HandleFunc("DELETE /v1/canvas/nodes/{id}", s.deleteCanvasNode)
+	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/project", s.setProject)
+	mux.HandleFunc("GET /v1/canvas/conversations/{id}/changes", s.projectChanges)
+	mux.HandleFunc("GET /v1/canvas/conversations/{id}/diff", s.projectDiff)
 	mux.HandleFunc("POST /v1/canvas/links", s.createLink)
 	mux.HandleFunc("DELETE /v1/canvas/links/{id}", s.deleteLink)
 	return s.authenticate(mux)
@@ -198,6 +203,18 @@ func (s *Server) createConversation(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusBadRequest, errors.New("a solo conversation needs exactly one provider"))
 		return
 	}
+	project, err := validProject(input.ProjectPath)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	access, err := validAccess(input.Access)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	input.ProjectPath = project
+	input.Access = access
 	input.Providers = selected
 	input.Title = strings.TrimSpace(input.Title)
 	if input.Title == "" {
@@ -273,6 +290,122 @@ func (s *Server) deleteCanvasNode(response http.ResponseWriter, request *http.Re
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
+}
+
+// validProject accepts an absolute path to an existing directory, or the empty
+// string, which means "no project, use a scratch directory".
+func validProject(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(path) {
+		return "", errors.New("project must be an absolute path")
+	}
+	clean := filepath.Clean(path)
+	info, err := os.Stat(clean)
+	if err != nil || !info.IsDir() {
+		return "", errors.New("project must be an existing directory")
+	}
+	return clean, nil
+}
+
+func validAccess(access string) (string, error) {
+	switch provider.Access(access) {
+	case provider.AccessRead, provider.AccessEdit:
+		return access, nil
+	case "":
+		return string(provider.AccessEdit), nil
+	default:
+		return "", errors.New("access must be read or edit")
+	}
+}
+
+func (s *Server) setProject(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	var input domain.ProjectRequest
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	project, err := validProject(input.ProjectPath)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	access, err := validAccess(input.Access)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	err = s.store.SetConversationProject(request.Context(), id, project, access)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusNotFound, errors.New("conversation does not exist"))
+		return
+	}
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) conversationProject(ctx context.Context, id int64) (string, error) {
+	canvas, err := s.store.Canvas(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, item := range canvas.Conversations {
+		if item.ID == id {
+			return item.ProjectPath, nil
+		}
+	}
+	return "", errors.New("conversation does not exist")
+}
+
+func (s *Server) projectChanges(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	project, err := s.conversationProject(request.Context(), id)
+	if err != nil {
+		writeError(response, http.StatusNotFound, err)
+		return
+	}
+	status, err := vcs.ProjectStatus(request.Context(), project)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, status)
+}
+
+func (s *Server) projectDiff(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	path := request.URL.Query().Get("path")
+	if path == "" {
+		writeError(response, http.StatusBadRequest, errors.New("path is required"))
+		return
+	}
+	project, err := s.conversationProject(request.Context(), id)
+	if err != nil {
+		writeError(response, http.StatusNotFound, err)
+		return
+	}
+	diff, err := vcs.FileDiff(request.Context(), project, path)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, diff)
 }
 
 func (s *Server) createLink(response http.ResponseWriter, request *http.Request) {
@@ -433,6 +566,26 @@ func (c *Client) CreateNote(ctx context.Context, input domain.NewNote) (domain.C
 
 func (c *Client) PatchCanvasNode(ctx context.Context, patch domain.CanvasNodePatch) error {
 	return c.do(ctx, http.MethodPatch, "/v1/canvas/nodes", patch, nil, http.StatusNoContent)
+}
+
+func (c *Client) SetProject(ctx context.Context, conversationID int64, input domain.ProjectRequest) error {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/project"
+	return c.do(ctx, http.MethodPut, path, input, nil, http.StatusNoContent)
+}
+
+func (c *Client) ProjectChanges(ctx context.Context, conversationID int64) (vcs.Status, error) {
+	var status vcs.Status
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/changes"
+	err := c.do(ctx, http.MethodGet, path, nil, &status, http.StatusOK)
+	return status, err
+}
+
+func (c *Client) FileDiff(ctx context.Context, conversationID int64, file string) (vcs.Diff, error) {
+	var diff vcs.Diff
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) +
+		"/diff?path=" + url.QueryEscape(file)
+	err := c.do(ctx, http.MethodGet, path, nil, &diff, http.StatusOK)
+	return diff, err
 }
 
 func (c *Client) CreateLink(ctx context.Context, input domain.NewLink) (domain.CanvasLink, error) {

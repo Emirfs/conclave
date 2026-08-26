@@ -47,31 +47,93 @@ func Discover() []domain.Provider {
 	return providers
 }
 
-func ChatInvocation(name, prompt string) (Invocation, error) {
-	path, err := executable(name)
+// Access says how much the provider may do in the project directory.
+type Access string
+
+const (
+	// AccessRead lets a provider look at the project but change nothing.
+	AccessRead Access = "read"
+	// AccessEdit lets a provider work as it does in its own terminal: read,
+	// edit files and run commands inside the project, without stopping to ask.
+	// Non-interactive runs cannot prompt, so this necessarily auto-approves.
+	AccessEdit Access = "edit"
+)
+
+// Request is everything a provider needs for one turn.
+type Request struct {
+	Provider string
+	Prompt   string
+	Access   Access
+	// SessionID continues a provider-side conversation when it is already known.
+	SessionID string
+	Model     string
+}
+
+// ChatInvocation builds the command line for one turn.
+func ChatInvocation(request Request) (Invocation, error) {
+	path, err := executable(request.Provider)
 	if err != nil {
 		return Invocation{}, err
 	}
-	switch name {
+	edit := request.Access == AccessEdit
+	switch request.Provider {
 	case "claude":
-		return Invocation{
-			Command: []string{path, "--print", "--output-format", "stream-json", "--include-partial-messages", "--verbose", "--permission-mode", "plan", "--tools", "", "--safe-mode", "--no-session-persistence"},
-			Stdin:   prompt,
-			Stream:  StreamClaude,
-		}, nil
+		command := []string{path, "--print", "--output-format", "stream-json",
+			"--include-partial-messages", "--verbose"}
+		if edit {
+			// Matches a normal session that accepts its own edits.
+			command = append(command, "--permission-mode", "acceptEdits")
+		} else {
+			command = append(command, "--permission-mode", "plan", "--tools", "")
+		}
+		if request.Model != "" {
+			command = append(command, "--model", request.Model)
+		}
+		if request.SessionID != "" {
+			command = append(command, "--resume", request.SessionID)
+		}
+		return Invocation{Command: command, Stdin: request.Prompt, Stream: StreamClaude}, nil
+
 	case "openai":
-		return Invocation{
-			Command: []string{path, "exec", "--json", "--sandbox", "read-only", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--color", "never", "-"},
-			Stdin:   prompt,
-			Stream:  StreamCodex,
-		}, nil
+		// "exec" starts a session; "exec resume <id>" continues one. The id is a
+		// positional argument, so it has to come before the options.
+		command := []string{path, "exec"}
+		if request.SessionID != "" {
+			command = append(command, "resume", request.SessionID)
+		}
+		command = append(command, "--json", "--skip-git-repo-check", "--color", "never")
+		if edit {
+			command = append(command, "--sandbox", "workspace-write")
+		} else {
+			command = append(command, "--sandbox", "read-only")
+		}
+		if request.Model != "" {
+			command = append(command, "--model", request.Model)
+		}
+		// A lone dash makes codex read the prompt from stdin.
+		command = append(command, "-")
+		return Invocation{Command: command, Stdin: request.Prompt, Stream: StreamCodex}, nil
+
 	case "gemini":
-		return Invocation{
-			Command: []string{path, "--print", prompt, "--mode", "plan", "--output-format", "stream-json"},
-			Stream:  StreamAntigravity,
-		}, nil
+		command := []string{path, "--print", request.Prompt, "--output-format", "stream-json"}
+		if edit {
+			command = append(command, "--mode", "accept-edits")
+		} else {
+			command = append(command, "--mode", "plan")
+		}
+		if request.Model != "" {
+			command = append(command, "--model", request.Model)
+		}
+		if request.SessionID != "" {
+			command = append(command, "--conversation", request.SessionID)
+		}
+		return Invocation{Command: command, Stream: StreamAntigravity}, nil
+
 	case "ollama":
-		model := os.Getenv("CONCLAVE_OLLAMA_MODEL")
+		model := request.Model
+		if model == "" {
+			model = os.Getenv("CONCLAVE_OLLAMA_MODEL")
+		}
 		if model == "" {
 			model = "qwen3:4b"
 		}
@@ -79,9 +141,10 @@ func ChatInvocation(name, prompt string) (Invocation, error) {
 		// terminal, so there is no progress to report for this provider.
 		return Invocation{
 			Command: []string{path, "run", model, "--hidethinking"},
-			Stdin:   prompt,
+			Stdin:   request.Prompt,
 			Stream:  StreamPlain,
 		}, nil
+
 	default:
 		return Invocation{}, errors.New("provider does not support chat")
 	}

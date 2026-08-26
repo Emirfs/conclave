@@ -115,6 +115,8 @@ export namespace domain {
 	    // Go type: time
 	    created_at: any;
 	    turns: ChatTurn[];
+	    project_path?: string;
+	    access?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Conversation(source);
@@ -128,6 +130,8 @@ export namespace domain {
 	        this.providers = source["providers"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.turns = this.convertValues(source["turns"], ChatTurn);
+	        this.project_path = source["project_path"];
+	        this.access = source["access"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -217,6 +221,8 @@ export namespace domain {
 	    title: string;
 	    kind: string;
 	    providers: string[];
+	    project_path?: string;
+	    access?: string;
 	    x: number;
 	    y: number;
 	
@@ -229,6 +235,8 @@ export namespace domain {
 	        this.title = source["title"];
 	        this.kind = source["kind"];
 	        this.providers = source["providers"];
+	        this.project_path = source["project_path"];
+	        this.access = source["access"];
 	        this.x = source["x"];
 	        this.y = source["y"];
 	    }
@@ -396,6 +404,81 @@ export namespace domain {
 	        this.version = source["version"];
 	        this.providers = this.convertValues(source["providers"], Provider);
 	        this.runs = this.convertValues(source["runs"], Run);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace vcs {
+	
+	export class Change {
+	    path: string;
+	    status: string;
+	    staged: boolean;
+	    untracked: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Change(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.status = source["status"];
+	        this.staged = source["staged"];
+	        this.untracked = source["untracked"];
+	    }
+	}
+	export class Diff {
+	    path: string;
+	    patch: string;
+	    truncated: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Diff(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.patch = source["patch"];
+	        this.truncated = source["truncated"];
+	    }
+	}
+	export class Status {
+	    project: string;
+	    branch?: string;
+	    changes: Change[];
+	    available: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.project = source["project"];
+	        this.branch = source["branch"];
+	        this.changes = this.convertValues(source["changes"], Change);
+	        this.available = source["available"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

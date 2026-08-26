@@ -3,6 +3,7 @@ import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 
 import { providerStyle } from '../providers'
 import { CloseButton } from './CloseButton'
+import { Changes } from './Changes'
 import { domain } from '../../wailsjs/go/models'
 import type { ConversationNodeData } from './useCanvas'
 
@@ -10,11 +11,18 @@ type Props = NodeProps & {
   data: ConversationNodeData & {
     onSend: (conversationID: number, prompt: string) => Promise<void>
     onClose: (id: string) => void
+    onPickProject: (conversationID: number, current: string) => Promise<void>
+    onToggleAccess: (conversationID: number, project: string, access: string) => Promise<void>
   }
 }
 
+type Tab = 'chat' | 'changes'
+
 export const ConversationNode = memo(function ConversationNode({ id, data, selected }: Props) {
-  const { conversation, onSend, onClose } = data
+  const { conversation, onSend, onClose, onPickProject, onToggleAccess } = data
+  const project = conversation.project_path ?? ''
+  const access = conversation.access ?? 'edit'
+  const [tab, setTab] = useState<Tab>('chat')
   const providers = conversation.providers ?? []
   const turns = conversation.turns ?? []
   const lead = providerStyle(providers[0] ?? conversation.title)
@@ -88,6 +96,50 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
         <CloseButton onClose={() => onClose(id)} label="Konuşmayı kapat" />
       </header>
 
+      <div className="node__toolbar nodrag">
+        <button
+          className="node__project"
+          onClick={() => void onPickProject(conversation.id, project)}
+          title={project || 'Bu kart için bir proje dizini seç'}
+        >
+          <FolderIcon />
+          <span className="node__project-path">{project ? shortPath(project) : 'Proje seç'}</span>
+        </button>
+        <button
+          className={`node__access node__access--${access}`}
+          onClick={() => void onToggleAccess(conversation.id, project, access === 'edit' ? 'read' : 'edit')}
+          title={
+            access === 'edit'
+              ? 'Sağlayıcı bu projede dosya değiştirebilir ve komut çalıştırabilir'
+              : 'Sağlayıcı yalnızca okuyabilir'
+          }
+          disabled={!project}
+        >
+          {access === 'edit' ? 'düzenleyebilir' : 'salt okunur'}
+        </button>
+        <span className="node__tabs">
+          <button
+            className={`node__tab${tab === 'chat' ? ' node__tab--active' : ''}`}
+            onClick={() => setTab('chat')}
+          >
+            sohbet
+          </button>
+          <button
+            className={`node__tab${tab === 'changes' ? ' node__tab--active' : ''}`}
+            onClick={() => setTab('changes')}
+            disabled={!project}
+            title={project ? 'Projedeki değişiklikler' : 'Önce bir proje seç'}
+          >
+            değişiklikler
+          </button>
+        </span>
+      </div>
+
+      {tab === 'changes' ? (
+        <div className="node__body nowheel">
+          <Changes conversationID={conversation.id} refreshKey={turns.length} />
+        </div>
+      ) : (
       <div className="node__body node__transcript nowheel" ref={transcript}>
         {turns.length === 0 ? (
           <p className="node__placeholder">
@@ -99,6 +151,7 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
           turns.map((turn) => <Turn key={turn.id} turn={turn} group={group} />)
         )}
       </div>
+      )}
 
       {/* Left accepts a relayed answer, right sends this card's answers on. */}
       <Handle type="target" position={Position.Left} className="node__port" />
@@ -210,4 +263,27 @@ function toolLabel(tool: string): string {
     WebSearch: 'web araması',
   }
   return known[tool] ?? tool
+}
+
+/** Long paths do not fit a card header; the tail is the informative part. */
+const SEPARATOR = /[\\/]/
+
+function shortPath(path: string): string {
+  const parts = path.split(SEPARATOR).filter(Boolean)
+  if (parts.length <= 2) return path
+  return '…/' + parts.slice(-2).join('/')
+}
+
+function FolderIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+      <path
+        d="M1 3.2c0-.4.3-.7.7-.7h2.4l1 1.2h5.2c.4 0 .7.3.7.7v4.9c0 .4-.3.7-.7.7H1.7a.7.7 0 0 1-.7-.7z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }

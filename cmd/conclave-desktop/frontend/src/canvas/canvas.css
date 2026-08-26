@@ -472,3 +472,204 @@
   stroke: var(--accent);
   stroke-width: 1.6;
 }
+
+/* ---------- card toolbar ---------- */
+
+.node__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 6px 8px;
+  background: var(--surface-base);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.node__project,
+.node__access,
+.node__tab {
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: default;
+  transition: background 120ms var(--ease), color 120ms var(--ease),
+    border-color 120ms var(--ease);
+}
+
+.node__project {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 45%;
+  padding: 3px 7px;
+}
+
+.node__project:hover {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
+.node__project-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.node__access {
+  flex: none;
+  padding: 3px 7px;
+}
+
+/* Edit access is the loud one: it means the provider can change files. */
+.node__access--edit {
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+}
+
+.node__access--read {
+  color: var(--text-muted);
+}
+
+.node__access:disabled {
+  opacity: 0.4;
+}
+
+.node__tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  flex: none;
+}
+
+.node__tab {
+  padding: 3px 8px;
+}
+
+.node__tab--active {
+  border-color: var(--node-accent);
+  color: var(--text-primary);
+}
+
+.node__tab:disabled {
+  opacity: 0.4;
+}
+
+/* ---------- changes and diff ---------- */
+
+.changes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.changes__empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.changes__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.changes__file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: default;
+}
+
+.changes__file:hover {
+  background: var(--surface-overlay);
+}
+
+.changes__file--active {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
+.changes__code {
+  flex: none;
+  width: 20px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: center;
+}
+
+.changes__code--new {
+  color: var(--positive);
+}
+.changes__code--staged {
+  color: var(--accent);
+}
+.changes__code--dirty {
+  color: var(--warning);
+}
+
+.changes__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.patch {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-void);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  user-select: text;
+}
+
+.patch__line {
+  white-space: pre;
+}
+
+.patch__line--add {
+  color: var(--positive);
+  background: color-mix(in srgb, var(--positive) 10%, transparent);
+}
+
+.patch__line--remove {
+  color: var(--negative);
+  background: color-mix(in srgb, var(--negative) 10%, transparent);
+}
+
+.patch__line--hunk {
+  color: var(--accent);
+}
+
+.patch__line--meta {
+  color: var(--text-muted);
+}
+
+.patch__line--context {
+  color: var(--text-secondary);
+}

@@ -8,6 +8,8 @@ import {
   DeleteCanvasNode,
   LinkNodes,
   PatchCanvasNode,
+  PickProjectDirectory,
+  SetProject,
   SendTurn,
   UnlinkNodes,
 } from '../../wailsjs/go/main/App'
@@ -232,6 +234,33 @@ export function useCanvas(connected: boolean) {
     [],
   )
 
+  const pickProject = useCallback(
+    async (conversationID: number, current: string) => {
+      try {
+        const chosen = await PickProjectDirectory(current)
+        // An empty result means the dialog was cancelled; leave the card alone.
+        if (!chosen) return
+        await SetProject(conversationID, chosen, 'edit')
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  const setAccess = useCallback(
+    async (conversationID: number, project: string, access: string) => {
+      try {
+        await SetProject(conversationID, project, access)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
   const send = useCallback(
     async (conversationID: number, prompt: string) => {
       try {
@@ -248,7 +277,9 @@ export function useCanvas(connected: boolean) {
     () => ({
       nodes, setNodes, edges, error, loaded, load, patch,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
+      pickProject, setAccess,
     }),
-    [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove, setNoteBody, send, link, unlink],
+    [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
+     setNoteBody, send, link, unlink, pickProject, setAccess],
   )
 }

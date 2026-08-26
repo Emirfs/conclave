@@ -100,6 +100,10 @@ type ChatJob struct {
 	ConversationID int64
 	Provider       string
 	Prompt         string
+	ProjectPath    string
+	Access         string
+	SessionID      string
+	Model          string
 }
 
 // Conversation kinds. A solo conversation talks to exactly one provider; a
@@ -122,6 +126,11 @@ type Conversation struct {
 	Providers []string   `json:"providers"`
 	CreatedAt time.Time  `json:"created_at"`
 	Turns     []ChatTurn `json:"turns"`
+	// ProjectPath is the directory the providers run in. Empty means an
+	// isolated scratch directory with no project to work on.
+	ProjectPath string `json:"project_path,omitempty"`
+	// Access is "read" or "edit"; see provider.Access.
+	Access string `json:"access,omitempty"`
 }
 
 // CanvasNode is presentation state the daemon owns so a layout survives a
@@ -153,11 +162,19 @@ type CanvasNodePatch struct {
 }
 
 type NewConversation struct {
-	Title     string   `json:"title"`
-	Kind      string   `json:"kind"`
-	Providers []string `json:"providers"`
-	X         float64  `json:"x"`
-	Y         float64  `json:"y"`
+	Title       string   `json:"title"`
+	Kind        string   `json:"kind"`
+	Providers   []string `json:"providers"`
+	ProjectPath string   `json:"project_path,omitempty"`
+	Access      string   `json:"access,omitempty"`
+	X           float64  `json:"x"`
+	Y           float64  `json:"y"`
+}
+
+// ProjectRequest repoints a card at a directory and access level.
+type ProjectRequest struct {
+	ProjectPath string `json:"project_path"`
+	Access      string `json:"access"`
 }
 
 type NewNote struct {

@@ -88,17 +88,26 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 		return err
 	}
 	persist := context.WithoutCancel(ctx)
-	invocation, err := provider.ChatInvocation(job.Provider, job.Prompt)
+	invocation, err := provider.ChatInvocation(provider.Request{
+		Provider:  job.Provider,
+		Prompt:    job.Prompt,
+		Access:    provider.Access(job.Access),
+		SessionID: job.SessionID,
+		Model:     job.Model,
+	})
 	if err != nil {
 		return d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", err.Error())
 	}
-	outcome := d.executeChat(ctx, invocation, d.chatProgress(persist, job.ResponseID))
+	outcome := d.executeChat(ctx, job.ProjectPath, invocation, d.chatProgress(persist, job.ResponseID))
 	if ctx.Err() != nil {
 		_ = d.store.RequeueChatResponse(persist, job.ResponseID)
 		return ctx.Err()
 	}
 	if outcome.quota != nil {
 		_ = d.store.RecordProviderQuota(persist, job.Provider, *outcome.quota)
+	}
+	if outcome.sessionID != "" {
+		_ = d.store.RecordProviderSession(persist, job.ConversationID, job.Provider, outcome.sessionID, job.Model)
 	}
 	if outcome.failure != "" {
 		if err := d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", outcome.failure); err != nil {
@@ -151,12 +160,20 @@ type chatResult struct {
 // executeChat runs a provider and reads its stdout line by line so a streaming
 // format can report the answer while it is still being written. progress is
 // called with the text so far.
-func (d *Daemon) executeChat(parent context.Context, invocation provider.Invocation, progress func(string, string)) chatResult {
-	workdir, err := os.MkdirTemp("", "conclave-chat-")
-	if err != nil {
-		return chatResult{failure: err.Error()}
+func (d *Daemon) executeChat(parent context.Context, project string, invocation provider.Invocation, progress func(string, string)) chatResult {
+	workdir := project
+	if workdir == "" {
+		// No project means no work to do on disk, so the provider gets a
+		// scratch directory that is thrown away afterwards.
+		scratch, err := os.MkdirTemp("", "conclave-chat-")
+		if err != nil {
+			return chatResult{failure: err.Error()}
+		}
+		defer os.RemoveAll(scratch)
+		workdir = scratch
+	} else if info, err := os.Stat(workdir); err != nil || !info.IsDir() {
+		return chatResult{failure: "project directory is not available: " + workdir}
 	}
-	defer os.RemoveAll(workdir)
 	ctx, cancel := context.WithTimeout(parent, d.timeout)
 	defer cancel()
 

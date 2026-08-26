@@ -22,6 +22,10 @@ export function EnsureDaemon() {
   return window['go']['main']['App']['EnsureDaemon']();
 }
 
+export function FileDiff(arg1, arg2) {
+  return window['go']['main']['App']['FileDiff'](arg1, arg2);
+}
+
 export function LinkNodes(arg1, arg2) {
   return window['go']['main']['App']['LinkNodes'](arg1, arg2);
 }
@@ -30,8 +34,20 @@ export function PatchCanvasNode(arg1) {
   return window['go']['main']['App']['PatchCanvasNode'](arg1);
 }
 
+export function PickProjectDirectory(arg1) {
+  return window['go']['main']['App']['PickProjectDirectory'](arg1);
+}
+
+export function ProjectChanges(arg1) {
+  return window['go']['main']['App']['ProjectChanges'](arg1);
+}
+
 export function SendTurn(arg1, arg2) {
   return window['go']['main']['App']['SendTurn'](arg1, arg2);
+}
+
+export function SetProject(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetProject'](arg1, arg2, arg3);
 }
 
 export function Snapshot() {

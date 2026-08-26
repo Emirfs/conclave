@@ -9,9 +9,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"github.com/Emirfs/conclave/internal/api"
 	"github.com/Emirfs/conclave/internal/domain"
 	"github.com/Emirfs/conclave/internal/statedir"
+	"github.com/Emirfs/conclave/internal/vcs"
 )
 
 // App exposes the daemon to the frontend. The frontend never speaks HTTP and
@@ -102,6 +105,50 @@ func (a *App) PatchCanvasNode(patch domain.CanvasNodePatch) error {
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
 	return client.PatchCanvasNode(ctx, patch)
+}
+
+// PickProjectDirectory opens the native folder chooser and returns the picked
+// path, or an empty string when the user cancels.
+func (a *App) PickProjectDirectory(current string) (string, error) {
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:                "Kart icin proje dizini sec",
+		DefaultDirectory:     current,
+		CanCreateDirectories: false,
+	})
+}
+
+// SetProject points one card at a directory and access level. Each card holds
+// its own, so two cards can work on two different projects at once.
+func (a *App) SetProject(conversationID int64, path, access string) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.SetProject(ctx, conversationID, domain.ProjectRequest{ProjectPath: path, Access: access})
+}
+
+// ProjectChanges lists what has changed in a card's project.
+func (a *App) ProjectChanges(conversationID int64) (vcs.Status, error) {
+	client, err := a.client()
+	if err != nil {
+		return vcs.Status{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 25*time.Second)
+	defer cancel()
+	return client.ProjectChanges(ctx, conversationID)
+}
+
+// FileDiff returns the unified diff of one changed file.
+func (a *App) FileDiff(conversationID int64, path string) (vcs.Diff, error) {
+	client, err := a.client()
+	if err != nil {
+		return vcs.Diff{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 25*time.Second)
+	defer cancel()
+	return client.FileDiff(ctx, conversationID, path)
 }
 
 // LinkNodes relays the source card's answers into the target card.

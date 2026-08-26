@@ -32,7 +32,8 @@ export function Board({ canvas }: { canvas: BoardHandle }) {
 }
 
 function BoardSurface({ canvas }: { canvas: BoardHandle }) {
-  const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink } = canvas
+  const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink,
+    pickProject, setAccess } = canvas
 
   // Closing removes the node and, for a conversation, its history with it.
   const close = useCallback((id: string) => void remove(id), [remove])
@@ -45,9 +46,18 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
       nodes.map((node) =>
         node.data.kind === 'note'
           ? { ...node, data: { ...node.data, onBodyChange: setNoteBody, onClose: close } }
-          : { ...node, data: { ...node.data, onSend: send, onClose: close } },
+          : {
+              ...node,
+              data: {
+                ...node.data,
+                onSend: send,
+                onClose: close,
+                onPickProject: pickProject,
+                onToggleAccess: setAccess,
+              },
+            },
       ),
-    [nodes, setNoteBody, send, close],
+    [nodes, setNoteBody, send, close, pickProject, setAccess],
   )
 
   const onNodesChange = useCallback(

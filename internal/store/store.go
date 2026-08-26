@@ -138,6 +138,21 @@ CREATE TABLE canvas_links (
 );
 ALTER TABLE chat_turns ADD COLUMN relay_depth INTEGER NOT NULL DEFAULT 0;
 `,
+	// 6: a card works inside a real project directory, at a chosen access
+	// level, and remembers the provider-side session so a turn continues the
+	// same conversation instead of starting a new one.
+	`
+ALTER TABLE conversations ADD COLUMN project_path TEXT NOT NULL DEFAULT '';
+ALTER TABLE conversations ADD COLUMN access TEXT NOT NULL DEFAULT 'edit';
+CREATE TABLE provider_sessions (
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (conversation_id, provider)
+);
+`,
 }
 
 func (s *Store) init() error {
@@ -261,15 +276,22 @@ func (s *Store) ClaimChatResponse(ctx context.Context) (*domain.ChatJob, error) 
 	defer tx.Rollback()
 	var job domain.ChatJob
 	err = tx.QueryRowContext(ctx, `
-SELECT r.id, r.turn_id, r.provider, t.prompt, COALESCE(t.conversation_id, 0)
-FROM chat_responses r JOIN chat_turns t ON t.id = r.turn_id
+SELECT r.id, r.turn_id, r.provider, t.prompt, COALESCE(t.conversation_id, 0),
+       COALESCE(c.project_path, ''), COALESCE(c.access, 'edit'),
+       COALESCE(ps.session_id, ''), COALESCE(ps.model, '')
+FROM chat_responses r
+JOIN chat_turns t ON t.id = r.turn_id
+LEFT JOIN conversations c ON c.id = t.conversation_id
+LEFT JOIN provider_sessions ps
+       ON ps.conversation_id = t.conversation_id AND ps.provider = r.provider
 WHERE r.status = ?
   AND NOT EXISTS (
     SELECT 1 FROM chat_responses active
     WHERE active.provider = r.provider AND active.status = ?
   )
 ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
-		Scan(&job.ResponseID, &job.TurnID, &job.Provider, &job.Prompt, &job.ConversationID)
+		Scan(&job.ResponseID, &job.TurnID, &job.Provider, &job.Prompt, &job.ConversationID,
+			&job.ProjectPath, &job.Access, &job.SessionID, &job.Model)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -619,9 +641,13 @@ func (s *Store) CreateConversation(ctx context.Context, request domain.NewConver
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	access := request.Access
+	if access == "" {
+		access = string(provider.AccessEdit)
+	}
 	result, err := tx.ExecContext(ctx,
-		"INSERT INTO conversations(title, kind, created_at) VALUES(?, ?, ?)",
-		request.Title, request.Kind, now)
+		"INSERT INTO conversations(title, kind, created_at, project_path, access) VALUES(?, ?, ?, ?, ?)",
+		request.Title, request.Kind, now, request.ProjectPath, access)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -650,6 +676,7 @@ VALUES(?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), ?)`
 	return domain.Conversation{
 		ID: id, Title: request.Title, Kind: request.Kind,
 		Providers: request.Providers, CreatedAt: created,
+		ProjectPath: request.ProjectPath, Access: access,
 	}, nil
 }
 
@@ -708,7 +735,7 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 
 func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, title, kind, created_at FROM conversations ORDER BY id")
+		"SELECT id, title, kind, created_at, project_path, access FROM conversations ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -717,7 +744,8 @@ func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, e
 	for rows.Next() {
 		var item domain.Conversation
 		var created string
-		if err := rows.Scan(&item.ID, &item.Title, &item.Kind, &created); err != nil {
+		if err := rows.Scan(&item.ID, &item.Title, &item.Kind, &created,
+			&item.ProjectPath, &item.Access); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1096,4 +1124,40 @@ func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, promp
 		return err
 	}
 	return tx.Commit()
+}
+
+
+// RecordProviderSession remembers the provider-side conversation id so the next
+// turn continues it instead of starting over.
+func (s *Store) RecordProviderSession(ctx context.Context, conversationID int64, name, sessionID, model string) error {
+	if conversationID == 0 || sessionID == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO provider_sessions(conversation_id, provider, session_id, model, updated_at)
+VALUES(?, ?, ?, ?, ?)
+ON CONFLICT(conversation_id, provider) DO UPDATE SET
+    session_id = excluded.session_id,
+    model = excluded.model,
+    updated_at = excluded.updated_at`,
+		conversationID, name, sessionID, model, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+// SetConversationProject points a card at a project directory and access level.
+func (s *Store) SetConversationProject(ctx context.Context, conversationID int64, path, access string) error {
+	result, err := s.db.ExecContext(ctx,
+		"UPDATE conversations SET project_path = ?, access = ? WHERE id = ?",
+		path, access, conversationID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
