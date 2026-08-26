@@ -17,7 +17,7 @@ Yapay zekâ kodlama CLI'ları tek başlarına kullanışlıdır; ancak birkaçı
 - her karta bağımsız proje dizini ve `read` veya `edit` erişimi atar;
 - proje kartı içinde Git çalışma ağacı değişikliklerini ve unified diff'i gösterir;
 - tamamlanan yanıtları yapılandırılabilir canvas bağlantılarıyla aktarır, tartıştırır veya inceletir;
-- iki kartı sınırlı bir sağlayıcılar arası konuşma için eşleştirir;
+- iki kartı sınırlı konuşma veya açıkça seçilen iş-bitene-kadar akışı için eşleştirir;
 - her turdan sonra isteğe bağlı komut çalıştırıp hatayı aynı karta geri besler;
 - istemci bağlantısından bağımsız, sıralı build ve test pipeline'ları çalıştırır;
 - konuşmaları, canvas konumlarını, bağlantıları, kotaları, oturumları ve pipeline durumunu SQLite'ta saklar.
@@ -48,11 +48,13 @@ Wails masaüstü istemcisi React Flow tabanlı kalıcı bir sonsuz pano sunar.
 - **Grup konuşması** ile her mesajı aynı anda en fazla dört sağlayıcıya gönderin.
 - Boş canvas alanına çift tıklayarak not oluşturun.
 - Kartları taşıyıp boyutlandırın; geometri daemon tarafından saklanır.
+- Uzun cevaplar ve belgeler için kartı büyütün, küçültün veya tam ekran açın.
+- Sağlayıcı cevaplarını GitHub Flavored Markdown olarak okuyun; not kartlarında yerel `.md` dosyası açıp düzenleme ve önizleme arasında geçiş yapın.
 - Her kart için proje dizini seçin, ardından `read` ile `edit` erişimi arasında geçiş yapın.
 - **Değişiklikler** sekmesinden Git durumunu ve dosyanın unified diff'ini inceleyin.
 - Tamamlanan yanıtları aktarmak için bir konuşma kartının sağ portunu diğerinin sol portuna bağlayın.
 - Tam olarak iki konuşma kartını seçerek iki yönlü eşleştirin.
-- Bir bağlantıyı seçerek `relay`, `dialogue` veya `review` modunu ve tur sınırını belirleyin.
+- Bir bağlantıyı seçerek `relay`, `dialogue` veya `review` modunu, tur sınırını ya da iş-bitene-kadar konuşmayı belirleyin.
 - Her turdan sonra komut çalıştırmak için kartın **Test** sekmesini kullanın. Başarısız çıkış kodu ile komut çıktısı, ayarlanan yeniden deneme sınırına kadar kartın sonraki mesajı olur.
 - Mesaj göndermek için `Enter`, yeni satır için `Shift+Enter` kullanın.
 
@@ -68,7 +70,7 @@ Bağlantılar canvas'ı bağımsız sohbetler koleksiyonu olmaktan çıkarıp bi
 | `dialogue` | Kaynağı başka bir katılımcı olarak sunar ve hedeften yanıt ister |
 | `review` | Hedeften kaynak çıktıyı hata, eksik ve riskler açısından incelemesini ister |
 
-Her bağlantının kendine ait sınırlı tur bütçesi vardır. Eşleştirme iki yönü birden oluşturur; böylece iki sağlayıcı sınırsız döngü oluşturmadan birbirinin işi üzerinde konuşabilir veya inceleme yapabilir.
+Bağlantılar varsayılan olarak sınırlı tur bütçesi kullanır. Açıkça seçilen iş-bitene-kadar konuşma bu sınırı kaldırır; yapılandırılmış bütün `until_pass` test döngüleri geçince, sağlayıcı tamamlandığını bildirince, kullanıcı girdisi isteyince veya kullanıcı bağlantıyı kaldırınca durur.
 
 ### Test geri besleme döngüsü
 

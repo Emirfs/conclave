@@ -29,7 +29,7 @@ func (s *Store) SetLoop(ctx context.Context, conversationID int64, config domain
 	// rather than the single command it held before.
 	result, err := tx.ExecContext(ctx, `
 UPDATE conversations
-SET loop_mode = ?, loop_interval_seconds = ?, test_rounds = ?
+SET loop_mode = ?, loop_interval_seconds = ?, test_rounds = ?, loop_last_signature = ''
 WHERE id = ?`, config.Mode, config.IntervalSeconds, notify, conversationID)
 	if err != nil {
 		return err
@@ -64,9 +64,13 @@ func (s *Store) SetLoopRunning(ctx context.Context, conversationID int64, runnin
 		value = 1
 		due = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	result, err := s.db.ExecContext(ctx,
-		"UPDATE conversations SET loop_running = ?, loop_due_at = ? WHERE id = ?",
-		value, due, conversationID)
+	query := "UPDATE conversations SET loop_running = ?, loop_due_at = ? WHERE id = ?"
+	if running {
+		// A previous pass belongs to the previous run. Re-arming creates a new
+		// completion gate for work-until-done dialogue links.
+		query = "UPDATE conversations SET loop_running = ?, loop_due_at = ?, loop_last_signature = '' WHERE id = ?"
+	}
+	result, err := s.db.ExecContext(ctx, query, value, due, conversationID)
 	if err != nil {
 		return err
 	}
@@ -199,7 +203,7 @@ DELETE FROM card_runs WHERE conversation_id = ? AND id NOT IN (
 	if passed && job.Mode == domain.LoopUntilPass {
 		_, err := s.db.ExecContext(ctx, `
 UPDATE conversations
-SET loop_running = 0, loop_due_at = '', loop_last_signature = ''
+SET loop_running = 0, loop_due_at = '', loop_last_signature = 'passed'
 WHERE id = ?`, job.ConversationID)
 		return false, err
 	}

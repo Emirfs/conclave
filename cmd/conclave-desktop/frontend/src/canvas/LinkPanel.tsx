@@ -12,11 +12,12 @@ export function LinkPanel({
   onUnlink,
 }: {
   edge: Edge
-  onConfigure: (id: string, mode: string, rounds: number) => void
+  onConfigure: (id: string, mode: string, rounds: number, untilDone: boolean) => void
   onUnlink: (id: string) => void
 }) {
   const mode = (edge.data?.mode as string) ?? 'relay'
   const rounds = (edge.data?.maxRounds as number) ?? 3
+  const untilDone = (edge.data?.untilDone as boolean) ?? false
 
   return (
     <div className="linkpanel">
@@ -26,7 +27,7 @@ export function LinkPanel({
           <button
             key={value}
             className={`linkpanel__choice${mode === value ? ' linkpanel__choice--active' : ''}`}
-            onClick={() => onConfigure(edge.id, value, rounds)}
+            onClick={() => onConfigure(edge.id, value, rounds, value === 'dialogue' && untilDone)}
             title={describeMode(value)}
           >
             {label}
@@ -39,13 +40,25 @@ export function LinkPanel({
           <button
             key={value}
             className={`linkpanel__choice${rounds === value ? ' linkpanel__choice--active' : ''}`}
-            onClick={() => onConfigure(edge.id, mode, value)}
+            onClick={() => onConfigure(edge.id, mode, value, false)}
           >
             {value}
           </button>
         ))}
       </div>
+      <button
+        className={`linkpanel__until${untilDone ? ' linkpanel__until--active' : ''}`}
+        onClick={() => onConfigure(edge.id, 'dialogue', rounds, !untilDone)}
+        title="Testler geçene, sağlayıcı işi tamamlayana veya kullanıcı kararı gerekene kadar sürdür"
+      >
+        {untilDone ? 'bitene kadar açık' : 'iş bitene kadar sürdür'}
+      </button>
       <p className="linkpanel__hint">{describeMode(mode)}</p>
+      {untilDone && (
+        <p className="linkpanel__hint">
+          Kartların döngü sekmesinde “geçene kadar” testlerini başlat. Testler geçince veya kart tamam/kullanıcı girdisi işareti verince konuşma durur.
+        </p>
+      )}
       <button className="linkpanel__remove" onClick={() => onUnlink(edge.id)}>
         Bağlantıyı kaldır
       </button>
@@ -56,7 +69,7 @@ export function LinkPanel({
 function describeMode(mode: string): string {
   switch (mode) {
     case 'dialogue':
-      return 'İki kart birbirine cevap verir. Ters yön otomatik kurulur; tur sayısı kadar sürer.'
+      return 'İki kart birbirine cevap verir. Tur sınırı veya iş bitene kadar modu kullanılabilir.'
     case 'review':
       return 'Hedef kart gelen çıktıyı inceler ve eksikleri söyler.'
     default:

@@ -37,4 +37,4 @@ export function Snapshot():Promise<domain.Snapshot>;
 
 export function UnlinkNodes(arg1:number):Promise<void>;
 
-export function UpdateLink(arg1:number,arg2:string,arg3:number):Promise<void>;
+export function UpdateLink(arg1:number,arg2:string,arg3:number,arg4:boolean):Promise<void>;

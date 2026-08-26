@@ -77,7 +77,9 @@ export const LINK_MODES: Record<string, string> = {
 }
 
 function linkLabel(link: domain.CanvasLink): string {
-  return `${LINK_MODES[link.mode] ?? link.mode} · ${link.max_rounds}`
+  return link.until_done
+    ? `${LINK_MODES[link.mode] ?? link.mode} · bitene kadar`
+    : `${LINK_MODES[link.mode] ?? link.mode} · ${link.max_rounds}`
 }
 
 export function useCanvas(connected: boolean) {
@@ -95,7 +97,6 @@ export function useCanvas(connected: boolean) {
       let working = false
       for (const item of canvas.conversations ?? []) {
         conversations.set(item.id, item)
-        if (item.loop_running) working = true
         for (const turn of item.turns ?? []) {
           for (const response of turn.responses ?? []) {
             if (response.status === 'queued' || response.status === 'running') working = true
@@ -103,25 +104,52 @@ export function useCanvas(connected: boolean) {
         }
       }
       setBusy(working)
-      setEdges(
-        (canvas.links ?? []).map((link) => ({
+      const mappedEdges = (canvas.links ?? []).map((link) => ({
           id: String(link.id),
           source: String(link.source_id),
           target: String(link.target_id),
-          animated: working,
+          // Provider activity is already visible in its card. Animating every
+          // edge whenever any card works keeps the WebView GPU busy and makes
+          // large boards stutter.
+          animated: false,
           type: 'smoothstep',
           label: linkLabel(link),
-          data: { mode: link.mode, maxRounds: link.max_rounds },
-        })),
-      )
+          data: { mode: link.mode, maxRounds: link.max_rounds, untilDone: link.until_done },
+        }))
+      setEdges((current) => {
+        if (
+          current.length === mappedEdges.length &&
+          mappedEdges.every((edge, index) => {
+            const existing = current[index]
+            return existing.id === edge.id && existing.source === edge.source &&
+              existing.target === edge.target && existing.label === edge.label
+          })
+        ) {
+          return current
+        }
+        const local = new Map(current.map((edge) => [edge.id, edge]))
+        return mappedEdges.map((edge) => ({ ...edge, selected: local.get(edge.id)?.selected }))
+      })
       const mapped = (canvas.nodes ?? [])
         .map((node) => toBoardNode(node, conversations))
         .filter((node): node is BoardNode => node !== null)
       setNodes((current) => {
         const local = new Map(current.map((node) => [node.id, node]))
-        return mapped.map((node) => {
+        const next = mapped.map((node) => {
           const existing = local.get(node.id)
           if (!existing) return node
+          if (node.data.kind === 'note' && existing.data.kind === 'note') {
+            // Note edits are local-first and debounced. Reusing the whole node
+            // also keeps an idle board from rendering on every poll.
+            return existing
+          }
+          if (
+            node.data.kind === 'conversation' &&
+            existing.data.kind === 'conversation' &&
+            JSON.stringify(node.data.conversation) === JSON.stringify(existing.data.conversation)
+          ) {
+            return existing
+          }
           // Server data wins for content, local state wins for geometry: a
           // refresh landing mid-drag must not yank the node back.
           return {
@@ -131,12 +159,12 @@ export function useCanvas(connected: boolean) {
             height: existing.height,
             selected: existing.selected,
             dragging: existing.dragging,
-            data:
-              node.data.kind === 'note' && existing.data.kind === 'note'
-                ? existing.data
-                : node.data,
+            data: node.data,
           }
         })
+        return next.length === current.length && next.every((node, index) => node === current[index])
+          ? current
+          : next
       })
       setError(null)
       setLoaded(true)
@@ -253,9 +281,9 @@ export function useCanvas(connected: boolean) {
   )
 
   const configureLink = useCallback(
-    async (id: string, mode: string, rounds: number) => {
+    async (id: string, mode: string, rounds: number, untilDone: boolean) => {
       try {
-        await UpdateLink(Number(id), mode, rounds)
+        await UpdateLink(Number(id), mode, rounds, untilDone)
         await load()
       } catch (cause) {
         setError(String(cause))

@@ -120,9 +120,9 @@ const (
 )
 
 type Conversation struct {
-	ID        int64     `json:"id"`
-	Title     string    `json:"title"`
-	Kind      string    `json:"kind"`
+	ID        int64      `json:"id"`
+	Title     string     `json:"title"`
+	Kind      string     `json:"kind"`
 	Providers []string   `json:"providers"`
 	CreatedAt time.Time  `json:"created_at"`
 	Turns     []ChatTurn `json:"turns"`
@@ -198,6 +198,7 @@ type CanvasLink struct {
 	TargetID  int64  `json:"target_id"`
 	Mode      string `json:"mode"`
 	MaxRounds int    `json:"max_rounds"`
+	UntilDone bool   `json:"until_done"`
 }
 
 // Link modes decide how a relayed answer is presented to the receiving card.
@@ -211,13 +212,14 @@ const (
 	LinkReview = "review"
 )
 
-// maxLinkRounds is the ceiling on any link's round budget, so a mistyped value
-// cannot turn a pair of cards into an unbounded loop.
+// maxLinkRounds is the ceiling on a bounded link's round budget. Unbounded work
+// requires the separate, explicit UntilDone flag and its completion protocol.
 const maxLinkRounds = 12
 
 type LinkOptions struct {
 	Mode      string `json:"mode"`
 	MaxRounds int    `json:"max_rounds"`
+	UntilDone bool   `json:"until_done"`
 }
 
 // Normalised fills in defaults and clamps the round budget.
@@ -233,14 +235,18 @@ func (o LinkOptions) Normalised() LinkOptions {
 	if o.MaxRounds > maxLinkRounds {
 		o.MaxRounds = maxLinkRounds
 	}
+	if o.Mode != LinkDialogue {
+		o.UntilDone = false
+	}
 	return o
 }
 
 type NewLink struct {
-	SourceID int64  `json:"source_id"`
-	TargetID int64  `json:"target_id"`
-	Mode     string `json:"mode,omitempty"`
-	MaxRounds int   `json:"max_rounds,omitempty"`
+	SourceID  int64  `json:"source_id"`
+	TargetID  int64  `json:"target_id"`
+	Mode      string `json:"mode,omitempty"`
+	MaxRounds int    `json:"max_rounds,omitempty"`
+	UntilDone bool   `json:"until_done,omitempty"`
 	// Pair also creates the reverse link, so the two cards answer each other.
 	Pair bool `json:"pair,omitempty"`
 }

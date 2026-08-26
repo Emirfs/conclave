@@ -161,7 +161,6 @@ func (s *Server) createRun(response http.ResponseWriter, request *http.Request) 
 	writeJSON(response, http.StatusAccepted, map[string]int64{"id": id})
 }
 
-
 // decodeJSON enforces the shared request rules: JSON content type, a body size
 // cap, and no unknown fields so a typo in a client is an error, not a silent
 // no-op.
@@ -420,7 +419,7 @@ func (s *Server) createLink(response http.ResponseWriter, request *http.Request)
 		writeError(response, http.StatusBadRequest, errors.New("source and target node ids are required"))
 		return
 	}
-	options := domain.LinkOptions{Mode: input.Mode, MaxRounds: input.MaxRounds}
+	options := domain.LinkOptions{Mode: input.Mode, MaxRounds: input.MaxRounds, UntilDone: input.UntilDone}
 	if input.Pair {
 		// Pairing links both ways, so the two cards answer each other.
 		links, err := s.store.PairNodes(request.Context(), input.SourceID, input.TargetID, options)

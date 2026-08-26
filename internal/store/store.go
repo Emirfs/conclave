@@ -192,6 +192,11 @@ CREATE TABLE card_runs (
 );
 CREATE INDEX card_runs_conversation_idx ON card_runs(conversation_id, id DESC);
 `,
+	// 9: dialogue links can continue until tests or a provider signal completion.
+	// Existing links remain bounded unless this is explicitly enabled.
+	`
+ALTER TABLE canvas_links ADD COLUMN until_done INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 func (s *Store) init() error {
@@ -948,7 +953,6 @@ WHERE id = ? AND status = ?`,
 	return err
 }
 
-
 // RecordProviderQuota stores the most recent allowance a provider reported.
 // Only some providers report one, so a missing row simply means "unknown".
 func (s *Store) RecordProviderQuota(ctx context.Context, name string, quota provider.Quota) error {
@@ -1017,12 +1021,13 @@ WHERE id IN (?, ?) AND kind = ? AND conversation_id IS NOT NULL`,
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := s.db.ExecContext(ctx, `
-INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds)
-VALUES(?, ?, ?, ?, ?)
+INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done)
+VALUES(?, ?, ?, ?, ?, ?)
 ON CONFLICT(source_id, target_id) DO UPDATE SET
     mode = excluded.mode,
-    max_rounds = excluded.max_rounds`,
-		sourceID, targetID, now, options.Mode, options.MaxRounds)
+    max_rounds = excluded.max_rounds,
+    until_done = excluded.until_done`,
+		sourceID, targetID, now, options.Mode, options.MaxRounds, options.UntilDone)
 	if err != nil {
 		return domain.CanvasLink{}, err
 	}
@@ -1048,7 +1053,7 @@ ON CONFLICT(source_id, target_id) DO UPDATE SET
 	}
 	return domain.CanvasLink{
 		ID: id, SourceID: sourceID, TargetID: targetID,
-		Mode: options.Mode, MaxRounds: options.MaxRounds,
+		Mode: options.Mode, MaxRounds: options.MaxRounds, UntilDone: options.UntilDone,
 	}, nil
 }
 
@@ -1056,13 +1061,14 @@ ON CONFLICT(source_id, target_id) DO UPDATE SET
 // existing reverse link alone apart from matching its mode and budget.
 func (s *Store) ensureReverseLink(ctx context.Context, sourceID, targetID int64, options domain.LinkOptions) error {
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds)
-VALUES(?, ?, ?, ?, ?)
+INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done)
+VALUES(?, ?, ?, ?, ?, ?)
 ON CONFLICT(source_id, target_id) DO UPDATE SET
     mode = excluded.mode,
-    max_rounds = excluded.max_rounds`,
+    max_rounds = excluded.max_rounds,
+    until_done = excluded.until_done`,
 		targetID, sourceID, time.Now().UTC().Format(time.RFC3339Nano),
-		options.Mode, options.MaxRounds)
+		options.Mode, options.MaxRounds, options.UntilDone)
 	return err
 }
 
@@ -1093,8 +1099,8 @@ func (s *Store) UpdateLink(ctx context.Context, id int64, options domain.LinkOpt
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx,
-		"UPDATE canvas_links SET mode = ?, max_rounds = ? WHERE id = ?",
-		options.Mode, options.MaxRounds, id); err != nil {
+		"UPDATE canvas_links SET mode = ?, max_rounds = ?, until_done = ? WHERE id = ?",
+		options.Mode, options.MaxRounds, options.UntilDone, id); err != nil {
 		return err
 	}
 	// Choosing "dialogue" on a one-way link is a request for a conversation,
@@ -1122,7 +1128,7 @@ func (s *Store) DeleteLink(ctx context.Context, id int64) error {
 
 func (s *Store) listLinks(ctx context.Context) ([]domain.CanvasLink, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, source_id, target_id, mode, max_rounds FROM canvas_links ORDER BY id")
+		"SELECT id, source_id, target_id, mode, max_rounds, until_done FROM canvas_links ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -1130,7 +1136,7 @@ func (s *Store) listLinks(ctx context.Context) ([]domain.CanvasLink, error) {
 	links := []domain.CanvasLink{}
 	for rows.Next() {
 		var link domain.CanvasLink
-		if err := rows.Scan(&link.ID, &link.SourceID, &link.TargetID, &link.Mode, &link.MaxRounds); err != nil {
+		if err := rows.Scan(&link.ID, &link.SourceID, &link.TargetID, &link.Mode, &link.MaxRounds, &link.UntilDone); err != nil {
 			return nil, err
 		}
 		links = append(links, link)
@@ -1202,7 +1208,7 @@ WHERE t.id = ?`, turnID).Scan(&conversationID, &depth, &sourceTitle)
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-SELECT target.conversation_id, link.mode, link.max_rounds
+SELECT target.conversation_id, link.mode, link.max_rounds, link.until_done
 FROM canvas_links link
 JOIN canvas_nodes source ON source.id = link.source_id
 JOIN canvas_nodes target ON target.id = link.target_id
@@ -1214,11 +1220,12 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 		conversation int64
 		mode         string
 		maxRounds    int
+		untilDone    bool
 	}
 	var targets []destination
 	for rows.Next() {
 		var item destination
-		if err := rows.Scan(&item.conversation, &item.mode, &item.maxRounds); err != nil {
+		if err := rows.Scan(&item.conversation, &item.mode, &item.maxRounds, &item.untilDone); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -1230,11 +1237,20 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 
 	delivered := 0
 	for _, target := range targets {
+		if target.untilDone {
+			complete, err := s.dialogueComplete(ctx, conversationID, target.conversation, payload)
+			if err != nil {
+				return delivered, err
+			}
+			if complete {
+				continue
+			}
+		}
 		// Each link decides for itself when the exchange has gone far enough.
-		if depth >= target.maxRounds {
+		if !target.untilDone && depth >= target.maxRounds {
 			continue
 		}
-		prompt := framePayload(target.mode, sourceTitle, payload)
+		prompt := framePayload(target.mode, sourceTitle, payload, target.untilDone)
 		if err := s.createRelayTurn(ctx, target.conversation, prompt, depth+1); err != nil {
 			return delivered, err
 		}
@@ -1245,7 +1261,7 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 
 // framePayload presents a relayed answer the way the link's mode intends. The
 // wording is what turns a handoff into a conversation or a review.
-func framePayload(mode, sourceTitle, payload string) string {
+func framePayload(mode, sourceTitle, payload string, untilDone bool) string {
 	// Naming the speaker is what makes the two cards aware of each other
 	// instead of receiving anonymous text.
 	speaker := sourceTitle
@@ -1254,14 +1270,44 @@ func framePayload(mode, sourceTitle, payload string) string {
 	}
 	switch mode {
 	case domain.LinkDialogue:
-		return speaker + " kartı sana şunu söyledi. Doğrudan ona cevap ver ve " +
+		instruction := speaker + " kartı sana şunu söyledi. Doğrudan ona cevap ver ve " +
 			"konuşmayı sürdürecek bir şey ekle:\n\n" + payload
+		if untilDone {
+			instruction += "\n\nİş doğrulanarak tamamlandıysa cevabını [CONCLAVE_DONE] ile; " +
+				"devam etmek için kullanıcı kararı gerekiyorsa [CONCLAVE_USER_INPUT] ile bitir. " +
+				"Bu işaretleri yalnızca gerçekten durmak gerektiğinde kullan."
+		}
+		return instruction
 	case domain.LinkReview:
 		return speaker + " kartının çıktısı aşağıda. İncele; hata, eksik veya risk " +
 			"görüyorsan açıkça yaz, sorun yoksa kısaca uygun olduğunu söyle.\n\n" + payload
 	default:
 		return payload
 	}
+}
+
+const (
+	dialogueDoneMarker      = "[CONCLAVE_DONE]"
+	dialogueUserInputMarker = "[CONCLAVE_USER_INPUT]"
+)
+
+// dialogueComplete combines objective test completion with explicit provider
+// terminal states. If both cards define until-pass loops, every loop must pass.
+func (s *Store) dialogueComplete(ctx context.Context, sourceID, targetID int64, payload string) (bool, error) {
+	trimmed := strings.TrimSpace(payload)
+	if strings.HasSuffix(trimmed, dialogueDoneMarker) || strings.HasSuffix(trimmed, dialogueUserInputMarker) {
+		return true, nil
+	}
+	var configured, passed int
+	err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*), COALESCE(SUM(CASE WHEN loop_last_signature = 'passed' THEN 1 ELSE 0 END), 0)
+FROM conversations
+WHERE id IN (?, ?) AND loop_mode = ?`, sourceID, targetID, domain.LoopUntilPass).
+		Scan(&configured, &passed)
+	if err != nil {
+		return false, err
+	}
+	return configured > 0 && passed == configured, nil
 }
 
 func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, prompt string, depth int) error {
@@ -1287,7 +1333,6 @@ func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, promp
 	}
 	return tx.Commit()
 }
-
 
 // RecordProviderSession remembers the provider-side conversation id so the next
 // turn continues it instead of starting over.
@@ -1323,5 +1368,3 @@ func (s *Store) SetConversationProject(ctx context.Context, conversationID int64
 	}
 	return nil
 }
-
-

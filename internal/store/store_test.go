@@ -749,12 +749,15 @@ func TestReviewModeAsksForCritique(t *testing.T) {
 }
 
 func TestLinkOptionsAreClamped(t *testing.T) {
-	huge := domain.LinkOptions{Mode: "uydurma", MaxRounds: 9999}.Normalised()
+	huge := domain.LinkOptions{Mode: "uydurma", MaxRounds: 9999, UntilDone: true}.Normalised()
 	if huge.Mode != domain.LinkRelay {
 		t.Fatalf("unknown mode became %q", huge.Mode)
 	}
 	if huge.MaxRounds > 12 {
 		t.Fatalf("round budget was not clamped: %d", huge.MaxRounds)
+	}
+	if huge.UntilDone {
+		t.Fatal("a non-dialogue link retained until-done mode")
 	}
 	zero := domain.LinkOptions{}.Normalised()
 	if zero.MaxRounds < 1 {
@@ -762,7 +765,70 @@ func TestLinkOptionsAreClamped(t *testing.T) {
 	}
 }
 
+func TestUntilDoneDialogueIgnoresRoundBudgetAndStopsAtMarker(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+	if _, err := store.PairNodes(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 1, UntilDone: true}); err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "baslat"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
 
+	for index, answer := range []string{"devam", "hala calisiyorum", "tamam " + dialogueDoneMarker} {
+		job, err := store.ClaimChatResponse(ctx)
+		if err != nil || job == nil {
+			t.Fatalf("claim %d: %v", index, err)
+		}
+		if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, answer, ""); err != nil {
+			t.Fatalf("finish %d: %v", index, err)
+		}
+		delivered, err := store.RelayTurn(ctx, job.TurnID)
+		if err != nil {
+			t.Fatalf("relay %d: %v", index, err)
+		}
+		if index < 2 && delivered != 1 {
+			t.Fatalf("round %d delivered %d, want 1", index, delivered)
+		}
+		if index == 2 && delivered != 0 {
+			t.Fatalf("completion marker delivered %d turns", delivered)
+		}
+	}
+}
+
+func TestUntilDoneDialogueStopsWhenConfiguredTestsPass(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+	if _, err := store.PairNodes(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 1, UntilDone: true}); err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+UPDATE conversations SET loop_mode = ?, loop_last_signature = 'passed' WHERE id IN (?, ?)`,
+		domain.LoopUntilPass, first.ID, second.ID); err != nil {
+		t.Fatalf("mark tests passed: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "baslat"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, "devam", ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	delivered, err := store.RelayTurn(ctx, job.TurnID)
+	if err != nil {
+		t.Fatalf("relay: %v", err)
+	}
+	if delivered != 0 {
+		t.Fatalf("passed tests delivered %d turns", delivered)
+	}
+}
 
 // Choosing dialogue must make the link mutual, otherwise "karşılıklı" is a
 // one-way handoff that ends after a single hop.
