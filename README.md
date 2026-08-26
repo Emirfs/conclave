@@ -17,7 +17,7 @@ AI coding CLIs are useful in isolation, but coordinating them usually means jugg
 - assigns a project directory and `read` or `edit` access independently to each card;
 - shows Git working-tree changes and unified diffs inside project cards;
 - relays, discusses, or reviews completed answers through configurable canvas links;
-- pairs two cards for a bounded provider-to-provider conversation;
+- pairs two cards for a bounded conversation or an explicit work-until-done exchange;
 - runs an optional command after each turn and feeds failures back to the same card;
 - queues ordered build and test pipelines that survive client disconnection;
 - persists conversations, canvas geometry, links, provider quota, sessions, and pipeline state in SQLite.
@@ -48,11 +48,13 @@ The Wails desktop client uses React Flow as a persistent infinite board.
 - Use **Group conversation** to send each turn to up to four available providers.
 - Double-click empty canvas space to create a note.
 - Drag and resize cards; geometry is stored by the daemon.
+- Grow, shrink, or open a card fullscreen for long answers and documents.
+- Read provider answers as GitHub Flavored Markdown; note cards can open local `.md` files and switch between editing and preview.
 - Select a project directory per card, then toggle between `read` and `edit` access.
 - Open the **Changes** tab to inspect Git status and a file's unified diff.
 - Connect the right port of one conversation card to the left port of another to relay completed answers.
 - Select exactly two conversation cards to pair them in both directions.
-- Select a connection to choose `relay`, `dialogue`, or `review` mode and a round limit.
+- Select a connection to choose `relay`, `dialogue`, or `review` mode, a round limit, or work-until-done dialogue.
 - Use a card's **Test** tab to run a command after each turn. A failing exit code and its output become the card's next message, up to the configured retry limit.
 - Press `Enter` to send a message and `Shift+Enter` to insert a newline.
 
@@ -68,7 +70,7 @@ Connections turn the canvas into a workflow rather than a collection of independ
 | `dialogue` | Presents the source as another participant and asks the target to answer it |
 | `review` | Asks the target to critique the source output for errors, omissions, and risks |
 
-Each link has its own bounded round budget. Pairing creates both directions at once, so two providers can discuss or review each other's work without creating an unbounded loop.
+Links use a bounded round budget by default. An explicit work-until-done dialogue ignores that budget and continues until every configured `until_pass` test cycle succeeds, a provider reports completion, a provider requests user input, or the user removes the link.
 
 ### Test feedback loop
 

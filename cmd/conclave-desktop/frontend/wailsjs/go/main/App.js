@@ -70,6 +70,6 @@ export function UnlinkNodes(arg1) {
   return window['go']['main']['App']['UnlinkNodes'](arg1);
 }
 
-export function UpdateLink(arg1, arg2, arg3) {
-  return window['go']['main']['App']['UpdateLink'](arg1, arg2, arg3);
+export function UpdateLink(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['UpdateLink'](arg1, arg2, arg3, arg4);
 }

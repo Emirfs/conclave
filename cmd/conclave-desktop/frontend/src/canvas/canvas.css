@@ -860,6 +860,7 @@
 
 .boardpanel__action,
 .linkpanel__choice,
+.linkpanel__until,
 .linkpanel__remove,
 .testloop__choice,
 .testloop__save,
@@ -927,6 +928,18 @@
 .testloop__choice--active {
   border-color: var(--accent);
   background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.linkpanel__until {
+  padding: 6px 8px;
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--line));
+  color: var(--warning);
+}
+
+.linkpanel__until--active {
+  border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
   color: var(--text-primary);
 }
 

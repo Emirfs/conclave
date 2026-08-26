@@ -6,6 +6,7 @@ export namespace domain {
 	    target_id: number;
 	    mode: string;
 	    max_rounds: number;
+	    until_done: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new CanvasLink(source);
@@ -18,6 +19,7 @@ export namespace domain {
 	        this.target_id = source["target_id"];
 	        this.mode = source["mode"];
 	        this.max_rounds = source["max_rounds"];
+	        this.until_done = source["until_done"];
 	    }
 	}
 	export class CanvasNode {

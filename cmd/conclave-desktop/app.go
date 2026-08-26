@@ -51,7 +51,6 @@ func (a *App) Snapshot() (domain.Snapshot, error) {
 	return client.Snapshot(ctx)
 }
 
-
 // Canvas returns the whole board: conversations and the nodes that place them.
 func (a *App) Canvas() (domain.Canvas, error) {
 	client, err := a.client()
@@ -176,14 +175,14 @@ func (a *App) PairNodes(firstID, secondID int64, mode string, rounds int) ([]dom
 }
 
 // UpdateLink changes how an existing link works.
-func (a *App) UpdateLink(id int64, mode string, rounds int) error {
+func (a *App) UpdateLink(id int64, mode string, rounds int, untilDone bool) error {
 	client, err := a.client()
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
-	return client.UpdateLink(ctx, id, domain.LinkOptions{Mode: mode, MaxRounds: rounds})
+	return client.UpdateLink(ctx, id, domain.LinkOptions{Mode: mode, MaxRounds: rounds, UntilDone: untilDone})
 }
 
 // SetLoop replaces a card's step list and how its cycle repeats.

@@ -77,7 +77,9 @@ export const LINK_MODES: Record<string, string> = {
 }
 
 function linkLabel(link: domain.CanvasLink): string {
-  return `${LINK_MODES[link.mode] ?? link.mode} · ${link.max_rounds}`
+  return link.until_done
+    ? `${LINK_MODES[link.mode] ?? link.mode} · bitene kadar`
+    : `${LINK_MODES[link.mode] ?? link.mode} · ${link.max_rounds}`
 }
 
 export function useCanvas(connected: boolean) {
@@ -111,7 +113,7 @@ export function useCanvas(connected: boolean) {
           animated: working,
           type: 'smoothstep',
           label: linkLabel(link),
-          data: { mode: link.mode, maxRounds: link.max_rounds },
+          data: { mode: link.mode, maxRounds: link.max_rounds, untilDone: link.until_done },
         })),
       )
       const mapped = (canvas.nodes ?? [])
@@ -253,9 +255,9 @@ export function useCanvas(connected: boolean) {
   )
 
   const configureLink = useCallback(
-    async (id: string, mode: string, rounds: number) => {
+    async (id: string, mode: string, rounds: number, untilDone: boolean) => {
       try {
-        await UpdateLink(Number(id), mode, rounds)
+        await UpdateLink(Number(id), mode, rounds, untilDone)
         await load()
       } catch (cause) {
         setError(String(cause))
