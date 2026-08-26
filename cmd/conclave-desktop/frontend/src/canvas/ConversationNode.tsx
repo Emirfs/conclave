@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizer, Position, useConnection, type NodeProps } from '@xyflow/react'
 
 import { providerStyle } from '../providers'
 import { CloseButton } from './CloseButton'
@@ -26,6 +26,8 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
   const project = conversation.project_path ?? ''
   const access = conversation.access ?? 'edit'
   const [tab, setTab] = useState<Tab>('chat')
+  // True only while the user is dragging a connection somewhere on the board.
+  const linking = useConnection((connection) => connection.inProgress)
   const providers = conversation.providers ?? []
   const turns = conversation.turns ?? []
   const lead = providerStyle(providers[0] ?? conversation.title)
@@ -175,13 +177,15 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
       </div>
       )}
 
-      {/* Left accepts a relayed answer, right sends this card's answers on.
-          The third handle covers the whole card and only becomes a drop target
-          while a link is being drawn, so releasing anywhere on a card connects
-          it instead of demanding a hit on the small port. */}
+      {/* Left accepts a relayed answer, right sends this card's answers on. */}
       <Handle type="target" position={Position.Left} id="in" className="node__port" />
       <Handle type="source" position={Position.Right} id="out" className="node__port" />
-      <Handle type="target" position={Position.Left} id="anywhere" className="node__dropzone" />
+      {/* A card-wide drop target, but only while a link is actually being
+          drawn. Rendering it always would cover the card and swallow every
+          click on its header, buttons and input. */}
+      {linking && (
+        <Handle type="target" position={Position.Left} id="anywhere" className="node__dropzone" />
+      )}
 
       <div className="node__composer">
         <textarea

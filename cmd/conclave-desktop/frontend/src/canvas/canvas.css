@@ -439,7 +439,8 @@
   border: 1.5px solid var(--node-accent);
   background: var(--surface-base);
   opacity: 0;
-  transition: opacity 120ms var(--ease), transform 120ms var(--ease);
+  transition: opacity 120ms var(--ease), box-shadow 120ms var(--ease),
+    border-color 120ms var(--ease);
 }
 
 /* Ports stay hidden until the card is in play, so the board reads calmly. */
@@ -451,7 +452,10 @@
 }
 
 .node__port:hover {
-  transform: scale(1.35);
+  /* Not transform: React Flow positions handles with one, and replacing it
+     would shift the port away from the card edge. */
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .react-flow__edge-path {
@@ -1084,11 +1088,10 @@
    exactly over them. */
 .node:hover .node__port {
   opacity: 1;
-  transform: scale(1.1);
 }
 
-/* Covers the whole card, inert until a connection is in flight. Then dropping
-   anywhere on the card makes the link. */
+/* Covers the whole card so a link can be dropped anywhere on it. It only
+   exists in the DOM while a connection is being drawn; see ConversationNode. */
 .node__dropzone {
   position: absolute;
   inset: 0;
@@ -1099,14 +1102,8 @@
   border-radius: var(--radius-lg);
   background: transparent;
   opacity: 0;
-  pointer-events: none;
   min-width: 0;
   min-height: 0;
-}
-
-.react-flow.connecting .node__dropzone,
-.react-flow__node.connectingto .node__dropzone {
-  pointer-events: all;
 }
 
 /* Tell the user where a link can land while one is being drawn. */
