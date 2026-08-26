@@ -2,9 +2,11 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Handle, NodeResizer, Position, useConnection, type NodeProps } from '@xyflow/react'
 
 import { providerStyle } from '../providers'
+import { CardControls } from './CardControls'
 import { CloseButton } from './CloseButton'
 import { Changes } from './Changes'
 import { LoopPanel } from './LoopPanel'
+import { Markdown } from './Markdown'
 import { domain } from '../../wailsjs/go/models'
 import type { ConversationNodeData } from './useCanvas'
 
@@ -16,13 +18,14 @@ type Props = NodeProps & {
     onToggleAccess: (conversationID: number, project: string, access: string) => Promise<void>
     onSaveLoop: (conversationID: number, config: domain.LoopConfig) => Promise<void>
     onToggleLoop: (conversationID: number, running: boolean) => Promise<void>
+    onResize: (id: string, direction: -1 | 1) => void
   }
 }
 
 type Tab = 'chat' | 'changes' | 'tests'
 
 export const ConversationNode = memo(function ConversationNode({ id, data, selected }: Props) {
-  const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop } = data
+  const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop, onResize } = data
   const project = conversation.project_path ?? ''
   const access = conversation.access ?? 'edit'
   const [tab, setTab] = useState<Tab>('chat')
@@ -36,6 +39,7 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const transcript = useRef<HTMLDivElement>(null)
+  const card = useRef<HTMLDivElement>(null)
 
   // Follow the tail as answers arrive, which is what a chat pane should do.
   useEffect(() => {
@@ -70,6 +74,7 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
 
   return (
     <div
+      ref={card}
       className={`node node--conversation${selected ? ' node--selected' : ''}`}
       style={{ ['--node-accent' as string]: group ? 'var(--accent)' : lead.accent }}
     >
@@ -98,6 +103,11 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
         </span>
         <span className="node__title">{conversation.title}</span>
         <span className="node__kind">{group ? 'grup' : 'tekil'}</span>
+        <CardControls
+          target={card}
+          onShrink={() => onResize(id, -1)}
+          onGrow={() => onResize(id, 1)}
+        />
         <CloseButton onClose={() => onClose(id)} label="Konuşmayı kapat" />
       </header>
 
@@ -228,9 +238,9 @@ function Response({ response, showName }: { response: domain.ChatResponse; showN
         <>
           {working && <Activity status={response.status} activity={response.activity} />}
           {partial !== '' && (
-            <p className={working ? 'reply__text reply__text--streaming' : 'reply__text'}>
-              {partial}
-            </p>
+            <div className={working ? 'reply__text reply__text--streaming' : 'reply__text'}>
+              <Markdown>{partial}</Markdown>
+            </div>
           )}
         </>
       )}

@@ -43,13 +43,31 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
   const close = useCallback((id: string) => void remove(id), [remove])
   const flow = useReactFlow()
 
+  const resize = useCallback(
+    (id: string, direction: -1 | 1) => {
+      setNodes((current) =>
+        current.map((node) => {
+          if (node.id !== id) return node
+          const conversation = node.data.kind === 'conversation'
+          const minWidth = conversation ? 300 : 240
+          const minHeight = conversation ? 240 : 120
+          const width = Math.max(minWidth, Math.min(1200, (node.width ?? (conversation ? 420 : 240)) + direction * 80))
+          const height = Math.max(minHeight, Math.min(900, (node.height ?? (conversation ? 520 : 180)) + direction * 60))
+          patch({ id: Number(id), width, height } as domain.CanvasNodePatch)
+          return { ...node, width, height }
+        }),
+      )
+    },
+    [patch, setNodes],
+  )
+
   // Notes need a callback in their data so the textarea can report edits, but
   // the hook owns the state. Injecting it here keeps NoteNode presentational.
   const decorated = useMemo(
     () =>
       nodes.map((node) =>
         node.data.kind === 'note'
-          ? { ...node, data: { ...node.data, onBodyChange: setNoteBody, onClose: close } }
+          ? { ...node, data: { ...node.data, onBodyChange: setNoteBody, onClose: close, onResize: resize } }
           : {
               ...node,
               data: {
@@ -60,10 +78,11 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
                 onToggleAccess: setAccess,
                 onSaveLoop: saveLoop,
                 onToggleLoop: toggleLoop,
+                onResize: resize,
               },
             },
       ),
-    [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop],
+    [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop, resize],
   )
 
   const onNodesChange = useCallback(
