@@ -21,6 +21,12 @@ Read `CONTEXT.md` before changing package boundaries.
 - The frontend never speaks HTTP and never holds the daemon token; it calls Go through Wails bindings.
 - Chat context is scoped by conversation and provider; conversations never leak into each other.
 - Schema changes are append-only migrations tracked with `PRAGMA user_version`.
-- Test commands execute directly as argument arrays. Never introduce implicit shell evaluation.
+- Test commands, provider CLIs and git all execute directly as argument arrays. Never introduce
+  implicit shell evaluation.
+- A card runs its providers in its own project directory at its own access level. `edit` access means
+  the provider may change files and run commands there without asking, because a non-interactive run
+  cannot prompt. Keep that visible in the UI; never widen a card's access on its behalf.
+- Paths supplied by a client are untrusted. Anything that reads the filesystem must reject absolute
+  paths and parent traversal (see `internal/vcs`).
 - Provider credentials, tokens, and session data must not enter logs, SQLite, prompts, or Mnemo.
 - Mnemo writes are drafts and project-scoped; verified memory remains human-controlled.

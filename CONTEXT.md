@@ -14,6 +14,7 @@ nodes the daemon persists, so a layout survives a restart.
 | `internal/provider/` | Provider CLI discovery and invocation. |
 | `internal/statedir/` | State directory and daemon token shared by every local client. |
 | `internal/store/` | SQLite persistence, migrations and restart recovery. |
+| `internal/vcs/` | Read-only git status and diff for a card's project. |
 
 ## Invariants
 
@@ -26,6 +27,9 @@ nodes the daemon persists, so a layout survives a restart.
 - Chat context is scoped by conversation *and* provider. Two conversations with the same provider must
   never see each other's history.
 - A provider runs at most one chat job at a time.
+- Each card carries its own project directory and access level; providers run there, as they would in
+  a terminal. `edit` access auto-approves file changes and commands, because `--print` runs cannot ask.
+- Client-supplied paths are untrusted: reject absolute paths and parent traversal before touching disk.
 - SQLite is operational state; Mnemo is shared semantic memory. Neither stores credentials.
 - Schema changes are append-only migrations tracked with `PRAGMA user_version`. Never edit an applied
   migration.
