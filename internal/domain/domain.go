@@ -54,4 +54,33 @@ type Snapshot struct {
 	Version   string     `json:"version"`
 	Providers []Provider `json:"providers"`
 	Runs      []Run      `json:"runs"`
+	Turns     []ChatTurn `json:"turns"`
+}
+
+type ChatRequest struct {
+	Prompt    string   `json:"prompt"`
+	Providers []string `json:"providers"`
+}
+
+type ChatResponse struct {
+	ID       int64  `json:"id"`
+	TurnID   int64  `json:"turn_id"`
+	Provider string `json:"provider"`
+	Status   Status `json:"status"`
+	Content  string `json:"content,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+type ChatTurn struct {
+	ID        int64          `json:"id"`
+	Prompt    string         `json:"prompt"`
+	CreatedAt time.Time      `json:"created_at"`
+	Responses []ChatResponse `json:"responses"`
+}
+
+type ChatJob struct {
+	ResponseID int64
+	TurnID     int64
+	Provider   string
+	Prompt     string
 }

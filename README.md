@@ -11,9 +11,10 @@ The initial vertical slice provides:
 - direct process execution without an intermediate shell;
 - discovery of Claude, Codex, Gemini, Ollama, and Mnemo CLIs;
 - a JSON headless client and a Bubble Tea TUI;
+- persistent parallel conversations with Claude, Codex, Gemini, and Ollama;
 - a provider-neutral boundary for future subscription CLI and API adapters.
 
-Provider execution and Mnemo read/write are intentionally not enabled yet. Credentials and provider session data will never be persisted in Mnemo.
+Provider chat uses the official subscription CLI sessions in isolated temporary directories with write tools disabled. Credentials and provider session data are not persisted in SQLite or Mnemo. Mnemo read/write integration is intentionally not enabled yet.
 
 ## Requirements
 
@@ -39,6 +40,14 @@ Open the TUI in another terminal:
 
 ```powershell
 go run ./cmd/conclave tui
+```
+
+The TUI opens in chat mode. Type a message and press `Enter`; press `Esc` to select providers with the arrow keys and `Space`, then press `i` to return to the input.
+
+Queue a message without the TUI:
+
+```powershell
+go run ./cmd/conclave chat --provider claude --provider openai "Compare these two approaches"
 ```
 
 Inspect daemon state without a TUI:

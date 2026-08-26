@@ -48,6 +48,8 @@ func run(arguments []string) error {
 		return runStatus(arguments)
 	case "run":
 		return submitRun(arguments)
+	case "chat":
+		return submitChat(arguments)
 	case "tui":
 		return runTUI(arguments)
 	case "help", "-h", "--help":
@@ -62,6 +64,7 @@ func runDaemon(arguments []string) error {
 	flags := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	address := flags.String("listen", defaultAddress, "local listen address")
 	workers := flags.Int("workers", 2, "maximum concurrent pipelines")
+	chatWorkers := flags.Int("chat-workers", 4, "maximum concurrent provider chats")
 	timeout := flags.Duration("stage-timeout", 20*time.Minute, "per-stage timeout")
 	stateDirectory := flags.String("state-dir", defaultStateDirectory(), "state directory")
 	if err := flags.Parse(arguments); err != nil {
@@ -97,7 +100,7 @@ func runDaemon(arguments []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	engine := daemon.New(database, *workers, *timeout)
+	engine := daemon.New(database, *workers, *chatWorkers, *timeout)
 	engineDone := make(chan struct{})
 	go func() {
 		defer close(engineDone)
@@ -109,7 +112,9 @@ func runDaemon(arguments []string) error {
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
 		WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second,
 	}
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -118,6 +123,7 @@ func runDaemon(arguments []string) error {
 	log.Printf("conclave daemon listening on %s", *address)
 	err = server.ListenAndServe()
 	stop()
+	<-shutdownDone
 	<-engineDone
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
@@ -198,6 +204,45 @@ func submitRun(arguments []string) error {
 	return nil
 }
 
+func submitChat(arguments []string) error {
+	flags := flag.NewFlagSet("chat", flag.ContinueOnError)
+	address := flags.String("address", defaultAddress, "daemon address")
+	tokenFile := flags.String("token-file", defaultTokenFile(), "daemon token file")
+	var providers stageFlags
+	flags.Var(&providers, "provider", "provider name (repeatable; default: all available)")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	prompt := strings.TrimSpace(strings.Join(flags.Args(), " "))
+	if prompt == "" {
+		return errors.New("chat message is required")
+	}
+	token, err := readToken(*tokenFile)
+	if err != nil {
+		return err
+	}
+	client := api.NewClient("http://"+*address, token)
+	if len(providers) == 0 {
+		snapshot, err := client.Snapshot(context.Background())
+		if err != nil {
+			return err
+		}
+		for _, item := range snapshot.Providers {
+			if item.Available && item.Kind != "memory" {
+				providers = append(providers, item.Name)
+			}
+		}
+	}
+	id, err := client.CreateChatTurn(context.Background(), domain.ChatRequest{
+		Prompt: prompt, Providers: providers,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("chat turn #%d queued for %s\n", id, strings.Join(providers, ", "))
+	return nil
+}
+
 func runTUI(arguments []string) error {
 	flags := flag.NewFlagSet("tui", flag.ContinueOnError)
 	address := flags.String("address", defaultAddress, "daemon address")
@@ -275,5 +320,5 @@ func isLoopbackAddress(address string) bool {
 }
 
 func usage() {
-	fmt.Println("conclave [tui|daemon|status|run] [options]")
+	fmt.Println("conclave [tui|daemon|status|run|chat] [options]")
 }
