@@ -369,3 +369,255 @@ func TestConversationTurnsAreChronological(t *testing.T) {
 		t.Fatalf("order = %v, want [bir iki uc]", got)
 	}
 }
+
+// helper: run every queued response of a conversation to completion.
+func answerAll(t *testing.T, store *Store, reply string) int {
+	t.Helper()
+	ctx := context.Background()
+	answered := 0
+	for range 20 {
+		job, err := store.ClaimChatResponse(ctx)
+		if err != nil {
+			t.Fatalf("claim: %v", err)
+		}
+		if job == nil {
+			return answered
+		}
+		if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, reply, ""); err != nil {
+			t.Fatalf("finish: %v", err)
+		}
+		if _, err := store.RelayTurn(ctx, job.TurnID); err != nil {
+			t.Fatalf("relay: %v", err)
+		}
+		answered++
+	}
+	t.Fatal("answering did not settle; a relay loop is likely")
+	return answered
+}
+
+func linkedPair(t *testing.T, store *Store) (domain.Conversation, domain.Conversation, domain.Canvas) {
+	t.Helper()
+	ctx := context.Background()
+	first, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "A", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+	second, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "B", Kind: domain.KindSolo, Providers: []string{"openai"},
+	})
+	if err != nil {
+		t.Fatalf("create B: %v", err)
+	}
+	canvas, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	return first, second, canvas
+}
+
+func nodeOf(t *testing.T, canvas domain.Canvas, conversationID int64) int64 {
+	t.Helper()
+	for _, node := range canvas.Nodes {
+		if node.ConversationID != nil && *node.ConversationID == conversationID {
+			return node.ID
+		}
+	}
+	t.Fatalf("no node for conversation %d", conversationID)
+	return 0
+}
+
+func TestLinkRelaysAnswerToTargetCard(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+
+	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID)); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "ilk soru"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	answerAll(t, store, "A'nin cevabi")
+
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	var target domain.Conversation
+	for _, item := range after.Conversations {
+		if item.ID == second.ID {
+			target = item
+		}
+	}
+	if len(target.Turns) != 1 {
+		t.Fatalf("target received %d turns, want 1", len(target.Turns))
+	}
+	if target.Turns[0].Prompt != "A'nin cevabi" {
+		t.Fatalf("relayed prompt = %q", target.Turns[0].Prompt)
+	}
+}
+
+// Two cards pointing at each other must stop, not talk forever.
+func TestMutualLinksStopAtRelayDepth(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+
+	firstNode := nodeOf(t, canvas, first.ID)
+	secondNode := nodeOf(t, canvas, second.ID)
+	if _, err := store.CreateLink(ctx, firstNode, secondNode); err != nil {
+		t.Fatalf("link A->B: %v", err)
+	}
+	if _, err := store.CreateLink(ctx, secondNode, firstNode); err != nil {
+		t.Fatalf("link B->A: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "baslat"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+
+	// answerAll fails the test if this never settles.
+	answered := answerAll(t, store, "devam")
+
+	// One original turn plus maxRelayDepth relayed turns, and no more.
+	if answered != maxRelayDepth+1 {
+		t.Fatalf("answered %d turns, want %d", answered, maxRelayDepth+1)
+	}
+	var depths []int
+	rows, err := store.db.QueryContext(ctx, "SELECT relay_depth FROM chat_turns ORDER BY id")
+	if err != nil {
+		t.Fatalf("read depths: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var depth int
+		if err := rows.Scan(&depth); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		depths = append(depths, depth)
+		if depth > maxRelayDepth {
+			t.Fatalf("relay depth %d exceeded the limit", depth)
+		}
+	}
+	if len(depths) != maxRelayDepth+1 {
+		t.Fatalf("turns = %v", depths)
+	}
+}
+
+// A group card must relay once with every provider's answer, not once each.
+func TestGroupCardRelaysOnceWithEveryAnswer(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+
+	group, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "Grup", Kind: domain.KindGroup, Providers: []string{"claude", "openai"},
+	})
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	target, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "Hedef", Kind: domain.KindSolo, Providers: []string{"gemini"},
+	})
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	canvas, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, group.ID), nodeOf(t, canvas, target.ID)); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, group.ID, "karsilastir"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+
+	// Finish only the first provider: nothing may be relayed yet.
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim one: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, "birinci", ""); err != nil {
+		t.Fatalf("finish one: %v", err)
+	}
+	delivered, err := store.RelayTurn(ctx, job.TurnID)
+	if err != nil {
+		t.Fatalf("relay one: %v", err)
+	}
+	if delivered != 0 {
+		t.Fatalf("relayed %d times before the turn finished", delivered)
+	}
+
+	second, err := store.ClaimChatResponse(ctx)
+	if err != nil || second == nil {
+		t.Fatalf("claim two: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, second.ResponseID, domain.StatusPassed, "ikinci", ""); err != nil {
+		t.Fatalf("finish two: %v", err)
+	}
+	if delivered, err = store.RelayTurn(ctx, second.TurnID); err != nil {
+		t.Fatalf("relay two: %v", err)
+	}
+	if delivered != 1 {
+		t.Fatalf("relayed %d times, want 1", delivered)
+	}
+
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	for _, item := range after.Conversations {
+		if item.ID != target.ID {
+			continue
+		}
+		if len(item.Turns) != 1 {
+			t.Fatalf("target got %d turns, want 1", len(item.Turns))
+		}
+		prompt := item.Turns[0].Prompt
+		if !strings.Contains(prompt, "birinci") || !strings.Contains(prompt, "ikinci") {
+			t.Fatalf("relayed prompt is missing an answer: %q", prompt)
+		}
+	}
+}
+
+func TestSelfLinkIsRefused(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	conversation, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "Tek", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	canvas, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	node := nodeOf(t, canvas, conversation.ID)
+	if _, err := store.CreateLink(ctx, node, node); err == nil {
+		t.Fatal("a card was allowed to link to itself")
+	}
+}
+
+func TestNoteCannotBeLinked(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	conversation, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "Kart", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	note, err := store.CreateNote(ctx, domain.NewNote{Body: "not"})
+	if err != nil {
+		t.Fatalf("note: %v", err)
+	}
+	canvas, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, conversation.ID), note.ID); err == nil {
+		t.Fatal("a note was allowed to be a relay target")
+	}
+}

@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Node } from '@xyflow/react'
+import type { Edge, Node } from '@xyflow/react'
 
 import {
   Canvas as LoadCanvas,
   CreateConversation,
   CreateNote,
   DeleteCanvasNode,
+  LinkNodes,
   PatchCanvasNode,
   SendTurn,
+  UnlinkNodes,
 } from '../../wailsjs/go/main/App'
 import { domain } from '../../wailsjs/go/models'
 
@@ -63,6 +65,7 @@ function toBoardNode(
 
 export function useCanvas(connected: boolean) {
   const [nodes, setNodes] = useState<BoardNode[]>([])
+  const [edges, setEdges] = useState<Edge[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -82,6 +85,15 @@ export function useCanvas(connected: boolean) {
         }
       }
       setBusy(working)
+      setEdges(
+        (canvas.links ?? []).map((link) => ({
+          id: String(link.id),
+          source: String(link.source_id),
+          target: String(link.target_id),
+          animated: working,
+          type: 'smoothstep',
+        })),
+      )
       const mapped = (canvas.nodes ?? [])
         .map((node) => toBoardNode(node, conversations))
         .filter((node): node is BoardNode => node !== null)
@@ -196,6 +208,30 @@ export function useCanvas(connected: boolean) {
     [patch],
   )
 
+  const link = useCallback(
+    async (sourceID: string, targetID: string) => {
+      try {
+        await LinkNodes(Number(sourceID), Number(targetID))
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  const unlink = useCallback(
+    async (id: string) => {
+      setEdges((current) => current.filter((edge) => edge.id !== id))
+      try {
+        await UnlinkNodes(Number(id))
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [],
+  )
+
   const send = useCallback(
     async (conversationID: number, prompt: string) => {
       try {
@@ -209,7 +245,10 @@ export function useCanvas(connected: boolean) {
   )
 
   return useMemo(
-    () => ({ nodes, setNodes, error, loaded, load, patch, addConversation, addNote, remove, setNoteBody, send }),
-    [nodes, error, loaded, load, patch, addConversation, addNote, remove, setNoteBody, send],
+    () => ({
+      nodes, setNodes, edges, error, loaded, load, patch,
+      addConversation, addNote, remove, setNoteBody, send, link, unlink,
+    }),
+    [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove, setNoteBody, send, link, unlink],
   )
 }

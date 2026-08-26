@@ -104,6 +104,27 @@ func (a *App) PatchCanvasNode(patch domain.CanvasNodePatch) error {
 	return client.PatchCanvasNode(ctx, patch)
 }
 
+// LinkNodes relays the source card's answers into the target card.
+func (a *App) LinkNodes(sourceID, targetID int64) (domain.CanvasLink, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.CanvasLink{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CreateLink(ctx, domain.NewLink{SourceID: sourceID, TargetID: targetID})
+}
+
+func (a *App) UnlinkNodes(id int64) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.DeleteLink(ctx, id)
+}
+
 func (a *App) DeleteCanvasNode(id int64) error {
 	client, err := a.client()
 	if err != nil {

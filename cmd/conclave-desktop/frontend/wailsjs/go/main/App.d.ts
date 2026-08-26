@@ -12,8 +12,12 @@ export function DeleteCanvasNode(arg1:number):Promise<void>;
 
 export function EnsureDaemon():Promise<void>;
 
+export function LinkNodes(arg1:number,arg2:number):Promise<domain.CanvasLink>;
+
 export function PatchCanvasNode(arg1:domain.CanvasNodePatch):Promise<void>;
 
 export function SendTurn(arg1:number,arg2:string):Promise<void>;
 
 export function Snapshot():Promise<domain.Snapshot>;
+
+export function UnlinkNodes(arg1:number):Promise<void>;

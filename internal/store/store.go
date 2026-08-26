@@ -126,6 +126,18 @@ CREATE TABLE provider_quota (
 	`
 ALTER TABLE chat_responses ADD COLUMN activity TEXT NOT NULL DEFAULT '';
 `,
+	// 5: links relay one card's answer into another as its next message, and
+	// relay_depth is what stops two linked cards talking forever.
+	`
+CREATE TABLE canvas_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+    target_id INTEGER NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    UNIQUE(source_id, target_id)
+);
+ALTER TABLE chat_turns ADD COLUMN relay_depth INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 func (s *Store) init() error {
@@ -664,7 +676,11 @@ VALUES(?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), ?, ?, 
 
 // Canvas returns every conversation and node needed to draw the board.
 func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
-	canvas := domain.Canvas{Conversations: []domain.Conversation{}, Nodes: []domain.CanvasNode{}}
+	canvas := domain.Canvas{
+		Conversations: []domain.Conversation{},
+		Nodes:         []domain.CanvasNode{},
+		Links:         []domain.CanvasLink{},
+	}
 	conversations, err := s.listConversations(ctx)
 	if err != nil {
 		return canvas, err
@@ -682,6 +698,11 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 		return canvas, err
 	}
 	canvas.Nodes = nodes
+	links, err := s.listLinks(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Links = links
 	return canvas, nil
 }
 
@@ -884,4 +905,195 @@ FROM provider_quota`)
 		quota[name] = item
 	}
 	return quota, rows.Err()
+}
+
+// maxRelayDepth bounds how far an answer travels along links. Two cards
+// pointing at each other would otherwise talk until the quota runs out.
+const maxRelayDepth = 3
+
+// CreateLink connects two canvas nodes so the source's answers are relayed into
+// the target. Self-links are refused; a card must not answer itself.
+func (s *Store) CreateLink(ctx context.Context, sourceID, targetID int64) (domain.CanvasLink, error) {
+	if sourceID == targetID {
+		return domain.CanvasLink{}, errors.New("a card cannot be linked to itself")
+	}
+	var conversations int
+	err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM canvas_nodes
+WHERE id IN (?, ?) AND kind = ? AND conversation_id IS NOT NULL`,
+		sourceID, targetID, domain.NodeConversation).Scan(&conversations)
+	if err != nil {
+		return domain.CanvasLink{}, err
+	}
+	if conversations != 2 {
+		return domain.CanvasLink{}, errors.New("only conversation cards can be linked")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := s.db.ExecContext(ctx,
+		"INSERT OR IGNORE INTO canvas_links(source_id, target_id, created_at) VALUES(?, ?, ?)",
+		sourceID, targetID, now)
+	if err != nil {
+		return domain.CanvasLink{}, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return domain.CanvasLink{}, err
+	}
+	if id == 0 {
+		// The link already existed; report the one that is stored.
+		err = s.db.QueryRowContext(ctx,
+			"SELECT id FROM canvas_links WHERE source_id = ? AND target_id = ?",
+			sourceID, targetID).Scan(&id)
+		if err != nil {
+			return domain.CanvasLink{}, err
+		}
+	}
+	return domain.CanvasLink{ID: id, SourceID: sourceID, TargetID: targetID}, nil
+}
+
+func (s *Store) DeleteLink(ctx context.Context, id int64) error {
+	result, err := s.db.ExecContext(ctx, "DELETE FROM canvas_links WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) listLinks(ctx context.Context) ([]domain.CanvasLink, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, source_id, target_id FROM canvas_links ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	links := []domain.CanvasLink{}
+	for rows.Next() {
+		var link domain.CanvasLink
+		if err := rows.Scan(&link.ID, &link.SourceID, &link.TargetID); err != nil {
+			return nil, err
+		}
+		links = append(links, link)
+	}
+	return links, rows.Err()
+}
+
+// RelayPayload reports the finished text of a turn, but only once every
+// provider in it has stopped. Relaying per response would fire several times
+// for a group card; relaying per turn fires once with the whole answer.
+func (s *Store) RelayPayload(ctx context.Context, turnID int64) (string, bool, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT provider, status, content FROM chat_responses WHERE turn_id = ? ORDER BY id", turnID)
+	if err != nil {
+		return "", false, err
+	}
+	defer rows.Close()
+	var parts []string
+	multiple := 0
+	for rows.Next() {
+		var name, status, content string
+		if err := rows.Scan(&name, &status, &content); err != nil {
+			return "", false, err
+		}
+		if status == string(domain.StatusQueued) || status == string(domain.StatusRunning) {
+			return "", false, nil
+		}
+		multiple++
+		if status == string(domain.StatusPassed) && strings.TrimSpace(content) != "" {
+			parts = append(parts, name+": "+strings.TrimSpace(content))
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", false, err
+	}
+	if len(parts) == 0 {
+		return "", false, nil
+	}
+	if multiple == 1 {
+		// A single provider needs no attribution prefix.
+		_, answer, _ := strings.Cut(parts[0], ": ")
+		return answer, true, nil
+	}
+	return strings.Join(parts, "\n\n"), true, nil
+}
+
+// RelayTurn forwards a finished answer to every card linked from this one.
+// It returns the number of conversations that received it.
+func (s *Store) RelayTurn(ctx context.Context, turnID int64) (int, error) {
+	var conversationID int64
+	var depth int
+	err := s.db.QueryRowContext(ctx,
+		"SELECT COALESCE(conversation_id, 0), relay_depth FROM chat_turns WHERE id = ?", turnID).
+		Scan(&conversationID, &depth)
+	if err != nil {
+		return 0, err
+	}
+	if conversationID == 0 || depth >= maxRelayDepth {
+		return 0, nil
+	}
+	payload, ready, err := s.RelayPayload(ctx, turnID)
+	if err != nil || !ready {
+		return 0, err
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT target.conversation_id
+FROM canvas_links link
+JOIN canvas_nodes source ON source.id = link.source_id
+JOIN canvas_nodes target ON target.id = link.target_id
+WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conversationID)
+	if err != nil {
+		return 0, err
+	}
+	var targets []int64
+	for rows.Next() {
+		var target int64
+		if err := rows.Scan(&target); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		targets = append(targets, target)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+
+	delivered := 0
+	for _, target := range targets {
+		if err := s.createRelayTurn(ctx, target, payload, depth+1); err != nil {
+			return delivered, err
+		}
+		delivered++
+	}
+	return delivered, nil
+}
+
+func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, prompt string, depth int) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	providers, err := conversationProviders(ctx, tx, conversationID)
+	if err != nil {
+		return err
+	}
+	if len(providers) == 0 {
+		return nil
+	}
+	turnID, err := insertTurn(ctx, tx, conversationID, prompt, providers)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE chat_turns SET relay_depth = ? WHERE id = ?", depth, turnID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

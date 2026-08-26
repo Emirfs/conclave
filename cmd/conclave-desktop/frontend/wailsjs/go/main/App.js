@@ -22,6 +22,10 @@ export function EnsureDaemon() {
   return window['go']['main']['App']['EnsureDaemon']();
 }
 
+export function LinkNodes(arg1, arg2) {
+  return window['go']['main']['App']['LinkNodes'](arg1, arg2);
+}
+
 export function PatchCanvasNode(arg1) {
   return window['go']['main']['App']['PatchCanvasNode'](arg1);
 }
@@ -32,4 +36,8 @@ export function SendTurn(arg1, arg2) {
 
 export function Snapshot() {
   return window['go']['main']['App']['Snapshot']();
+}
+
+export function UnlinkNodes(arg1) {
+  return window['go']['main']['App']['UnlinkNodes'](arg1);
 }

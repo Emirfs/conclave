@@ -8,6 +8,8 @@ import {
   ReactFlowProvider,
   applyNodeChanges,
   useReactFlow,
+  type Connection,
+  type EdgeChange,
   type NodeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -30,7 +32,7 @@ export function Board({ canvas }: { canvas: BoardHandle }) {
 }
 
 function BoardSurface({ canvas }: { canvas: BoardHandle }) {
-  const { nodes, setNodes, patch, remove, setNoteBody, send } = canvas
+  const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink } = canvas
 
   // Closing removes the node and, for a conversation, its history with it.
   const close = useCallback((id: string) => void remove(id), [remove])
@@ -76,6 +78,23 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
     [patch, remove, setNodes],
   )
 
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      if (!connection.source || !connection.target) return
+      void link(connection.source, connection.target)
+    },
+    [link],
+  )
+
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      for (const change of changes) {
+        if (change.type === 'remove') void unlink(change.id)
+      }
+    },
+    [unlink],
+  )
+
   const onDoubleClick = useCallback(
     (event: React.MouseEvent) => {
       // The event always arrives from a React Flow descendant, never from this
@@ -93,9 +112,11 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
     <div className="board" onDoubleClick={onDoubleClick}>
       <ReactFlow
         nodes={decorated}
-        edges={[]}
+        edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
         proOptions={{ hideAttribution: true }}
         minZoom={0.2}
         maxZoom={2}
@@ -103,7 +124,6 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
         panOnScroll
         selectionOnDrag
         deleteKeyCode={['Delete', 'Backspace']}
-        nodesConnectable={false}
         elevateNodesOnSelect
       >
         <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="#232838" />

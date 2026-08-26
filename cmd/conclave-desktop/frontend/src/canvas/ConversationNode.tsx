@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { NodeResizer, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 
 import { providerStyle } from '../providers'
 import { CloseButton } from './CloseButton'
@@ -99,6 +99,10 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
           turns.map((turn) => <Turn key={turn.id} turn={turn} group={group} />)
         )}
       </div>
+
+      {/* Left accepts a relayed answer, right sends this card's answers on. */}
+      <Handle type="target" position={Position.Left} className="node__port" />
+      <Handle type="source" position={Position.Right} className="node__port" />
 
       <div className="node__composer">
         <textarea

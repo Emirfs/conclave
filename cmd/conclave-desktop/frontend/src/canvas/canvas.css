@@ -78,6 +78,7 @@
 /* ---------- conversation node ---------- */
 
 .node--conversation {
+  position: relative;
   border: 1px solid var(--line);
   /* The accent reads as a spine on the left rather than a full glowing border. */
   border-left: 3px solid var(--node-accent);
@@ -428,4 +429,46 @@
 /* The activity line stays above the text as it streams in. */
 .reply__working + .reply__text {
   margin-top: 4px;
+}
+
+/* ---------- relay ports and links ---------- */
+
+.node__port {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--node-accent);
+  background: var(--surface-base);
+  opacity: 0;
+  transition: opacity 120ms var(--ease), transform 120ms var(--ease);
+}
+
+/* Ports stay hidden until the card is in play, so the board reads calmly. */
+.node:hover .node__port,
+.node--selected .node__port,
+.react-flow__node.connectingfrom .node__port,
+.react-flow__node.connectingto .node__port {
+  opacity: 1;
+}
+
+.node__port:hover {
+  transform: scale(1.35);
+}
+
+.react-flow__edge-path {
+  stroke: var(--line-strong);
+  stroke-width: 1.6;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--accent);
+}
+
+/* An animated link means an answer is on its way along it. */
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke: var(--accent);
+}
+
+.react-flow__connectionline .react-flow__connection-path {
+  stroke: var(--accent);
+  stroke-width: 1.6;
 }

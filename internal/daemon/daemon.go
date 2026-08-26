@@ -101,9 +101,18 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 		_ = d.store.RecordProviderQuota(persist, job.Provider, *outcome.quota)
 	}
 	if outcome.failure != "" {
-		return d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", outcome.failure)
+		if err := d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", outcome.failure); err != nil {
+			return err
+		}
+	} else if err := d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusPassed, outcome.content, ""); err != nil {
+		return err
 	}
-	return d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusPassed, outcome.content, "")
+	// Once every provider in this turn has stopped, the answer travels along
+	// any links leaving this card. RelayTurn is a no-op until then.
+	if _, err := d.store.RelayTurn(persist, job.TurnID); err != nil {
+		return err
+	}
+	return nil
 }
 
 

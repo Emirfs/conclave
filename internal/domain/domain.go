@@ -167,8 +167,22 @@ type NewNote struct {
 	Y     float64 `json:"y"`
 }
 
+// CanvasLink relays a card's finished answer into another card as its next
+// message, which is how two providers hold a conversation with each other.
+type CanvasLink struct {
+	ID       int64 `json:"id"`
+	SourceID int64 `json:"source_id"`
+	TargetID int64 `json:"target_id"`
+}
+
+type NewLink struct {
+	SourceID int64 `json:"source_id"`
+	TargetID int64 `json:"target_id"`
+}
+
 // Canvas is everything the desktop client needs to draw the board.
 type Canvas struct {
 	Conversations []Conversation `json:"conversations"`
 	Nodes         []CanvasNode   `json:"nodes"`
+	Links         []CanvasLink   `json:"links"`
 }

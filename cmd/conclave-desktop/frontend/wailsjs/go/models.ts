@@ -1,5 +1,21 @@
 export namespace domain {
 	
+	export class CanvasLink {
+	    id: number;
+	    source_id: number;
+	    target_id: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CanvasLink(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.source_id = source["source_id"];
+	        this.target_id = source["target_id"];
+	    }
+	}
 	export class CanvasNode {
 	    id: number;
 	    kind: string;
@@ -135,6 +151,7 @@ export namespace domain {
 	export class Canvas {
 	    conversations: Conversation[];
 	    nodes: CanvasNode[];
+	    links: CanvasLink[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Canvas(source);
@@ -144,6 +161,7 @@ export namespace domain {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.conversations = this.convertValues(source["conversations"], Conversation);
 	        this.nodes = this.convertValues(source["nodes"], CanvasNode);
+	        this.links = this.convertValues(source["links"], CanvasLink);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -164,6 +182,7 @@ export namespace domain {
 		    return a;
 		}
 	}
+	
 	
 	export class CanvasNodePatch {
 	    id: number;

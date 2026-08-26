@@ -43,6 +43,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/canvas/notes", s.createNote)
 	mux.HandleFunc("PATCH /v1/canvas/nodes", s.patchCanvasNode)
 	mux.HandleFunc("DELETE /v1/canvas/nodes/{id}", s.deleteCanvasNode)
+	mux.HandleFunc("POST /v1/canvas/links", s.createLink)
+	mux.HandleFunc("DELETE /v1/canvas/links/{id}", s.deleteLink)
 	return s.authenticate(mux)
 }
 
@@ -273,6 +275,41 @@ func (s *Server) deleteCanvasNode(response http.ResponseWriter, request *http.Re
 	response.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) createLink(response http.ResponseWriter, request *http.Request) {
+	var input domain.NewLink
+	if !decodeJSON(response, request, 4<<10, &input) {
+		return
+	}
+	if input.SourceID <= 0 || input.TargetID <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("source and target node ids are required"))
+		return
+	}
+	link, err := s.store.CreateLink(request.Context(), input.SourceID, input.TargetID)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, link)
+}
+
+func (s *Server) deleteLink(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("link id must be a positive integer"))
+		return
+	}
+	err = s.store.DeleteLink(request.Context(), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusNotFound, errors.New("link does not exist"))
+		return
+	}
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
 // selectProviders keeps only discovered, chat-capable providers and drops
 // duplicates while preserving the caller's order.
 func selectProviders(requested []string) ([]string, error) {
@@ -396,6 +433,16 @@ func (c *Client) CreateNote(ctx context.Context, input domain.NewNote) (domain.C
 
 func (c *Client) PatchCanvasNode(ctx context.Context, patch domain.CanvasNodePatch) error {
 	return c.do(ctx, http.MethodPatch, "/v1/canvas/nodes", patch, nil, http.StatusNoContent)
+}
+
+func (c *Client) CreateLink(ctx context.Context, input domain.NewLink) (domain.CanvasLink, error) {
+	var link domain.CanvasLink
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/links", input, &link, http.StatusCreated)
+	return link, err
+}
+
+func (c *Client) DeleteLink(ctx context.Context, id int64) error {
+	return c.do(ctx, http.MethodDelete, "/v1/canvas/links/"+strconv.FormatInt(id, 10), nil, nil, http.StatusNoContent)
 }
 
 func (c *Client) DeleteCanvasNode(ctx context.Context, id int64) error {
