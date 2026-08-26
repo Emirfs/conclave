@@ -1,0 +1,9 @@
+/conclave.exe
+/conclave
+/build/
+/dist/
+/.conclave/
+*.log
+.env
+.env.*
+config.local.*
