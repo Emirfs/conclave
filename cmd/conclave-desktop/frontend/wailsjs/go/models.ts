@@ -4,6 +4,8 @@ export namespace domain {
 	    id: number;
 	    source_id: number;
 	    target_id: number;
+	    mode: string;
+	    max_rounds: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new CanvasLink(source);
@@ -14,6 +16,8 @@ export namespace domain {
 	        this.id = source["id"];
 	        this.source_id = source["source_id"];
 	        this.target_id = source["target_id"];
+	        this.mode = source["mode"];
+	        this.max_rounds = source["max_rounds"];
 	    }
 	}
 	export class CanvasNode {
@@ -117,6 +121,8 @@ export namespace domain {
 	    turns: ChatTurn[];
 	    project_path?: string;
 	    access?: string;
+	    test_command?: string;
+	    test_rounds?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Conversation(source);
@@ -132,6 +138,8 @@ export namespace domain {
 	        this.turns = this.convertValues(source["turns"], ChatTurn);
 	        this.project_path = source["project_path"];
 	        this.access = source["access"];
+	        this.test_command = source["test_command"];
+	        this.test_rounds = source["test_rounds"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

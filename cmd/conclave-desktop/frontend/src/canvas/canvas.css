@@ -673,3 +673,152 @@
 .patch__line--context {
   color: var(--text-secondary);
 }
+
+/* ---------- board panel: pairing and link options ---------- */
+
+.boardpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.boardpanel__action,
+.linkpanel__choice,
+.linkpanel__remove,
+.testloop__choice,
+.testloop__save,
+.testloop__off {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: default;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease),
+    color 120ms var(--ease);
+}
+
+.boardpanel__action {
+  padding: 6px 10px;
+  box-shadow: var(--shadow-panel);
+}
+
+.boardpanel__action:hover {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
+.linkpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 230px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+}
+
+.linkpanel__title {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.linkpanel__row,
+.testloop__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.linkpanel__label,
+.testloop__label {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.linkpanel__choice,
+.testloop__choice {
+  padding: 3px 8px;
+}
+
+.linkpanel__choice--active,
+.testloop__choice--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.linkpanel__hint,
+.testloop__hint {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.linkpanel__remove {
+  padding: 5px 8px;
+}
+
+.linkpanel__remove:hover {
+  border-color: var(--negative);
+  color: var(--negative);
+}
+
+/* ---------- test loop ---------- */
+
+.testloop {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.testloop__input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  user-select: text;
+  cursor: text;
+}
+
+.testloop__input:focus {
+  border-color: var(--node-accent);
+}
+
+.testloop__save,
+.testloop__off {
+  padding: 5px 10px;
+}
+
+.testloop__save:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.testloop__off:hover {
+  border-color: var(--negative);
+  color: var(--negative);
+}
+
+/* Link labels sit on the edge itself. */
+.react-flow__edge-textbg {
+  fill: var(--surface-base);
+}
+
+.react-flow__edge-text {
+  fill: var(--text-muted);
+  font-size: 9px;
+}

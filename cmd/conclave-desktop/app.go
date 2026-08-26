@@ -162,6 +162,42 @@ func (a *App) LinkNodes(sourceID, targetID int64) (domain.CanvasLink, error) {
 	return client.CreateLink(ctx, domain.NewLink{SourceID: sourceID, TargetID: targetID})
 }
 
+// PairNodes links two cards both ways so they answer each other.
+func (a *App) PairNodes(firstID, secondID int64, mode string, rounds int) ([]domain.CanvasLink, error) {
+	client, err := a.client()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.PairLink(ctx, domain.NewLink{
+		SourceID: firstID, TargetID: secondID, Mode: mode, MaxRounds: rounds,
+	})
+}
+
+// UpdateLink changes how an existing link works.
+func (a *App) UpdateLink(id int64, mode string, rounds int) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.UpdateLink(ctx, id, domain.LinkOptions{Mode: mode, MaxRounds: rounds})
+}
+
+// SetTestLoop configures the command a card runs after each turn. An empty
+// command or zero rounds turns the loop off.
+func (a *App) SetTestLoop(conversationID int64, command string, rounds int) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.SetTestLoop(ctx, conversationID, domain.TestLoopRequest{Command: command, Rounds: rounds})
+}
+
 func (a *App) UnlinkNodes(id int64) error {
 	client, err := a.client()
 	if err != nil {

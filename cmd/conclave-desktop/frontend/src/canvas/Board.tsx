@@ -1,10 +1,11 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   Background,
   BackgroundVariant,
   Controls,
   MiniMap,
   ReactFlow,
+  Panel,
   ReactFlowProvider,
   applyNodeChanges,
   useReactFlow,
@@ -16,6 +17,7 @@ import '@xyflow/react/dist/style.css'
 
 import { domain } from '../../wailsjs/go/models'
 import { ConversationNode } from './ConversationNode'
+import { LinkPanel } from './LinkPanel'
 import { NoteNode } from './NoteNode'
 import type { BoardNode, useCanvas } from './useCanvas'
 
@@ -33,7 +35,8 @@ export function Board({ canvas }: { canvas: BoardHandle }) {
 
 function BoardSurface({ canvas }: { canvas: BoardHandle }) {
   const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink,
-    pickProject, setAccess } = canvas
+    pickProject, setAccess, pair, configureLink, configureTestLoop } = canvas
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
 
   // Closing removes the node and, for a conversation, its history with it.
   const close = useCallback((id: string) => void remove(id), [remove])
@@ -54,10 +57,11 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
                 onClose: close,
                 onPickProject: pickProject,
                 onToggleAccess: setAccess,
+                onConfigureTests: configureTestLoop,
               },
             },
       ),
-    [nodes, setNoteBody, send, close, pickProject, setAccess],
+    [nodes, setNoteBody, send, close, pickProject, setAccess, configureTestLoop],
   )
 
   const onNodesChange = useCallback(
@@ -88,6 +92,12 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
     [patch, remove, setNodes],
   )
 
+  // Selecting exactly two cards offers pairing, which links them both ways.
+  const selectedCards = useMemo(
+    () => nodes.filter((node) => node.selected && node.data.kind === 'conversation'),
+    [nodes],
+  )
+
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return
@@ -100,6 +110,9 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
     (changes: EdgeChange[]) => {
       for (const change of changes) {
         if (change.type === 'remove') void unlink(change.id)
+        if (change.type === 'select') {
+          setSelectedEdge(change.selected ? change.id : null)
+        }
       }
     },
     [unlink],
@@ -136,6 +149,28 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
         deleteKeyCode={['Delete', 'Backspace']}
         elevateNodesOnSelect
       >
+        <Panel position="top-left" className="boardpanel">
+          {selectedCards.length === 2 && (
+            <button
+              className="boardpanel__action"
+              onClick={() =>
+                void pair(selectedCards[0].id, selectedCards[1].id, 'dialogue', 3)
+              }
+            >
+              Seçili iki kartı eşleştir
+            </button>
+          )}
+          {selectedEdge && (
+            <LinkPanel
+              edge={edges.find((edge) => edge.id === selectedEdge) ?? { id: selectedEdge } as never}
+              onConfigure={configureLink}
+              onUnlink={(id) => {
+                setSelectedEdge(null)
+                void unlink(id)
+              }}
+            />
+          )}
+        </Panel>
         <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="#232838" />
         <Controls showInteractive={false} position="bottom-right" />
         <MiniMap

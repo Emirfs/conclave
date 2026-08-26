@@ -428,12 +428,15 @@ func nodeOf(t *testing.T, canvas domain.Canvas, conversationID int64) int64 {
 	return 0
 }
 
+// defaultRounds mirrors domain.LinkOptions{}.Normalised().
+const defaultRounds = 3
+
 func TestLinkRelaysAnswerToTargetCard(t *testing.T) {
 	store := openTemp(t)
 	ctx := context.Background()
 	first, second, canvas := linkedPair(t, store)
 
-	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID)); err != nil {
+	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID), domain.LinkOptions{}); err != nil {
 		t.Fatalf("link: %v", err)
 	}
 	if _, err := store.CreateConversationTurn(ctx, first.ID, "ilk soru"); err != nil {
@@ -467,10 +470,10 @@ func TestMutualLinksStopAtRelayDepth(t *testing.T) {
 
 	firstNode := nodeOf(t, canvas, first.ID)
 	secondNode := nodeOf(t, canvas, second.ID)
-	if _, err := store.CreateLink(ctx, firstNode, secondNode); err != nil {
+	if _, err := store.CreateLink(ctx, firstNode, secondNode, domain.LinkOptions{}); err != nil {
 		t.Fatalf("link A->B: %v", err)
 	}
-	if _, err := store.CreateLink(ctx, secondNode, firstNode); err != nil {
+	if _, err := store.CreateLink(ctx, secondNode, firstNode, domain.LinkOptions{}); err != nil {
 		t.Fatalf("link B->A: %v", err)
 	}
 	if _, err := store.CreateConversationTurn(ctx, first.ID, "baslat"); err != nil {
@@ -481,8 +484,8 @@ func TestMutualLinksStopAtRelayDepth(t *testing.T) {
 	answered := answerAll(t, store, "devam")
 
 	// One original turn plus maxRelayDepth relayed turns, and no more.
-	if answered != maxRelayDepth+1 {
-		t.Fatalf("answered %d turns, want %d", answered, maxRelayDepth+1)
+	if answered != defaultRounds+1 {
+		t.Fatalf("answered %d turns, want %d", answered, defaultRounds+1)
 	}
 	var depths []int
 	rows, err := store.db.QueryContext(ctx, "SELECT relay_depth FROM chat_turns ORDER BY id")
@@ -496,11 +499,11 @@ func TestMutualLinksStopAtRelayDepth(t *testing.T) {
 			t.Fatalf("scan: %v", err)
 		}
 		depths = append(depths, depth)
-		if depth > maxRelayDepth {
+		if depth > defaultRounds {
 			t.Fatalf("relay depth %d exceeded the limit", depth)
 		}
 	}
-	if len(depths) != maxRelayDepth+1 {
+	if len(depths) != defaultRounds+1 {
 		t.Fatalf("turns = %v", depths)
 	}
 }
@@ -526,7 +529,7 @@ func TestGroupCardRelaysOnceWithEveryAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("canvas: %v", err)
 	}
-	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, group.ID), nodeOf(t, canvas, target.ID)); err != nil {
+	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, group.ID), nodeOf(t, canvas, target.ID), domain.LinkOptions{}); err != nil {
 		t.Fatalf("link: %v", err)
 	}
 	if _, err := store.CreateConversationTurn(ctx, group.ID, "karsilastir"); err != nil {
@@ -595,7 +598,7 @@ func TestSelfLinkIsRefused(t *testing.T) {
 		t.Fatalf("canvas: %v", err)
 	}
 	node := nodeOf(t, canvas, conversation.ID)
-	if _, err := store.CreateLink(ctx, node, node); err == nil {
+	if _, err := store.CreateLink(ctx, node, node, domain.LinkOptions{}); err == nil {
 		t.Fatal("a card was allowed to link to itself")
 	}
 }
@@ -617,7 +620,235 @@ func TestNoteCannotBeLinked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("canvas: %v", err)
 	}
-	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, conversation.ID), note.ID); err == nil {
+	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, conversation.ID), note.ID, domain.LinkOptions{}); err == nil {
 		t.Fatal("a note was allowed to be a relay target")
+	}
+}
+
+func TestPairLinksBothDirections(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+
+	links, err := store.PairNodes(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 2})
+	if err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if len(links) != 2 {
+		t.Fatalf("pair created %d links, want 2", len(links))
+	}
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	if len(after.Links) != 2 {
+		t.Fatalf("canvas shows %d links", len(after.Links))
+	}
+	for _, link := range after.Links {
+		if link.Mode != domain.LinkDialogue || link.MaxRounds != 2 {
+			t.Fatalf("link = %+v", link)
+		}
+	}
+}
+
+// A paired conversation must stop after the link's own round budget, not the
+// old global constant.
+func TestPairedCardsStopAtLinkRoundBudget(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+
+	if _, err := store.PairNodes(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 1}); err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "baslat"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	answered := answerAll(t, store, "devam")
+	// The opening turn plus exactly one relayed hop.
+	if answered != 2 {
+		t.Fatalf("answered %d turns, want 2", answered)
+	}
+}
+
+func TestDialogueModeFramesTheRelayedAnswer(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+
+	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 3}); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "soru"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, "benim cevabim", ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if _, err := store.RelayTurn(ctx, job.TurnID); err != nil {
+		t.Fatalf("relay: %v", err)
+	}
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	for _, item := range after.Conversations {
+		if item.ID != second.ID {
+			continue
+		}
+		if len(item.Turns) != 1 {
+			t.Fatalf("target got %d turns", len(item.Turns))
+		}
+		prompt := item.Turns[0].Prompt
+		if !strings.Contains(prompt, "benim cevabim") {
+			t.Fatalf("relayed answer is missing: %q", prompt)
+		}
+		// Dialogue mode must ask for a reply, not just hand the text over.
+		if prompt == "benim cevabim" {
+			t.Fatal("dialogue mode relayed the answer verbatim")
+		}
+	}
+}
+
+func TestReviewModeAsksForCritique(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+
+	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkReview, MaxRounds: 2}); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "yaz"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job, _ := store.ClaimChatResponse(ctx)
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, "kod ciktisi", ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if _, err := store.RelayTurn(ctx, job.TurnID); err != nil {
+		t.Fatalf("relay: %v", err)
+	}
+	after, _ := store.Canvas(ctx)
+	for _, item := range after.Conversations {
+		if item.ID == second.ID && len(item.Turns) == 1 {
+			if !strings.Contains(item.Turns[0].Prompt, "İncele") &&
+				!strings.Contains(item.Turns[0].Prompt, "incele") {
+				t.Fatalf("review mode did not ask for a critique: %q", item.Turns[0].Prompt)
+			}
+		}
+	}
+}
+
+func TestLinkOptionsAreClamped(t *testing.T) {
+	huge := domain.LinkOptions{Mode: "uydurma", MaxRounds: 9999}.Normalised()
+	if huge.Mode != domain.LinkRelay {
+		t.Fatalf("unknown mode became %q", huge.Mode)
+	}
+	if huge.MaxRounds > 12 {
+		t.Fatalf("round budget was not clamped: %d", huge.MaxRounds)
+	}
+	zero := domain.LinkOptions{}.Normalised()
+	if zero.MaxRounds < 1 {
+		t.Fatalf("default round budget = %d", zero.MaxRounds)
+	}
+}
+
+func TestTestLoopIsOffWithoutCommandOrProject(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	conversation, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "Kart", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	turnID, err := store.CreateConversationTurn(ctx, conversation.ID, "merhaba")
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	if _, ok, err := store.ConversationTestLoop(ctx, turnID); err != nil || ok {
+		t.Fatalf("loop should be off: ok=%v err=%v", ok, err)
+	}
+
+	// A command without a project is still off: there is nowhere to run it.
+	if err := store.SetConversationTestLoop(ctx, conversation.ID, "go test ./...", 3); err != nil {
+		t.Fatalf("set loop: %v", err)
+	}
+	if _, ok, err := store.ConversationTestLoop(ctx, turnID); err != nil || ok {
+		t.Fatalf("loop without a project should be off: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestTestLoopStopsAfterItsRounds(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	project := t.TempDir()
+	conversation, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "Kart", Kind: domain.KindSolo, Providers: []string{"claude"},
+		ProjectPath: project,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.SetConversationTestLoop(ctx, conversation.ID, "go test ./...", 2); err != nil {
+		t.Fatalf("set loop: %v", err)
+	}
+	turnID, err := store.CreateConversationTurn(ctx, conversation.ID, "yaz")
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+
+	// Two retries are allowed, the third must be refused.
+	for round := range 2 {
+		loop, ok, err := store.ConversationTestLoop(ctx, turnID)
+		if err != nil || !ok {
+			t.Fatalf("round %d: ok=%v err=%v", round, ok, err)
+		}
+		if loop.Command != "go test ./..." || loop.Project != project {
+			t.Fatalf("loop = %+v", loop)
+		}
+		if err := store.CreateTestFailureTurn(ctx, turnID, "kirik"); err != nil {
+			t.Fatalf("failure turn: %v", err)
+		}
+		var next int64
+		if err := store.db.QueryRow(
+			"SELECT id FROM chat_turns WHERE conversation_id = ? ORDER BY id DESC LIMIT 1",
+			conversation.ID).Scan(&next); err != nil {
+			t.Fatalf("read next turn: %v", err)
+		}
+		turnID = next
+	}
+	if _, ok, err := store.ConversationTestLoop(ctx, turnID); err != nil || ok {
+		t.Fatalf("loop should be exhausted: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestSetTestLoopClampsRounds(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	conversation, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "Kart", Kind: domain.KindSolo, Providers: []string{"claude"},
+		ProjectPath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.SetConversationTestLoop(ctx, conversation.ID, "go test ./...", 9999); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	canvas, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	if canvas.Conversations[0].TestRounds > maxTestRounds {
+		t.Fatalf("rounds = %d, want <= %d", canvas.Conversations[0].TestRounds, maxTestRounds)
 	}
 }

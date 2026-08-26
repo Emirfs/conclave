@@ -49,7 +49,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/canvas/conversations/{id}/changes", s.projectChanges)
 	mux.HandleFunc("GET /v1/canvas/conversations/{id}/diff", s.projectDiff)
 	mux.HandleFunc("POST /v1/canvas/links", s.createLink)
+	mux.HandleFunc("PATCH /v1/canvas/links/{id}", s.updateLink)
 	mux.HandleFunc("DELETE /v1/canvas/links/{id}", s.deleteLink)
+	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/test-loop", s.setTestLoop)
 	return s.authenticate(mux)
 }
 
@@ -417,12 +419,71 @@ func (s *Server) createLink(response http.ResponseWriter, request *http.Request)
 		writeError(response, http.StatusBadRequest, errors.New("source and target node ids are required"))
 		return
 	}
-	link, err := s.store.CreateLink(request.Context(), input.SourceID, input.TargetID)
+	options := domain.LinkOptions{Mode: input.Mode, MaxRounds: input.MaxRounds}
+	if input.Pair {
+		// Pairing links both ways, so the two cards answer each other.
+		links, err := s.store.PairNodes(request.Context(), input.SourceID, input.TargetID, options)
+		if err != nil {
+			writeError(response, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(response, http.StatusCreated, links)
+		return
+	}
+	link, err := s.store.CreateLink(request.Context(), input.SourceID, input.TargetID, options)
 	if err != nil {
 		writeError(response, http.StatusBadRequest, err)
 		return
 	}
 	writeJSON(response, http.StatusCreated, link)
+}
+
+func (s *Server) updateLink(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("link id must be a positive integer"))
+		return
+	}
+	var input domain.LinkOptions
+	if !decodeJSON(response, request, 4<<10, &input) {
+		return
+	}
+	err = s.store.UpdateLink(request.Context(), id, input)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusNotFound, errors.New("link does not exist"))
+		return
+	}
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) setTestLoop(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	var input domain.TestLoopRequest
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	if utf8.RuneCountInString(input.Command) > 500 {
+		writeError(response, http.StatusBadRequest, errors.New("command is limited to 500 characters"))
+		return
+	}
+	err = s.store.SetConversationTestLoop(request.Context(), id, input.Command, input.Rounds)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusNotFound, errors.New("conversation does not exist"))
+		return
+	}
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) deleteLink(response http.ResponseWriter, request *http.Request) {
@@ -589,9 +650,28 @@ func (c *Client) FileDiff(ctx context.Context, conversationID int64, file string
 }
 
 func (c *Client) CreateLink(ctx context.Context, input domain.NewLink) (domain.CanvasLink, error) {
+	input.Pair = false
 	var link domain.CanvasLink
 	err := c.do(ctx, http.MethodPost, "/v1/canvas/links", input, &link, http.StatusCreated)
 	return link, err
+}
+
+// PairLink links two cards in both directions; the server answers with both.
+func (c *Client) PairLink(ctx context.Context, input domain.NewLink) ([]domain.CanvasLink, error) {
+	input.Pair = true
+	var links []domain.CanvasLink
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/links", input, &links, http.StatusCreated)
+	return links, err
+}
+
+func (c *Client) UpdateLink(ctx context.Context, id int64, options domain.LinkOptions) error {
+	return c.do(ctx, http.MethodPatch, "/v1/canvas/links/"+strconv.FormatInt(id, 10),
+		options, nil, http.StatusNoContent)
+}
+
+func (c *Client) SetTestLoop(ctx context.Context, conversationID int64, input domain.TestLoopRequest) error {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/test-loop"
+	return c.do(ctx, http.MethodPut, path, input, nil, http.StatusNoContent)
 }
 
 func (c *Client) DeleteLink(ctx context.Context, id int64) error {

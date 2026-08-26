@@ -17,6 +17,8 @@ export function FileDiff(arg1:number,arg2:string):Promise<vcs.Diff>;
 
 export function LinkNodes(arg1:number,arg2:number):Promise<domain.CanvasLink>;
 
+export function PairNodes(arg1:number,arg2:number,arg3:string,arg4:number):Promise<Array<domain.CanvasLink>>;
+
 export function PatchCanvasNode(arg1:domain.CanvasNodePatch):Promise<void>;
 
 export function PickProjectDirectory(arg1:string):Promise<string>;
@@ -27,6 +29,10 @@ export function SendTurn(arg1:number,arg2:string):Promise<void>;
 
 export function SetProject(arg1:number,arg2:string,arg3:string):Promise<void>;
 
+export function SetTestLoop(arg1:number,arg2:string,arg3:number):Promise<void>;
+
 export function Snapshot():Promise<domain.Snapshot>;
 
 export function UnlinkNodes(arg1:number):Promise<void>;
+
+export function UpdateLink(arg1:number,arg2:string,arg3:number):Promise<void>;

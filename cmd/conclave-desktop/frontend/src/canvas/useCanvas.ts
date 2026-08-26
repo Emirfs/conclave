@@ -7,11 +7,14 @@ import {
   CreateNote,
   DeleteCanvasNode,
   LinkNodes,
+  PairNodes,
   PatchCanvasNode,
   PickProjectDirectory,
   SetProject,
   SendTurn,
+  SetTestLoop,
   UnlinkNodes,
+  UpdateLink,
 } from '../../wailsjs/go/main/App'
 import { domain } from '../../wailsjs/go/models'
 
@@ -65,6 +68,17 @@ function toBoardNode(
   return { ...shared, type: 'conversation', data: { kind: 'conversation', conversation } }
 }
 
+/** Link modes as the user sees them on the board. */
+export const LINK_MODES: Record<string, string> = {
+  relay: 'aktar',
+  dialogue: 'karşılıklı',
+  review: 'incele',
+}
+
+function linkLabel(link: domain.CanvasLink): string {
+  return `${LINK_MODES[link.mode] ?? link.mode} · ${link.max_rounds}`
+}
+
 export function useCanvas(connected: boolean) {
   const [nodes, setNodes] = useState<BoardNode[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
@@ -94,6 +108,8 @@ export function useCanvas(connected: boolean) {
           target: String(link.target_id),
           animated: working,
           type: 'smoothstep',
+          label: linkLabel(link),
+          data: { mode: link.mode, maxRounds: link.max_rounds },
         })),
       )
       const mapped = (canvas.nodes ?? [])
@@ -222,6 +238,42 @@ export function useCanvas(connected: boolean) {
     [load],
   )
 
+  const pair = useCallback(
+    async (firstID: string, secondID: string, mode: string, rounds: number) => {
+      try {
+        await PairNodes(Number(firstID), Number(secondID), mode, rounds)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  const configureLink = useCallback(
+    async (id: string, mode: string, rounds: number) => {
+      try {
+        await UpdateLink(Number(id), mode, rounds)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  const configureTestLoop = useCallback(
+    async (conversationID: number, command: string, rounds: number) => {
+      try {
+        await SetTestLoop(conversationID, command, rounds)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
   const unlink = useCallback(
     async (id: string) => {
       setEdges((current) => current.filter((edge) => edge.id !== id))
@@ -277,9 +329,10 @@ export function useCanvas(connected: boolean) {
     () => ({
       nodes, setNodes, edges, error, loaded, load, patch,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
-      pickProject, setAccess,
+      pickProject, setAccess, pair, configureLink, configureTestLoop,
     }),
     [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
-     setNoteBody, send, link, unlink, pickProject, setAccess],
+     setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
+     configureTestLoop],
   )
 }

@@ -153,6 +153,15 @@ CREATE TABLE provider_sessions (
     PRIMARY KEY (conversation_id, provider)
 );
 `,
+	// 7: links carry a working mode and their own round budget, and a card can
+	// run a command after each turn and feed the failure back to itself.
+	`
+ALTER TABLE canvas_links ADD COLUMN mode TEXT NOT NULL DEFAULT 'relay';
+ALTER TABLE canvas_links ADD COLUMN max_rounds INTEGER NOT NULL DEFAULT 3;
+ALTER TABLE conversations ADD COLUMN test_command TEXT NOT NULL DEFAULT '';
+ALTER TABLE conversations ADD COLUMN test_rounds INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE chat_turns ADD COLUMN test_round INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 func (s *Store) init() error {
@@ -735,7 +744,9 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 
 func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, title, kind, created_at, project_path, access FROM conversations ORDER BY id")
+		`SELECT id, title, kind, created_at, project_path, access,
+		        COALESCE(test_command, ''), COALESCE(test_rounds, 0)
+		 FROM conversations ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -745,7 +756,7 @@ func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, e
 		var item domain.Conversation
 		var created string
 		if err := rows.Scan(&item.ID, &item.Title, &item.Kind, &created,
-			&item.ProjectPath, &item.Access); err != nil {
+			&item.ProjectPath, &item.Access, &item.TestCommand, &item.TestRounds); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -941,10 +952,11 @@ const maxRelayDepth = 3
 
 // CreateLink connects two canvas nodes so the source's answers are relayed into
 // the target. Self-links are refused; a card must not answer itself.
-func (s *Store) CreateLink(ctx context.Context, sourceID, targetID int64) (domain.CanvasLink, error) {
+func (s *Store) CreateLink(ctx context.Context, sourceID, targetID int64, options domain.LinkOptions) (domain.CanvasLink, error) {
 	if sourceID == targetID {
 		return domain.CanvasLink{}, errors.New("a card cannot be linked to itself")
 	}
+	options = options.Normalised()
 	var conversations int
 	err := s.db.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM canvas_nodes
@@ -957,9 +969,13 @@ WHERE id IN (?, ?) AND kind = ? AND conversation_id IS NOT NULL`,
 		return domain.CanvasLink{}, errors.New("only conversation cards can be linked")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	result, err := s.db.ExecContext(ctx,
-		"INSERT OR IGNORE INTO canvas_links(source_id, target_id, created_at) VALUES(?, ?, ?)",
-		sourceID, targetID, now)
+	result, err := s.db.ExecContext(ctx, `
+INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds)
+VALUES(?, ?, ?, ?, ?)
+ON CONFLICT(source_id, target_id) DO UPDATE SET
+    mode = excluded.mode,
+    max_rounds = excluded.max_rounds`,
+		sourceID, targetID, now, options.Mode, options.MaxRounds)
 	if err != nil {
 		return domain.CanvasLink{}, err
 	}
@@ -976,7 +992,43 @@ WHERE id IN (?, ?) AND kind = ? AND conversation_id IS NOT NULL`,
 			return domain.CanvasLink{}, err
 		}
 	}
-	return domain.CanvasLink{ID: id, SourceID: sourceID, TargetID: targetID}, nil
+	return domain.CanvasLink{
+		ID: id, SourceID: sourceID, TargetID: targetID,
+		Mode: options.Mode, MaxRounds: options.MaxRounds,
+	}, nil
+}
+
+// PairNodes links two cards in both directions so they answer each other. The
+// round budget is shared: each link stops the exchange after MaxRounds hops.
+func (s *Store) PairNodes(ctx context.Context, firstID, secondID int64, options domain.LinkOptions) ([]domain.CanvasLink, error) {
+	forward, err := s.CreateLink(ctx, firstID, secondID, options)
+	if err != nil {
+		return nil, err
+	}
+	backward, err := s.CreateLink(ctx, secondID, firstID, options)
+	if err != nil {
+		return nil, err
+	}
+	return []domain.CanvasLink{forward, backward}, nil
+}
+
+// UpdateLink changes how an existing link works.
+func (s *Store) UpdateLink(ctx context.Context, id int64, options domain.LinkOptions) error {
+	options = options.Normalised()
+	result, err := s.db.ExecContext(ctx,
+		"UPDATE canvas_links SET mode = ?, max_rounds = ? WHERE id = ?",
+		options.Mode, options.MaxRounds, id)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) DeleteLink(ctx context.Context, id int64) error {
@@ -996,7 +1048,7 @@ func (s *Store) DeleteLink(ctx context.Context, id int64) error {
 
 func (s *Store) listLinks(ctx context.Context) ([]domain.CanvasLink, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, source_id, target_id FROM canvas_links ORDER BY id")
+		"SELECT id, source_id, target_id, mode, max_rounds FROM canvas_links ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -1004,7 +1056,7 @@ func (s *Store) listLinks(ctx context.Context) ([]domain.CanvasLink, error) {
 	links := []domain.CanvasLink{}
 	for rows.Next() {
 		var link domain.CanvasLink
-		if err := rows.Scan(&link.ID, &link.SourceID, &link.TargetID); err != nil {
+		if err := rows.Scan(&link.ID, &link.SourceID, &link.TargetID, &link.Mode, &link.MaxRounds); err != nil {
 			return nil, err
 		}
 		links = append(links, link)
@@ -1053,6 +1105,9 @@ func (s *Store) RelayPayload(ctx context.Context, turnID int64) (string, bool, e
 
 // RelayTurn forwards a finished answer to every card linked from this one.
 // It returns the number of conversations that received it.
+// RelayTurn forwards a finished answer to every card linked from this one,
+// framed according to each link's mode. Each link carries its own round budget,
+// which is what stops a pair of cards from talking forever.
 func (s *Store) RelayTurn(ctx context.Context, turnID int64) (int, error) {
 	var conversationID int64
 	var depth int
@@ -1062,7 +1117,7 @@ func (s *Store) RelayTurn(ctx context.Context, turnID int64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if conversationID == 0 || depth >= maxRelayDepth {
+	if conversationID == 0 {
 		return 0, nil
 	}
 	payload, ready, err := s.RelayPayload(ctx, turnID)
@@ -1071,7 +1126,7 @@ func (s *Store) RelayTurn(ctx context.Context, turnID int64) (int, error) {
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-SELECT target.conversation_id
+SELECT target.conversation_id, link.mode, link.max_rounds
 FROM canvas_links link
 JOIN canvas_nodes source ON source.id = link.source_id
 JOIN canvas_nodes target ON target.id = link.target_id
@@ -1079,14 +1134,19 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 	if err != nil {
 		return 0, err
 	}
-	var targets []int64
+	type destination struct {
+		conversation int64
+		mode         string
+		maxRounds    int
+	}
+	var targets []destination
 	for rows.Next() {
-		var target int64
-		if err := rows.Scan(&target); err != nil {
+		var item destination
+		if err := rows.Scan(&item.conversation, &item.mode, &item.maxRounds); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		targets = append(targets, target)
+		targets = append(targets, item)
 	}
 	if err := rows.Close(); err != nil {
 		return 0, err
@@ -1094,12 +1154,31 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 
 	delivered := 0
 	for _, target := range targets {
-		if err := s.createRelayTurn(ctx, target, payload, depth+1); err != nil {
+		// Each link decides for itself when the exchange has gone far enough.
+		if depth >= target.maxRounds {
+			continue
+		}
+		prompt := framePayload(target.mode, payload)
+		if err := s.createRelayTurn(ctx, target.conversation, prompt, depth+1); err != nil {
 			return delivered, err
 		}
 		delivered++
 	}
 	return delivered, nil
+}
+
+// framePayload presents a relayed answer the way the link's mode intends. The
+// wording is what turns a handoff into a conversation or a review.
+func framePayload(mode, payload string) string {
+	switch mode {
+	case domain.LinkDialogue:
+		return "Bağlı olduğun diğer kart şunu söyledi. Doğrudan ona cevap ver:\n\n" + payload
+	case domain.LinkReview:
+		return "Aşağıdaki çıktıyı incele. Hata, eksik veya risk görüyorsan açıkça yaz; " +
+			"sorun yoksa kısaca uygun olduğunu söyle.\n\n" + payload
+	default:
+		return payload
+	}
 }
 
 func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, prompt string, depth int) error {
@@ -1161,3 +1240,99 @@ func (s *Store) SetConversationProject(ctx context.Context, conversationID int64
 	}
 	return nil
 }
+
+// TestLoop describes a card's after-each-turn command.
+type TestLoop struct {
+	Command string
+	Rounds  int
+	Project string
+	// Round is how many times the current chain has already retried.
+	Round int
+}
+
+// ConversationTestLoop reports the command a card should run after the given
+// turn, or ok=false when the card has no loop or the budget is spent.
+func (s *Store) ConversationTestLoop(ctx context.Context, turnID int64) (TestLoop, bool, error) {
+	var loop TestLoop
+	err := s.db.QueryRowContext(ctx, `
+SELECT COALESCE(c.test_command, ''), COALESCE(c.test_rounds, 0),
+       COALESCE(c.project_path, ''), t.test_round
+FROM chat_turns t JOIN conversations c ON c.id = t.conversation_id
+WHERE t.id = ?`, turnID).Scan(&loop.Command, &loop.Rounds, &loop.Project, &loop.Round)
+	if errors.Is(err, sql.ErrNoRows) {
+		return loop, false, nil
+	}
+	if err != nil {
+		return loop, false, err
+	}
+	if strings.TrimSpace(loop.Command) == "" || loop.Rounds <= 0 || loop.Project == "" {
+		return loop, false, nil
+	}
+	if loop.Round >= loop.Rounds {
+		return loop, false, nil
+	}
+	return loop, true, nil
+}
+
+// CreateTestFailureTurn asks the same card to fix what the command reported.
+func (s *Store) CreateTestFailureTurn(ctx context.Context, turnID int64, prompt string) error {
+	var conversationID int64
+	var round int
+	err := s.db.QueryRowContext(ctx,
+		"SELECT COALESCE(conversation_id, 0), test_round FROM chat_turns WHERE id = ?", turnID).
+		Scan(&conversationID, &round)
+	if err != nil {
+		return err
+	}
+	if conversationID == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	providers, err := conversationProviders(ctx, tx, conversationID)
+	if err != nil {
+		return err
+	}
+	if len(providers) == 0 {
+		return nil
+	}
+	newTurn, err := insertTurn(ctx, tx, conversationID, prompt, providers)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE chat_turns SET test_round = ? WHERE id = ?", round+1, newTurn); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetConversationTestLoop configures the command a card runs after each turn.
+func (s *Store) SetConversationTestLoop(ctx context.Context, conversationID int64, command string, rounds int) error {
+	if rounds < 0 {
+		rounds = 0
+	}
+	if rounds > maxTestRounds {
+		rounds = maxTestRounds
+	}
+	result, err := s.db.ExecContext(ctx,
+		"UPDATE conversations SET test_command = ?, test_rounds = ? WHERE id = ?",
+		strings.TrimSpace(command), rounds, conversationID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// maxTestRounds caps retries so a card that cannot fix a failure stops asking.
+const maxTestRounds = 10

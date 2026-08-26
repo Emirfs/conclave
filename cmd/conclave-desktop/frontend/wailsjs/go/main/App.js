@@ -30,6 +30,10 @@ export function LinkNodes(arg1, arg2) {
   return window['go']['main']['App']['LinkNodes'](arg1, arg2);
 }
 
+export function PairNodes(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['PairNodes'](arg1, arg2, arg3, arg4);
+}
+
 export function PatchCanvasNode(arg1) {
   return window['go']['main']['App']['PatchCanvasNode'](arg1);
 }
@@ -50,10 +54,18 @@ export function SetProject(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetProject'](arg1, arg2, arg3);
 }
 
+export function SetTestLoop(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetTestLoop'](arg1, arg2, arg3);
+}
+
 export function Snapshot() {
   return window['go']['main']['App']['Snapshot']();
 }
 
 export function UnlinkNodes(arg1) {
   return window['go']['main']['App']['UnlinkNodes'](arg1);
+}
+
+export function UpdateLink(arg1, arg2, arg3) {
+  return window['go']['main']['App']['UpdateLink'](arg1, arg2, arg3);
 }
