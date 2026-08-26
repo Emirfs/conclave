@@ -17,7 +17,7 @@ The initial vertical slice provides:
 
 Provider chat runs the official subscription CLIs in isolated temporary directories with write tools
 disabled. Conversation history is currently replayed into each prompt; real provider sessions
-(`claude --resume`, `codex exec resume`, `gemini --resume`) are the next step. Credentials and provider
+(`claude --resume`, `codex exec resume`, `agy --conversation`) are the next step. Credentials and provider
 session data are not persisted in SQLite or Mnemo. Mnemo read/write integration is intentionally not
 enabled yet.
 
