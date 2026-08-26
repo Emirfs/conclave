@@ -22,7 +22,7 @@ type Invocation struct {
 var candidates = []candidate{
 	{name: "claude", kind: "subscription-cli", aliases: []string{"claude", "claude.cmd"}},
 	{name: "openai", kind: "subscription-cli", aliases: []string{"codex", "codex.cmd"}},
-	{name: "gemini", kind: "subscription-cli", aliases: []string{"gemini", "gemini.cmd"}},
+	{name: "gemini", kind: "subscription-cli", aliases: []string{"agy", "agy.exe"}},
 	{name: "ollama", kind: "local", aliases: []string{"ollama", "ollama.exe"}},
 	{name: "mnemo", kind: "memory", aliases: []string{"mnemo", "mnemo.exe"}},
 }
@@ -62,8 +62,7 @@ func ChatInvocation(name, prompt string) (Invocation, error) {
 		}, nil
 	case "gemini":
 		return Invocation{
-			Command: []string{path, "--prompt", "Answer the user message provided on stdin.", "--approval-mode", "plan", "--sandbox", "--output-format", "text"},
-			Stdin:   prompt,
+			Command: []string{path, "--print", prompt, "--mode", "plan", "--output-format", "text"},
 		}, nil
 	case "ollama":
 		model := os.Getenv("CONCLAVE_OLLAMA_MODEL")
