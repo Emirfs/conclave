@@ -262,3 +262,27 @@
 .button:disabled {
   opacity: 0.5;
 }
+
+/* The board fills the stage; the placeholder centring must not apply. */
+.stage--board {
+  display: block;
+  padding: 0;
+}
+
+.provider--actionable:hover {
+  cursor: default;
+  background: var(--surface-overlay);
+  border-color: var(--line);
+}
+
+.button--block {
+  width: 100%;
+  text-align: center;
+}
+
+.rail__hint {
+  margin: 2px 6px 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}

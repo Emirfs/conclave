@@ -2,8 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { EnsureDaemon, Snapshot } from '../wailsjs/go/main/App'
 import { Quit, WindowMinimise, WindowToggleMaximise } from '../wailsjs/runtime/runtime'
-import type { domain } from '../wailsjs/go/models'
+import { domain } from '../wailsjs/go/models'
 import { providerStyle } from './providers'
+import { Board } from './canvas/Board'
+import { useCanvas } from './canvas/useCanvas'
+import './canvas/canvas.css'
 
 type Connection = 'connecting' | 'online' | 'offline'
 
@@ -55,22 +58,68 @@ export function App() {
 
   const providers = (snapshot?.providers ?? []).filter((item) => item.kind !== 'memory')
   const memory = (snapshot?.providers ?? []).filter((item) => item.kind === 'memory')
+  const ready = providers.filter((item) => item.available).map((item) => item.name)
+
+  const canvas = useCanvas(connection === 'online')
+
+  const addSolo = useCallback(
+    (name: string) => {
+      const style = providerStyle(name)
+      void canvas.addConversation({
+        title: style.label,
+        kind: 'solo',
+        providers: [name],
+        ...scatter(),
+      } as domain.NewConversation)
+    },
+    [canvas],
+  )
+
+  const addNote = useCallback(() => {
+    void canvas.addNote({ body: '', color: '', ...scatter() } as domain.NewNote)
+  }, [canvas])
+
+  const addGroup = useCallback(() => {
+    if (ready.length === 0) return
+    void canvas.addConversation({
+      title: 'Hepsi birden',
+      kind: 'group',
+      providers: ready.slice(0, 4),
+      ...scatter(),
+    } as domain.NewConversation)
+  }, [canvas, ready])
 
   return (
     <div className="shell">
       <TitleBar connection={connection} version={snapshot?.version} />
       <div className="body">
         <aside className="rail">
-          <ProviderGroup heading="Sağlayıcılar" providers={providers} />
+          <ProviderGroup heading="Sağlayıcılar" providers={providers} onPick={addSolo} />
+          <section className="rail__group">
+            <h2 className="rail__heading">Panoya ekle</h2>
+            <button className="button button--block" onClick={addGroup} disabled={ready.length === 0}>
+              Grup konuşması
+            </button>
+            <button className="button button--block" onClick={addNote}>
+              Not
+            </button>
+            <p className="rail__hint">
+              Sağlayıcıya tıkla: o sağlayıcıyla tekil konuşma. Boş zemine çift tıkla: o noktaya not.
+            </p>
+          </section>
           {memory.length > 0 && <ProviderGroup heading="Bellek" providers={memory} />}
         </aside>
-        <main className="stage">
-          <Stage
-            connection={connection}
-            error={error}
-            starting={starting}
-            onStart={startDaemon}
-          />
+        <main className={connection === 'online' ? 'stage stage--board' : 'stage'}>
+          {connection === 'online' ? (
+            <Board canvas={canvas} />
+          ) : (
+            <Stage
+              connection={connection}
+              error={error}
+              starting={starting}
+              onStart={startDaemon}
+            />
+          )}
         </main>
       </div>
     </div>
@@ -112,6 +161,12 @@ function TitleBar({ connection, version }: { connection: Connection; version?: s
   )
 }
 
+/** Offsets each new node a little so a burst of additions does not stack into
+ *  one pile at the origin. */
+function scatter() {
+  return { x: 80 + Math.random() * 320, y: 60 + Math.random() * 220 }
+}
+
 function CaptionIcon({ d }: { d: string }) {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -123,9 +178,11 @@ function CaptionIcon({ d }: { d: string }) {
 function ProviderGroup({
   heading,
   providers,
+  onPick,
 }: {
   heading: string
   providers: domain.Provider[]
+  onPick?: (name: string) => void
 }) {
   return (
     <section className="rail__group">
@@ -135,18 +192,30 @@ function ProviderGroup({
           Henüz keşfedilmedi
         </p>
       ) : (
-        providers.map((item) => <ProviderRow key={item.name} provider={item} />)
+        providers.map((item) => (
+          <ProviderRow key={item.name} provider={item} onPick={onPick} />
+        ))
       )}
     </section>
   )
 }
 
-function ProviderRow({ provider }: { provider: domain.Provider }) {
+function ProviderRow({
+  provider,
+  onPick,
+}: {
+  provider: domain.Provider
+  onPick?: (name: string) => void
+}) {
   const style = providerStyle(provider.name)
+  const actionable = Boolean(onPick) && provider.available
   return (
     <div
-      className={`provider provider--${provider.available ? 'online' : 'offline'}`}
-      title={provider.command ?? 'bulunamadı'}
+      className={`provider provider--${provider.available ? 'online' : 'offline'}${
+        actionable ? ' provider--actionable' : ''
+      }`}
+      title={actionable ? `${style.label} ile konuşma aç` : (provider.command ?? 'bulunamadı')}
+      onClick={actionable ? () => onPick?.(provider.name) : undefined}
     >
       <span
         className="provider__badge"
