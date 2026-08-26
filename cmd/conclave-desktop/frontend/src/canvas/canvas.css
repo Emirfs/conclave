@@ -255,6 +255,10 @@
   overflow-wrap: anywhere;
 }
 
+.reply__text--streaming {
+  white-space: pre-wrap;
+}
+
 /* ---------- Markdown ---------- */
 
 .markdown {

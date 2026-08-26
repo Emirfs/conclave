@@ -238,9 +238,13 @@ function Response({ response, showName }: { response: domain.ChatResponse; showN
         <>
           {working && <Activity status={response.status} activity={response.activity} />}
           {partial !== '' && (
-            <div className={working ? 'reply__text reply__text--streaming' : 'reply__text'}>
-              <Markdown>{partial}</Markdown>
-            </div>
+            working ? (
+              <p className="reply__text reply__text--streaming">{partial}</p>
+            ) : (
+              <div className="reply__text">
+                <Markdown>{partial}</Markdown>
+              </div>
+            )
           )}
         </>
       )}
