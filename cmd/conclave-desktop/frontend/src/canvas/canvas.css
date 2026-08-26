@@ -63,13 +63,21 @@
   box-shadow: var(--shadow-float);
 }
 
+.node:fullscreen {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface-raised);
+}
+
 .node__resize-line {
   border-color: var(--accent);
 }
 
 .node__resize-handle {
-  width: 8px;
-  height: 8px;
+  width: 11px;
+  height: 11px;
   border: 1px solid var(--accent);
   background: var(--surface-base);
   border-radius: 2px;
@@ -184,6 +192,18 @@
   color: var(--text-muted);
 }
 
+.node__note-preview {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  user-select: text;
+}
+
+.node__file-input {
+  display: none;
+}
+
 /* ---------- transcript ---------- */
 
 .node__transcript {
@@ -229,10 +249,121 @@
 
 .reply__text {
   margin: 0;
-  font-size: 12.5px;
+  font-size: 13.5px;
+  line-height: 1.62;
   color: var(--text-primary);
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* ---------- Markdown ---------- */
+
+.markdown {
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre,
+.markdown table,
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 0 0 0.8em;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.markdown h1 { font-size: 1.45em; }
+.markdown h2 { font-size: 1.28em; }
+.markdown h3 { font-size: 1.13em; }
+.markdown h4 { font-size: 1em; }
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.6em;
+}
+
+.markdown li + li {
+  margin-top: 0.28em;
+}
+
+.markdown blockquote {
+  padding: 0.15em 0 0.15em 0.85em;
+  border-left: 3px solid var(--line-strong);
+  color: var(--text-secondary);
+}
+
+.markdown code {
+  padding: 0.12em 0.32em;
+  border: 1px solid var(--line-subtle);
+  border-radius: 4px;
+  background: var(--surface-base);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+.markdown pre {
+  padding: 11px 13px;
+  overflow: auto;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-void);
+}
+
+.markdown pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 11.5px;
+  white-space: pre;
+}
+
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.markdown th,
+.markdown td {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
+.markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--line);
 }
 
 .reply__error {
@@ -352,6 +483,46 @@
 .node__close:hover {
   background: var(--negative);
   color: var(--text-inverse);
+}
+
+.node__card-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.node__card-control,
+.node__preview-toggle {
+  display: grid;
+  place-items: center;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: default;
+}
+
+.node__card-control:hover,
+.node__preview-toggle:hover {
+  background: var(--surface-base);
+  color: var(--text-primary);
+}
+
+.node__card-control svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.node__preview-toggle {
+  font-size: 10px;
 }
 
 /* A note has no header, so its button floats over the top-right corner. */
