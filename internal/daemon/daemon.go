@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -16,6 +18,13 @@ import (
 )
 
 const maxOutputBytes = 64 * 1024
+
+// maxLineBytes bounds a single streamed JSON event; providers emit large init
+// payloads, so this is well above the default scanner limit.
+const maxLineBytes = 4 * 1024 * 1024
+
+// progressInterval bounds how often partial output is written to SQLite.
+const progressInterval = 250 * time.Millisecond
 
 type Daemon struct {
 	store       *store.Store
@@ -50,6 +59,13 @@ func (d *Daemon) Run(ctx context.Context) {
 			d.chatWorker(ctx)
 		}()
 	}
+	// Card cycles get their own worker: a hardware loop can hold a step open
+	// for a long time and must not starve chat or pipelines.
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		d.loopWorker(ctx)
+	}()
 	<-ctx.Done()
 	workers.Wait()
 }
@@ -79,54 +95,225 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 		return err
 	}
 	persist := context.WithoutCancel(ctx)
-	invocation, err := provider.ChatInvocation(job.Provider, job.Prompt)
+	invocation, err := provider.ChatInvocation(provider.Request{
+		Provider:  job.Provider,
+		Prompt:    job.Prompt,
+		Access:    provider.Access(job.Access),
+		SessionID: job.SessionID,
+		Model:     job.Model,
+	})
 	if err != nil {
 		return d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", err.Error())
 	}
-	content, failure := d.executeChat(ctx, invocation)
+	outcome := d.executeChat(ctx, job.ProjectPath, invocation, d.chatProgress(persist, job.ResponseID))
 	if ctx.Err() != nil {
 		_ = d.store.RequeueChatResponse(persist, job.ResponseID)
 		return ctx.Err()
 	}
-	if failure != "" {
-		return d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", failure)
+	if outcome.quota != nil {
+		_ = d.store.RecordProviderQuota(persist, job.Provider, *outcome.quota)
 	}
-	return d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusPassed, content, "")
+	if outcome.sessionID != "" {
+		_ = d.store.RecordProviderSession(persist, job.ConversationID, job.Provider, outcome.sessionID, job.Model)
+	}
+	if outcome.failure != "" {
+		if err := d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", outcome.failure); err != nil {
+			return err
+		}
+	} else if err := d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusPassed, outcome.content, ""); err != nil {
+		return err
+	}
+	// Once every provider in this turn has stopped, the answer travels along
+	// any links leaving this card. RelayTurn is a no-op until then.
+	if _, err := d.store.RelayTurn(persist, job.TurnID); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (d *Daemon) executeChat(parent context.Context, invocation provider.Invocation) (string, string) {
-	workdir, err := os.MkdirTemp("", "conclave-chat-")
-	if err != nil {
-		return "", err.Error()
+
+// chatProgress persists partial provider output so the answer appears while it
+// is still being produced. Writes are throttled: a token-by-token provider
+// would otherwise turn one answer into thousands of UPDATE statements.
+func (d *Daemon) chatProgress(ctx context.Context, responseID int64) func(string, string) {
+	var mutex sync.Mutex
+	var last time.Time
+	var lastActivity string
+	return func(partial, activity string) {
+		mutex.Lock()
+		// An activity change is worth reporting immediately: it is the only
+		// signal a user gets while a provider works without emitting text.
+		if activity == lastActivity && time.Since(last) < progressInterval {
+			mutex.Unlock()
+			return
+		}
+		last = time.Now()
+		lastActivity = activity
+		mutex.Unlock()
+		// A failure here only costs a frame of liveness; the final write is
+		// what makes the answer durable.
+		_ = d.store.UpdateChatResponseContent(ctx, responseID, strings.TrimSpace(partial), activity)
 	}
-	defer os.RemoveAll(workdir)
+}
+
+// chatResult is what one provider run produced.
+type chatResult struct {
+	content   string
+	failure   string
+	sessionID string
+	quota     *provider.Quota
+}
+
+// executeChat runs a provider and reads its stdout line by line so a streaming
+// format can report the answer while it is still being written. progress is
+// called with the text so far.
+// splitCommand turns a typed command line into an argument array. Quoting is
+// honoured so a path with spaces survives, but nothing is evaluated: there is
+// no shell here, and no expansion of any kind.
+func splitCommand(line string) []string {
+	var parts []string
+	var current strings.Builder
+	quote := rune(0)
+	for _, symbol := range line {
+		switch {
+		case quote != 0:
+			if symbol == quote {
+				quote = 0
+			} else {
+				current.WriteRune(symbol)
+			}
+		case symbol == '\'' || symbol == '"':
+			quote = symbol
+		case symbol == ' ' || symbol == '\t':
+			if current.Len() > 0 {
+				parts = append(parts, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteRune(symbol)
+		}
+	}
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+	return parts
+}
+
+func (d *Daemon) executeChat(parent context.Context, project string, invocation provider.Invocation, progress func(string, string)) chatResult {
+	workdir := project
+	if workdir == "" {
+		// No project means no work to do on disk, so the provider gets a
+		// scratch directory that is thrown away afterwards.
+		scratch, err := os.MkdirTemp("", "conclave-chat-")
+		if err != nil {
+			return chatResult{failure: err.Error()}
+		}
+		defer os.RemoveAll(scratch)
+		workdir = scratch
+	} else if info, err := os.Stat(workdir); err != nil || !info.IsDir() {
+		return chatResult{failure: "project directory is not available: " + workdir}
+	}
 	ctx, cancel := context.WithTimeout(parent, d.timeout)
 	defer cancel()
+
 	command := exec.CommandContext(ctx, invocation.Command[0], invocation.Command[1:]...)
 	command.Dir = workdir
 	command.Stdin = strings.NewReader(invocation.Stdin)
 	command.Env = safeEnvironment()
 	command.WaitDelay = 10 * time.Second
 	configureProcessTree(command)
-	stdout := &limitedBuffer{limit: maxOutputBytes}
+
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return chatResult{failure: err.Error()}
+	}
 	stderr := &limitedBuffer{limit: maxOutputBytes}
-	command.Stdout = stdout
 	command.Stderr = stderr
-	if err := command.Run(); err != nil {
+
+	if err := command.Start(); err != nil {
+		return chatResult{failure: err.Error()}
+	}
+
+	result := d.consumeStream(stdout, invocation.Stream, progress)
+
+	if err := command.Wait(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", "provider timed out"
+			return chatResult{failure: "provider timed out"}
+		}
+		// A provider that reported its own error explains the failure better
+		// than an exit status does.
+		if result.failure != "" {
+			return result
 		}
 		failure := strings.TrimSpace(stderr.String())
 		if failure == "" {
 			failure = err.Error()
 		}
-		return "", failure
+		return chatResult{failure: failure, sessionID: result.sessionID, quota: result.quota}
 	}
-	content := strings.TrimSpace(stdout.String())
-	if content == "" {
-		return "", "provider returned an empty response"
+	if result.failure != "" {
+		return result
 	}
-	return content, ""
+	result.content = strings.TrimSpace(result.content)
+	if result.content == "" {
+		return chatResult{failure: "provider returned an empty response", sessionID: result.sessionID, quota: result.quota}
+	}
+	return result
+}
+
+// consumeStream reads provider output to completion. It must drain the pipe
+// even after hitting the size cap, otherwise the provider blocks on a full pipe
+// and the run never ends.
+func (d *Daemon) consumeStream(stdout io.Reader, format provider.StreamFormat, progress func(string, string)) chatResult {
+	var result chatResult
+	var accumulated strings.Builder
+	var final string
+	activity := ""
+	capped := false
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+	for scanner.Scan() {
+		update := provider.DecodeStreamLine(format, scanner.Text())
+		if update.SessionID != "" {
+			result.sessionID = update.SessionID
+		}
+		if update.Quota != nil {
+			result.quota = update.Quota
+		}
+		if update.Failure != "" {
+			result.failure = update.Failure
+		}
+		if update.Final != "" {
+			final = update.Final
+		}
+		if update.Activity != "" {
+			activity = update.Activity
+		}
+		if update.Delta != "" && !capped {
+			if accumulated.Len()+len(update.Delta) > maxOutputBytes {
+				capped = true
+				accumulated.WriteString("\n[output truncated]")
+			} else {
+				accumulated.WriteString(update.Delta)
+			}
+		}
+		// Report on every event, not only on text: a provider running a tool
+		// produces no text but is very much busy.
+		if progress != nil && (update.Delta != "" || update.Activity != "") {
+			progress(accumulated.String(), activity)
+		}
+	}
+	// A scanner error still leaves whatever arrived before it usable.
+	if err := scanner.Err(); err != nil && result.failure == "" && final == "" && accumulated.Len() == 0 {
+		result.failure = err.Error()
+	}
+	if final != "" {
+		result.content = final
+	} else {
+		result.content = accumulated.String()
+	}
+	return result
 }
 
 func safeEnvironment() []string {
@@ -234,17 +421,24 @@ func (d *Daemon) execute(parent context.Context, directory string, command []str
 	return -1, buffer.String() + "\n" + err.Error()
 }
 
+// limitedBuffer caps how much provider output is retained and, when onGrow is
+// set, reports the text captured so far as it arrives. The mutex matters
+// because the daemon reads the partial text while os/exec is still writing.
 type limitedBuffer struct {
+	mutex     sync.Mutex
 	data      bytes.Buffer
 	limit     int
 	truncated bool
+	onGrow    func(string)
 }
 
 func (b *limitedBuffer) Write(value []byte) (int, error) {
 	original := len(value)
+	b.mutex.Lock()
 	remaining := b.limit - b.data.Len()
 	if remaining <= 0 {
 		b.truncated = true
+		b.mutex.Unlock()
 		return original, nil
 	}
 	if len(value) > remaining {
@@ -252,10 +446,17 @@ func (b *limitedBuffer) Write(value []byte) (int, error) {
 		b.truncated = true
 	}
 	_, err := b.data.Write(value)
+	partial := b.data.String()
+	b.mutex.Unlock()
+	if err == nil && b.onGrow != nil {
+		b.onGrow(partial)
+	}
 	return original, err
 }
 
 func (b *limitedBuffer) String() string {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	if b.truncated {
 		return b.data.String() + "\n[output truncated]"
 	}

@@ -1,0 +1,1117 @@
+.board {
+  width: 100%;
+  height: 100%;
+}
+
+/* React Flow paints its own surfaces; align them with the app palette. */
+.react-flow {
+  --xy-background-color: var(--surface-base);
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+.react-flow__controls {
+  box-shadow: var(--shadow-panel);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--line-subtle);
+  fill: var(--text-secondary);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--surface-overlay);
+  fill: var(--text-primary);
+}
+
+.react-flow__minimap {
+  background: var(--surface-void);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-panel);
+}
+
+.react-flow__node {
+  /* The node components draw their own frame and shadow. */
+  border: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: var(--radius-lg);
+}
+
+/* ---------- shared node frame ---------- */
+
+.node {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-panel);
+  font-family: var(--font-ui);
+  text-align: left;
+}
+
+.node--selected {
+  box-shadow: var(--shadow-float);
+}
+
+.node__resize-line {
+  border-color: var(--accent);
+}
+
+.node__resize-handle {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--accent);
+  background: var(--surface-base);
+  border-radius: 2px;
+}
+
+/* ---------- conversation node ---------- */
+
+.node--conversation {
+  position: relative;
+  border: 1px solid var(--line);
+  /* The accent reads as a spine on the left rather than a full glowing border. */
+  border-left: 3px solid var(--node-accent);
+}
+
+.node--conversation.node--selected {
+  border-color: color-mix(in srgb, var(--node-accent) 55%, var(--line));
+  border-left-color: var(--node-accent);
+}
+
+.node__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--surface-overlay);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.node__badges {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.node__badge {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--badge-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--badge-accent) 14%, transparent);
+  color: var(--badge-accent);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.node__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text-primary);
+}
+
+.node__kind {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-base);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.node__body {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.node__placeholder {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+/* ---------- note node ---------- */
+
+.node--note {
+  position: relative;
+  border: 1px solid color-mix(in srgb, var(--note-accent) 40%, var(--line));
+  background: color-mix(in srgb, var(--note-accent) 9%, var(--surface-raised));
+}
+
+.node--note.node--selected {
+  border-color: var(--note-accent);
+}
+
+.node__note-text {
+  flex: 1;
+  width: 100%;
+  padding: 10px 12px 12px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.55;
+  user-select: text;
+  cursor: text;
+}
+
+.node__note-text::placeholder {
+  color: var(--text-muted);
+}
+
+/* ---------- transcript ---------- */
+
+.node__transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+  user-select: text;
+}
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.turn__prompt {
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-overlay);
+  border-left: 2px solid var(--text-muted);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.reply {
+  padding-left: 10px;
+  border-left: 2px solid var(--reply-accent);
+}
+
+.reply__name {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--reply-accent);
+}
+
+.reply__text {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.reply__error {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--negative);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.reply__working {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.reply__pips {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.reply__pips i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--reply-accent);
+  animation: pip 1.1s var(--ease) infinite;
+}
+
+.reply__pips i:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.reply__pips i:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes pip {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/* ---------- composer ---------- */
+
+.node__composer {
+  flex: none;
+  padding: 8px;
+  border-top: 1px solid var(--line-subtle);
+  background: var(--surface-overlay);
+}
+
+.node__input {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  outline: none;
+  resize: none;
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  line-height: 1.5;
+  user-select: text;
+  cursor: text;
+}
+
+.node__input:focus {
+  border-color: var(--node-accent);
+}
+
+.node__input::placeholder {
+  color: var(--text-muted);
+}
+
+.node__input:disabled {
+  opacity: 0.6;
+}
+
+/* ---------- close affordance ---------- */
+
+.node__close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: default;
+  opacity: 0;
+  transition: opacity 120ms var(--ease), background 120ms var(--ease),
+    color 120ms var(--ease);
+}
+
+/* Revealed on hover or when the node is selected, so the frame stays quiet. */
+.node:hover .node__close,
+.node--selected .node__close,
+.node__close:focus-visible {
+  opacity: 1;
+}
+
+.node__close:hover {
+  background: var(--negative);
+  color: var(--text-inverse);
+}
+
+/* A note has no header, so its button floats over the top-right corner. */
+.node--note .node__close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+}
+
+/* A caret trailing the text while the provider is still writing. */
+.reply__text--streaming::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--reply-accent);
+  animation: caret 1s steps(2, start) infinite;
+}
+
+@keyframes caret {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---------- drag handle ---------- */
+
+.node__grip {
+  cursor: grab;
+}
+
+.node__grip:active {
+  cursor: grabbing;
+}
+
+/* A note is one big textarea, so it needs a strip of its own to be grabbed. */
+.node__grip--note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex: none;
+  height: 22px;
+  padding: 0 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--note-accent) 22%, transparent);
+}
+
+.node__grip-dots {
+  flex: 1;
+  height: 100%;
+  /* Two rows of faint dots read as "grab here" without adding an icon. */
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--note-accent) 55%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 6px 6px;
+  background-position: center;
+  opacity: 0.5;
+}
+
+/* The note's close button sits inside the strip now, not over the corner. */
+.node--note .node__close {
+  position: static;
+}
+
+/* The activity line stays above the text as it streams in. */
+.reply__working + .reply__text {
+  margin-top: 4px;
+}
+
+/* ---------- relay ports and links ---------- */
+
+.node__port {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--node-accent);
+  background: var(--surface-base);
+  opacity: 0;
+  transition: opacity 120ms var(--ease), box-shadow 120ms var(--ease),
+    border-color 120ms var(--ease);
+}
+
+/* Ports stay hidden until the card is in play, so the board reads calmly. */
+.node:hover .node__port,
+.node--selected .node__port,
+.react-flow__node.connectingfrom .node__port,
+.react-flow__node.connectingto .node__port {
+  opacity: 1;
+}
+
+.node__port:hover {
+  /* Not transform: React Flow positions handles with one, and replacing it
+     would shift the port away from the card edge. */
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.react-flow__edge-path {
+  stroke: var(--line-strong);
+  stroke-width: 1.6;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--accent);
+}
+
+/* An animated link means an answer is on its way along it. */
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke: var(--accent);
+}
+
+.react-flow__connectionline .react-flow__connection-path {
+  stroke: var(--accent);
+  stroke-width: 1.6;
+}
+
+/* ---------- card toolbar ---------- */
+
+.node__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 6px 8px;
+  background: var(--surface-base);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.node__project,
+.node__access,
+.node__tab {
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: default;
+  transition: background 120ms var(--ease), color 120ms var(--ease),
+    border-color 120ms var(--ease);
+}
+
+.node__project {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 45%;
+  padding: 3px 7px;
+}
+
+.node__project:hover {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
+.node__project-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.node__access {
+  flex: none;
+  padding: 3px 7px;
+}
+
+/* Edit access is the loud one: it means the provider can change files. */
+.node__access--edit {
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+}
+
+.node__access--read {
+  color: var(--text-muted);
+}
+
+.node__access:disabled {
+  opacity: 0.4;
+}
+
+.node__tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  flex: none;
+}
+
+.node__tab {
+  padding: 3px 8px;
+}
+
+.node__tab--active {
+  border-color: var(--node-accent);
+  color: var(--text-primary);
+}
+
+.node__tab:disabled {
+  opacity: 0.4;
+}
+
+/* ---------- changes and diff ---------- */
+
+.changes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.changes__empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.changes__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.changes__file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: default;
+}
+
+.changes__file:hover {
+  background: var(--surface-overlay);
+}
+
+.changes__file--active {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
+.changes__code {
+  flex: none;
+  width: 20px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: center;
+}
+
+.changes__code--new {
+  color: var(--positive);
+}
+.changes__code--staged {
+  color: var(--accent);
+}
+.changes__code--dirty {
+  color: var(--warning);
+}
+
+.changes__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.patch {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-void);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  user-select: text;
+}
+
+.patch__line {
+  white-space: pre;
+}
+
+.patch__line--add {
+  color: var(--positive);
+  background: color-mix(in srgb, var(--positive) 10%, transparent);
+}
+
+.patch__line--remove {
+  color: var(--negative);
+  background: color-mix(in srgb, var(--negative) 10%, transparent);
+}
+
+.patch__line--hunk {
+  color: var(--accent);
+}
+
+.patch__line--meta {
+  color: var(--text-muted);
+}
+
+.patch__line--context {
+  color: var(--text-secondary);
+}
+
+/* ---------- board panel: pairing and link options ---------- */
+
+.boardpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.boardpanel__action,
+.linkpanel__choice,
+.linkpanel__remove,
+.testloop__choice,
+.testloop__save,
+.testloop__off {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: default;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease),
+    color 120ms var(--ease);
+}
+
+.boardpanel__action {
+  padding: 6px 10px;
+  box-shadow: var(--shadow-panel);
+}
+
+.boardpanel__action:hover {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
+.linkpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 230px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+}
+
+.linkpanel__title {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.linkpanel__row,
+.testloop__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.linkpanel__label,
+.testloop__label {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.linkpanel__choice,
+.testloop__choice {
+  padding: 3px 8px;
+}
+
+.linkpanel__choice--active,
+.testloop__choice--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.linkpanel__hint,
+.testloop__hint {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.linkpanel__remove {
+  padding: 5px 8px;
+}
+
+.linkpanel__remove:hover {
+  border-color: var(--negative);
+  color: var(--negative);
+}
+
+/* ---------- test loop ---------- */
+
+.testloop {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.testloop__input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  user-select: text;
+  cursor: text;
+}
+
+.testloop__input:focus {
+  border-color: var(--node-accent);
+}
+
+.testloop__save,
+.testloop__off {
+  padding: 5px 10px;
+}
+
+.testloop__save:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.testloop__off:hover {
+  border-color: var(--negative);
+  color: var(--negative);
+}
+
+/* Link labels sit on the edge itself. */
+.react-flow__edge-textbg {
+  fill: var(--surface-base);
+}
+
+.react-flow__edge-text {
+  fill: var(--text-muted);
+  font-size: 9px;
+}
+
+
+/* ---------- loop panel ---------- */
+
+.loop {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.loop__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.loop__empty {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.loop__step {
+  display: grid;
+  grid-template-columns: 14px 70px 1fr 46px 20px;
+  align-items: center;
+  gap: 4px;
+}
+
+.loop__index {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.loop__name,
+.loop__command,
+.loop__timeout {
+  padding: 4px 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  user-select: text;
+  cursor: text;
+  min-width: 0;
+}
+
+.loop__name:focus,
+.loop__command:focus,
+.loop__timeout:focus {
+  border-color: var(--node-accent);
+}
+
+.loop__drop {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  cursor: default;
+}
+
+.loop__drop:hover {
+  color: var(--negative);
+}
+
+.loop__add,
+.loop__choice,
+.loop__save,
+.loop__start,
+.loop__stop {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 9px;
+  cursor: default;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease),
+    color 120ms var(--ease);
+}
+
+.loop__add:hover,
+.loop__save:hover {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
+.loop__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.loop__label {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.loop__choice--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.loop__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.loop__hint {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.loop__start {
+  border-color: color-mix(in srgb, var(--positive) 45%, transparent);
+  color: var(--positive);
+}
+
+.loop__stop {
+  border-color: color-mix(in srgb, var(--negative) 45%, transparent);
+  color: var(--negative);
+}
+
+.loop__start:disabled,
+.loop__stop:disabled {
+  opacity: 0.4;
+}
+
+.loop__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--positive);
+}
+
+.loop__live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--positive);
+  animation: pulse 1.6s var(--ease) infinite;
+}
+
+.loop__runs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.loop__run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-overlay);
+  font-size: 10.5px;
+}
+
+.loop__run-status {
+  flex: none;
+  width: 34px;
+  font-weight: 650;
+}
+
+.loop__run--passed .loop__run-status {
+  color: var(--positive);
+}
+
+.loop__run--failed .loop__run-status {
+  color: var(--negative);
+}
+
+.loop__run-step {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.loop__run-code {
+  flex: none;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+
+/* ---------- bulk selection ---------- */
+
+.selectionbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+}
+
+.selectionbar__count {
+  padding-right: 4px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.selectionbar__close:hover {
+  border-color: var(--negative);
+  color: var(--negative);
+}
+
+/* The selection box drawn by a left drag on empty canvas. */
+.react-flow__selection {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+/* A selected node reads clearly even inside a large selection. */
+.react-flow__node.selected .node {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+
+/* ---------- easier linking ---------- */
+
+/* The visible port, with a much larger invisible hit area around it. */
+.node__port {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+.node__port::after {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+}
+
+/* Ports stay visible whenever the pointer is anywhere near the card, not only
+   exactly over them. */
+.node:hover .node__port {
+  opacity: 1;
+}
+
+/* Covers the whole card so a link can be dropped anywhere on it. It only
+   exists in the DOM while a connection is being drawn; see ConversationNode. */
+.node__dropzone {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: none;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  opacity: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Tell the user where a link can land while one is being drawn. */
+.react-flow__node.connectingto .node {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+
+.react-flow__node.connectingfrom .node__port {
+  opacity: 1;
+}
