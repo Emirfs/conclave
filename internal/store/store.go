@@ -160,15 +160,52 @@ func (s *Store) applyMigration(version int) error {
 	return tx.Commit()
 }
 
-func (s *Store) CreateChatTurn(ctx context.Context, request domain.ChatRequest) (int64, error) {
+// CreateConversationTurn records a prompt against a conversation and queues one
+// response per provider the conversation targets.
+func (s *Store) CreateConversationTurn(ctx context.Context, conversationID int64, prompt string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
+	providers, err := conversationProviders(ctx, tx, conversationID)
+	if err != nil {
+		return 0, err
+	}
+	if len(providers) == 0 {
+		return 0, fmt.Errorf("conversation %d has no providers", conversationID)
+	}
+	turnID, err := insertTurn(ctx, tx, conversationID, prompt, providers)
+	if err != nil {
+		return 0, err
+	}
+	return turnID, tx.Commit()
+}
+
+func conversationProviders(ctx context.Context, tx *sql.Tx, conversationID int64) ([]string, error) {
+	rows, err := tx.QueryContext(ctx,
+		"SELECT provider FROM conversation_providers WHERE conversation_id = ? ORDER BY position",
+		conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var providers []string
+	for rows.Next() {
+		var provider string
+		if err := rows.Scan(&provider); err != nil {
+			return nil, err
+		}
+		providers = append(providers, provider)
+	}
+	return providers, rows.Err()
+}
+
+func insertTurn(ctx context.Context, tx *sql.Tx, conversationID int64, prompt string, providers []string) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := tx.ExecContext(ctx,
-		"INSERT INTO chat_turns(prompt, created_at) VALUES(?, ?)", request.Prompt, now)
+		"INSERT INTO chat_turns(conversation_id, prompt, created_at) VALUES(?, ?, ?)",
+		conversationID, prompt, now)
 	if err != nil {
 		return 0, err
 	}
@@ -176,14 +213,14 @@ func (s *Store) CreateChatTurn(ctx context.Context, request domain.ChatRequest) 
 	if err != nil {
 		return 0, err
 	}
-	for _, name := range request.Providers {
+	for _, name := range providers {
 		if _, err := tx.ExecContext(ctx,
 			"INSERT INTO chat_responses(turn_id, provider, status, updated_at) VALUES(?, ?, ?, ?)",
 			turnID, name, domain.StatusQueued, now); err != nil {
 			return 0, err
 		}
 	}
-	return turnID, tx.Commit()
+	return turnID, nil
 }
 
 func (s *Store) ClaimChatResponse(ctx context.Context) (*domain.ChatJob, error) {
@@ -194,7 +231,7 @@ func (s *Store) ClaimChatResponse(ctx context.Context) (*domain.ChatJob, error) 
 	defer tx.Rollback()
 	var job domain.ChatJob
 	err = tx.QueryRowContext(ctx, `
-SELECT r.id, r.turn_id, r.provider, t.prompt
+SELECT r.id, r.turn_id, r.provider, t.prompt, COALESCE(t.conversation_id, 0)
 FROM chat_responses r JOIN chat_turns t ON t.id = r.turn_id
 WHERE r.status = ?
   AND NOT EXISTS (
@@ -202,7 +239,7 @@ WHERE r.status = ?
     WHERE active.provider = r.provider AND active.status = ?
   )
 ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
-		Scan(&job.ResponseID, &job.TurnID, &job.Provider, &job.Prompt)
+		Scan(&job.ResponseID, &job.TurnID, &job.Provider, &job.Prompt, &job.ConversationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -225,7 +262,7 @@ ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	job.Prompt, err = s.chatContext(ctx, job.Provider, job.TurnID)
+	job.Prompt, err = s.chatContext(ctx, job.ConversationID, job.Provider, job.TurnID)
 	if err != nil {
 		_ = s.RequeueChatResponse(context.WithoutCancel(ctx), job.ResponseID)
 		return nil, err
@@ -233,13 +270,16 @@ ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
 	return &job, nil
 }
 
-func (s *Store) chatContext(ctx context.Context, provider string, turnID int64) (string, error) {
+// chatContext rebuilds the exchange history this provider has seen inside this
+// conversation. Scoping by conversation is what keeps two solo conversations
+// with the same provider independent of each other.
+func (s *Store) chatContext(ctx context.Context, conversationID int64, provider string, turnID int64) (string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT t.prompt, CASE WHEN t.id = ? THEN '' ELSE r.content END
 FROM chat_turns t
 JOIN chat_responses r ON r.turn_id = t.id AND r.provider = ?
-WHERE t.id = ? OR (t.id < ? AND r.status = ?)
-ORDER BY t.id DESC LIMIT 8`, turnID, provider, turnID, turnID, domain.StatusPassed)
+WHERE t.conversation_id = ? AND (t.id = ? OR (t.id < ? AND r.status = ?))
+ORDER BY t.id DESC LIMIT 8`, turnID, provider, conversationID, turnID, turnID, domain.StatusPassed)
 	if err != nil {
 		return "", err
 	}
@@ -285,13 +325,16 @@ func (s *Store) RequeueChatResponse(ctx context.Context, id int64) error {
 	return err
 }
 
-func (s *Store) ListChatTurns(ctx context.Context, limit int) ([]domain.ChatTurn, error) {
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, prompt, created_at FROM chat_turns ORDER BY id DESC LIMIT ?", limit)
+// conversationTurns returns the most recent turns of one conversation in
+// chronological order, which is how a transcript is read.
+func (s *Store) conversationTurns(ctx context.Context, conversationID int64, limit int) ([]domain.ChatTurn, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, prompt, created_at FROM chat_turns
+WHERE conversation_id = ? ORDER BY id DESC LIMIT ?`, conversationID, limit)
 	if err != nil {
 		return nil, err
 	}
-	var turns []domain.ChatTurn
+	turns := []domain.ChatTurn{}
 	for rows.Next() {
 		var turn domain.ChatTurn
 		var created string
@@ -304,6 +347,10 @@ func (s *Store) ListChatTurns(ctx context.Context, limit int) ([]domain.ChatTurn
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
+	}
+	// The query walks backwards to honour LIMIT; the reader wants oldest first.
+	for left, right := 0, len(turns)-1; left < right; left, right = left+1, right-1 {
+		turns[left], turns[right] = turns[right], turns[left]
 	}
 	for index := range turns {
 		responses, err := s.chatResponses(ctx, turns[index].ID)
@@ -522,6 +569,9 @@ func (s *Store) stages(ctx context.Context, runID int64) ([]domain.Stage, error)
 
 // Default node geometry. Clients may resize afterwards; these only decide where
 // a freshly created node lands.
+// transcriptLimit caps how much history the canvas carries per conversation.
+const transcriptLimit = 24
+
 const (
 	conversationWidth  = 420
 	conversationHeight = 340
@@ -599,6 +649,13 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 	conversations, err := s.listConversations(ctx)
 	if err != nil {
 		return canvas, err
+	}
+	for index := range conversations {
+		turns, err := s.conversationTurns(ctx, conversations[index].ID, transcriptLimit)
+		if err != nil {
+			return canvas, err
+		}
+		conversations[index].Turns = turns
 	}
 	canvas.Conversations = conversations
 	nodes, err := s.listCanvasNodes(ctx)

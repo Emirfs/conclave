@@ -80,6 +80,19 @@ func (a *App) CreateNote(input domain.NewNote) (domain.CanvasNode, error) {
 	return client.CreateNote(ctx, input)
 }
 
+// SendTurn posts a message into a conversation. Every provider the
+// conversation targets answers it.
+func (a *App) SendTurn(conversationID int64, prompt string) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	_, err = client.CreateTurn(ctx, conversationID, prompt)
+	return err
+}
+
 // PatchCanvasNode persists a move, resize or text edit.
 func (a *App) PatchCanvasNode(patch domain.CanvasNodePatch) error {
 	client, err := a.client()

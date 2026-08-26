@@ -30,6 +30,65 @@ export namespace domain {
 	        this.body = source["body"];
 	    }
 	}
+	export class ChatResponse {
+	    id: number;
+	    turn_id: number;
+	    provider: string;
+	    status: string;
+	    content?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.turn_id = source["turn_id"];
+	        this.provider = source["provider"];
+	        this.status = source["status"];
+	        this.content = source["content"];
+	        this.error = source["error"];
+	    }
+	}
+	export class ChatTurn {
+	    id: number;
+	    prompt: string;
+	    // Go type: time
+	    created_at: any;
+	    responses: ChatResponse[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatTurn(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.prompt = source["prompt"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.responses = this.convertValues(source["responses"], ChatResponse);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class Conversation {
 	    id: number;
 	    title: string;
@@ -37,6 +96,7 @@ export namespace domain {
 	    providers: string[];
 	    // Go type: time
 	    created_at: any;
+	    turns: ChatTurn[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Conversation(source);
@@ -49,6 +109,7 @@ export namespace domain {
 	        this.kind = source["kind"];
 	        this.providers = source["providers"];
 	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.turns = this.convertValues(source["turns"], ChatTurn);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -128,65 +189,8 @@ export namespace domain {
 	        this.body = source["body"];
 	    }
 	}
-	export class ChatResponse {
-	    id: number;
-	    turn_id: number;
-	    provider: string;
-	    status: string;
-	    content?: string;
-	    error?: string;
 	
-	    static createFrom(source: any = {}) {
-	        return new ChatResponse(source);
-	    }
 	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.turn_id = source["turn_id"];
-	        this.provider = source["provider"];
-	        this.status = source["status"];
-	        this.content = source["content"];
-	        this.error = source["error"];
-	    }
-	}
-	export class ChatTurn {
-	    id: number;
-	    prompt: string;
-	    // Go type: time
-	    created_at: any;
-	    responses: ChatResponse[];
-	
-	    static createFrom(source: any = {}) {
-	        return new ChatTurn(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.prompt = source["prompt"];
-	        this.created_at = this.convertValues(source["created_at"], null);
-	        this.responses = this.convertValues(source["responses"], ChatResponse);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
 	
 	export class NewConversation {
 	    title: string;
@@ -317,7 +321,6 @@ export namespace domain {
 	    version: string;
 	    providers: Provider[];
 	    runs: Run[];
-	    turns: ChatTurn[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Snapshot(source);
@@ -329,7 +332,6 @@ export namespace domain {
 	        this.version = source["version"];
 	        this.providers = this.convertValues(source["providers"], Provider);
 	        this.runs = this.convertValues(source["runs"], Run);
-	        this.turns = this.convertValues(source["turns"], ChatTurn);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -203,6 +203,7 @@ func submitChat(arguments []string) error {
 	flags := flag.NewFlagSet("chat", flag.ContinueOnError)
 	address := flags.String("address", defaultAddress, "daemon address")
 	tokenFile := flags.String("token-file", statedir.TokenPath(), "daemon token file")
+	conversation := flags.Int64("conversation", 0, "post into an existing conversation instead of opening one")
 	var providers stageFlags
 	flags.Var(&providers, "provider", "provider name (repeatable; default: all available)")
 	if err := flags.Parse(arguments); err != nil {
@@ -217,25 +218,56 @@ func submitChat(arguments []string) error {
 		return err
 	}
 	client := api.NewClient("http://"+*address, token)
-	if len(providers) == 0 {
-		snapshot, err := client.Snapshot(context.Background())
+	ctx := context.Background()
+
+	conversationID := *conversation
+	if conversationID == 0 {
+		if len(providers) == 0 {
+			snapshot, err := client.Snapshot(ctx)
+			if err != nil {
+				return err
+			}
+			for _, item := range snapshot.Providers {
+				if item.Available && item.Kind != "memory" {
+					providers = append(providers, item.Name)
+				}
+			}
+		}
+		kind := domain.KindGroup
+		if len(providers) == 1 {
+			kind = domain.KindSolo
+		}
+		// A conversation started from the CLI still belongs on the canvas, so
+		// the desktop client shows it like any other.
+		created, err := client.CreateConversation(ctx, domain.NewConversation{
+			Title: conversationTitle(prompt), Kind: kind, Providers: providers,
+		})
 		if err != nil {
 			return err
 		}
-		for _, item := range snapshot.Providers {
-			if item.Available && item.Kind != "memory" {
-				providers = append(providers, item.Name)
-			}
-		}
+		conversationID = created.ID
+		fmt.Printf("conversation #%d opened for %s\n", created.ID, strings.Join(created.Providers, ", "))
 	}
-	id, err := client.CreateChatTurn(context.Background(), domain.ChatRequest{
-		Prompt: prompt, Providers: providers,
-	})
+	id, err := client.CreateTurn(ctx, conversationID, prompt)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("chat turn #%d queued for %s\n", id, strings.Join(providers, ", "))
+	fmt.Printf("turn #%d queued in conversation #%d\n", id, conversationID)
 	return nil
+}
+
+// conversationTitle keeps a readable label without carrying a whole prompt into
+// the node header.
+func conversationTitle(prompt string) string {
+	fields := strings.Fields(prompt)
+	if len(fields) > 6 {
+		fields = fields[:6]
+	}
+	title := strings.Join(fields, " ")
+	if runes := []rune(title); len(runes) > 60 {
+		title = string(runes[:60])
+	}
+	return title
 }
 
 func isLoopbackAddress(address string) bool {

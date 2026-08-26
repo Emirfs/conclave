@@ -7,6 +7,7 @@ import {
   CreateNote,
   DeleteCanvasNode,
   PatchCanvasNode,
+  SendTurn,
 } from '../../wailsjs/go/main/App'
 import { domain } from '../../wailsjs/go/models'
 
@@ -25,6 +26,9 @@ export type BoardNode = Node<ConversationNodeData | NoteNodeData>
 
 /** How long a drag or keystroke settles before it is written to the daemon. */
 const PATCH_DEBOUNCE = 350
+
+/** How often transcripts are refetched. Stage 3 replaces this with streaming. */
+const REFRESH_INTERVAL = 1200
 
 function toBoardNode(
   node: domain.CanvasNode,
@@ -65,7 +69,27 @@ export function useCanvas(connected: boolean) {
       const mapped = (canvas.nodes ?? [])
         .map((node) => toBoardNode(node, conversations))
         .filter((node): node is BoardNode => node !== null)
-      setNodes(mapped)
+      setNodes((current) => {
+        const local = new Map(current.map((node) => [node.id, node]))
+        return mapped.map((node) => {
+          const existing = local.get(node.id)
+          if (!existing) return node
+          // Server data wins for content, local state wins for geometry: a
+          // refresh landing mid-drag must not yank the node back.
+          return {
+            ...node,
+            position: existing.position,
+            width: existing.width,
+            height: existing.height,
+            selected: existing.selected,
+            dragging: existing.dragging,
+            data:
+              node.data.kind === 'note' && existing.data.kind === 'note'
+                ? existing.data
+                : node.data,
+          }
+        })
+      })
       setError(null)
       setLoaded(true)
     } catch (cause) {
@@ -74,7 +98,10 @@ export function useCanvas(connected: boolean) {
   }, [])
 
   useEffect(() => {
-    if (connected) void load()
+    if (!connected) return
+    void load()
+    const timer = window.setInterval(() => void load(), REFRESH_INTERVAL)
+    return () => window.clearInterval(timer)
   }, [connected, load])
 
   // Clear pending writes on unmount so a timer cannot fire into a dead tree.
@@ -153,8 +180,20 @@ export function useCanvas(connected: boolean) {
     [patch],
   )
 
+  const send = useCallback(
+    async (conversationID: number, prompt: string) => {
+      try {
+        await SendTurn(conversationID, prompt)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
   return useMemo(
-    () => ({ nodes, setNodes, error, loaded, load, patch, addConversation, addNote, remove, setNoteBody }),
-    [nodes, error, loaded, load, patch, addConversation, addNote, remove, setNoteBody],
+    () => ({ nodes, setNodes, error, loaded, load, patch, addConversation, addNote, remove, setNoteBody, send }),
+    [nodes, error, loaded, load, patch, addConversation, addNote, remove, setNoteBody, send],
   )
 }

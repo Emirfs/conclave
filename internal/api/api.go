@@ -37,7 +37,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/snapshot", s.snapshot)
 	mux.HandleFunc("POST /v1/runs", s.createRun)
-	mux.HandleFunc("POST /v1/chat/turns", s.createChatTurn)
+	mux.HandleFunc("POST /v1/canvas/conversations/{id}/turns", s.createTurn)
 	mux.HandleFunc("GET /v1/canvas", s.canvas)
 	mux.HandleFunc("POST /v1/canvas/conversations", s.createConversation)
 	mux.HandleFunc("POST /v1/canvas/notes", s.createNote)
@@ -72,18 +72,18 @@ func (s *Server) snapshot(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusInternalServerError, err)
 		return
 	}
-	turns, err := s.store.ListChatTurns(request.Context(), 20)
-	if err != nil {
-		writeError(response, http.StatusInternalServerError, err)
-		return
-	}
 	writeJSON(response, http.StatusOK, domain.Snapshot{
-		Healthy: true, Version: Version, Providers: provider.Discover(), Runs: runs, Turns: turns,
+		Healthy: true, Version: Version, Providers: provider.Discover(), Runs: runs,
 	})
 }
 
-func (s *Server) createChatTurn(response http.ResponseWriter, request *http.Request) {
-	var input domain.ChatRequest
+func (s *Server) createTurn(response http.ResponseWriter, request *http.Request) {
+	conversationID, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || conversationID <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	var input domain.TurnRequest
 	if !decodeJSON(response, request, 64<<10, &input) {
 		return
 	}
@@ -92,15 +92,9 @@ func (s *Server) createChatTurn(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusBadRequest, errors.New("prompt requires 1 to 20000 characters"))
 		return
 	}
-	selected, err := selectProviders(input.Providers)
+	id, err := s.store.CreateConversationTurn(request.Context(), conversationID, input.Prompt)
 	if err != nil {
 		writeError(response, http.StatusBadRequest, err)
-		return
-	}
-	input.Providers = selected
-	id, err := s.store.CreateChatTurn(request.Context(), input)
-	if err != nil {
-		writeError(response, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(response, http.StatusAccepted, map[string]int64{"id": id})
@@ -326,9 +320,10 @@ func (c *Client) CreateRun(ctx context.Context, input domain.RunRequest) (int64,
 	return result["id"], err
 }
 
-func (c *Client) CreateChatTurn(ctx context.Context, input domain.ChatRequest) (int64, error) {
+func (c *Client) CreateTurn(ctx context.Context, conversationID int64, prompt string) (int64, error) {
 	var result map[string]int64
-	err := c.do(ctx, http.MethodPost, "/v1/chat/turns", input, &result, http.StatusAccepted)
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/turns"
+	err := c.do(ctx, http.MethodPost, path, domain.TurnRequest{Prompt: prompt}, &result, http.StatusAccepted)
 	return result["id"], err
 }
 

@@ -14,4 +14,6 @@ export function EnsureDaemon():Promise<void>;
 
 export function PatchCanvasNode(arg1:domain.CanvasNodePatch):Promise<void>;
 
+export function SendTurn(arg1:number,arg2:string):Promise<void>;
+
 export function Snapshot():Promise<domain.Snapshot>;

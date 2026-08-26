@@ -54,12 +54,12 @@ type Snapshot struct {
 	Version   string     `json:"version"`
 	Providers []Provider `json:"providers"`
 	Runs      []Run      `json:"runs"`
-	Turns     []ChatTurn `json:"turns"`
 }
 
-type ChatRequest struct {
-	Prompt    string   `json:"prompt"`
-	Providers []string `json:"providers"`
+// TurnRequest posts a message into an existing conversation. The providers are
+// the conversation's own, so a client cannot widen the fan-out per message.
+type TurnRequest struct {
+	Prompt string `json:"prompt"`
 }
 
 type ChatResponse struct {
@@ -79,10 +79,11 @@ type ChatTurn struct {
 }
 
 type ChatJob struct {
-	ResponseID int64
-	TurnID     int64
-	Provider   string
-	Prompt     string
+	ResponseID     int64
+	TurnID         int64
+	ConversationID int64
+	Provider       string
+	Prompt         string
 }
 
 // Conversation kinds. A solo conversation talks to exactly one provider; a
@@ -102,8 +103,9 @@ type Conversation struct {
 	ID        int64     `json:"id"`
 	Title     string    `json:"title"`
 	Kind      string    `json:"kind"`
-	Providers []string  `json:"providers"`
-	CreatedAt time.Time `json:"created_at"`
+	Providers []string   `json:"providers"`
+	CreatedAt time.Time  `json:"created_at"`
+	Turns     []ChatTurn `json:"turns"`
 }
 
 // CanvasNode is presentation state the daemon owns so a layout survives a

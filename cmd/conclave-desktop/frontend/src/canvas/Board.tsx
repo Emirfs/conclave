@@ -30,7 +30,7 @@ export function Board({ canvas }: { canvas: BoardHandle }) {
 }
 
 function BoardSurface({ canvas }: { canvas: BoardHandle }) {
-  const { nodes, setNodes, patch, remove, setNoteBody } = canvas
+  const { nodes, setNodes, patch, remove, setNoteBody, send } = canvas
   const flow = useReactFlow()
 
   // Notes need a callback in their data so the textarea can report edits, but
@@ -40,9 +40,9 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
       nodes.map((node) =>
         node.data.kind === 'note'
           ? { ...node, data: { ...node.data, onBodyChange: setNoteBody } }
-          : node,
+          : { ...node, data: { ...node.data, onSend: send } },
       ),
-    [nodes, setNoteBody],
+    [nodes, setNoteBody, send],
   )
 
   const onNodesChange = useCallback(
