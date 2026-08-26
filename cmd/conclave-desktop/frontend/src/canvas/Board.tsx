@@ -158,7 +158,7 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
                 void pair(selectedCards[0].id, selectedCards[1].id, 'dialogue', 3)
               }
             >
-              Seçili iki kartı eşleştir
+              Seçili iki kartı eşleştir (karşılıklı)
             </button>
           )}
           {selectedEdge && (

@@ -1039,10 +1039,31 @@ ON CONFLICT(source_id, target_id) DO UPDATE SET
 			return domain.CanvasLink{}, err
 		}
 	}
+	// "Dialogue" only means anything if the other card can answer back, so the
+	// return link is created with it rather than left for the user to notice.
+	if options.Mode == domain.LinkDialogue {
+		if err := s.ensureReverseLink(ctx, sourceID, targetID, options); err != nil {
+			return domain.CanvasLink{}, err
+		}
+	}
 	return domain.CanvasLink{
 		ID: id, SourceID: sourceID, TargetID: targetID,
 		Mode: options.Mode, MaxRounds: options.MaxRounds,
 	}, nil
+}
+
+// ensureReverseLink adds target -> source when it is missing, leaving an
+// existing reverse link alone apart from matching its mode and budget.
+func (s *Store) ensureReverseLink(ctx context.Context, sourceID, targetID int64, options domain.LinkOptions) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds)
+VALUES(?, ?, ?, ?, ?)
+ON CONFLICT(source_id, target_id) DO UPDATE SET
+    mode = excluded.mode,
+    max_rounds = excluded.max_rounds`,
+		targetID, sourceID, time.Now().UTC().Format(time.RFC3339Nano),
+		options.Mode, options.MaxRounds)
+	return err
 }
 
 // PairNodes links two cards in both directions so they answer each other. The
@@ -1062,18 +1083,24 @@ func (s *Store) PairNodes(ctx context.Context, firstID, secondID int64, options 
 // UpdateLink changes how an existing link works.
 func (s *Store) UpdateLink(ctx context.Context, id int64, options domain.LinkOptions) error {
 	options = options.Normalised()
-	result, err := s.db.ExecContext(ctx,
+	var sourceID, targetID int64
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT source_id, target_id FROM canvas_links WHERE id = ?", id).
+		Scan(&sourceID, &targetID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return sql.ErrNoRows
+		}
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx,
 		"UPDATE canvas_links SET mode = ?, max_rounds = ? WHERE id = ?",
-		options.Mode, options.MaxRounds, id)
-	if err != nil {
+		options.Mode, options.MaxRounds, id); err != nil {
 		return err
 	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed == 0 {
-		return sql.ErrNoRows
+	// Choosing "dialogue" on a one-way link is a request for a conversation,
+	// which needs the return link too.
+	if options.Mode == domain.LinkDialogue {
+		return s.ensureReverseLink(ctx, sourceID, targetID, options)
 	}
 	return nil
 }
@@ -1158,9 +1185,11 @@ func (s *Store) RelayPayload(ctx context.Context, turnID int64) (string, bool, e
 func (s *Store) RelayTurn(ctx context.Context, turnID int64) (int, error) {
 	var conversationID int64
 	var depth int
-	err := s.db.QueryRowContext(ctx,
-		"SELECT COALESCE(conversation_id, 0), relay_depth FROM chat_turns WHERE id = ?", turnID).
-		Scan(&conversationID, &depth)
+	var sourceTitle string
+	err := s.db.QueryRowContext(ctx, `
+SELECT COALESCE(t.conversation_id, 0), t.relay_depth, COALESCE(c.title, '')
+FROM chat_turns t LEFT JOIN conversations c ON c.id = t.conversation_id
+WHERE t.id = ?`, turnID).Scan(&conversationID, &depth, &sourceTitle)
 	if err != nil {
 		return 0, err
 	}
@@ -1205,7 +1234,7 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 		if depth >= target.maxRounds {
 			continue
 		}
-		prompt := framePayload(target.mode, payload)
+		prompt := framePayload(target.mode, sourceTitle, payload)
 		if err := s.createRelayTurn(ctx, target.conversation, prompt, depth+1); err != nil {
 			return delivered, err
 		}
@@ -1216,13 +1245,20 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 
 // framePayload presents a relayed answer the way the link's mode intends. The
 // wording is what turns a handoff into a conversation or a review.
-func framePayload(mode, payload string) string {
+func framePayload(mode, sourceTitle, payload string) string {
+	// Naming the speaker is what makes the two cards aware of each other
+	// instead of receiving anonymous text.
+	speaker := sourceTitle
+	if speaker == "" {
+		speaker = "Bağlı olduğun kart"
+	}
 	switch mode {
 	case domain.LinkDialogue:
-		return "Bağlı olduğun diğer kart şunu söyledi. Doğrudan ona cevap ver:\n\n" + payload
+		return speaker + " kartı sana şunu söyledi. Doğrudan ona cevap ver ve " +
+			"konuşmayı sürdürecek bir şey ekle:\n\n" + payload
 	case domain.LinkReview:
-		return "Aşağıdaki çıktıyı incele. Hata, eksik veya risk görüyorsan açıkça yaz; " +
-			"sorun yoksa kısaca uygun olduğunu söyle.\n\n" + payload
+		return speaker + " kartının çıktısı aşağıda. İncele; hata, eksik veya risk " +
+			"görüyorsan açıkça yaz, sorun yoksa kısaca uygun olduğunu söyle.\n\n" + payload
 	default:
 		return payload
 	}

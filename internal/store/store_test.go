@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -761,3 +762,123 @@ func TestLinkOptionsAreClamped(t *testing.T) {
 	}
 }
 
+
+
+// Choosing dialogue must make the link mutual, otherwise "karşılıklı" is a
+// one-way handoff that ends after a single hop.
+func TestDialogueLinkCreatesTheReturnLink(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+	firstNode := nodeOf(t, canvas, first.ID)
+	secondNode := nodeOf(t, canvas, second.ID)
+
+	if _, err := store.CreateLink(ctx, firstNode, secondNode,
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 3}); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	if len(after.Links) != 2 {
+		t.Fatalf("dialogue produced %d links, want 2", len(after.Links))
+	}
+	seen := map[string]bool{}
+	for _, link := range after.Links {
+		seen[fmt.Sprintf("%d->%d", link.SourceID, link.TargetID)] = true
+	}
+	forward := fmt.Sprintf("%d->%d", firstNode, secondNode)
+	backward := fmt.Sprintf("%d->%d", secondNode, firstNode)
+	if !seen[forward] || !seen[backward] {
+		t.Fatalf("links = %v", seen)
+	}
+}
+
+// Switching an existing one-way link to dialogue must do the same.
+func TestSwitchingToDialogueAddsTheReturnLink(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+	firstNode := nodeOf(t, canvas, first.ID)
+	secondNode := nodeOf(t, canvas, second.ID)
+
+	link, err := store.CreateLink(ctx, firstNode, secondNode, domain.LinkOptions{})
+	if err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	before, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	if len(before.Links) != 1 {
+		t.Fatalf("a relay link produced %d links", len(before.Links))
+	}
+
+	if err := store.UpdateLink(ctx, link.ID,
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 3}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	if len(after.Links) != 2 {
+		t.Fatalf("switching to dialogue produced %d links, want 2", len(after.Links))
+	}
+}
+
+// Relay stays one-way: it is a handoff, not a conversation.
+func TestRelayLinkStaysOneWay(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkRelay, MaxRounds: 3}); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	if len(after.Links) != 1 {
+		t.Fatalf("relay produced %d links, want 1", len(after.Links))
+	}
+}
+
+// The receiving card must be told which card is speaking to it.
+func TestRelayedPromptNamesTheSpeakingCard(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+	if _, err := store.CreateLink(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 3}); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "soru"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, "cevabim", ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if _, err := store.RelayTurn(ctx, job.TurnID); err != nil {
+		t.Fatalf("relay: %v", err)
+	}
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	for _, item := range after.Conversations {
+		if item.ID != second.ID || len(item.Turns) == 0 {
+			continue
+		}
+		// "A" is the title linkedPair gives the first card.
+		if !strings.Contains(item.Turns[0].Prompt, first.Title) {
+			t.Fatalf("prompt does not name the speaker %q: %q", first.Title, item.Turns[0].Prompt)
+		}
+	}
+}

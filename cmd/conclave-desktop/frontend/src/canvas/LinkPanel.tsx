@@ -56,10 +56,10 @@ export function LinkPanel({
 function describeMode(mode: string): string {
   switch (mode) {
     case 'dialogue':
-      return 'İki kart birbirine cevap verir; tur sayısı kadar sürer.'
+      return 'İki kart birbirine cevap verir. Ters yön otomatik kurulur; tur sayısı kadar sürer.'
     case 'review':
       return 'Hedef kart gelen çıktıyı inceler ve eksikleri söyler.'
     default:
-      return 'Kaynağın cevabı hedefe olduğu gibi aktarılır.'
+      return 'Tek yönlü devir: kaynağın cevabı hedefe olduğu gibi geçer.'
   }
 }
