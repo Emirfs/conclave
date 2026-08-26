@@ -17,14 +17,12 @@ import (
 	"syscall"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/gofrs/flock"
 
 	"github.com/Emirfs/conclave/internal/api"
 	"github.com/Emirfs/conclave/internal/daemon"
 	"github.com/Emirfs/conclave/internal/domain"
 	"github.com/Emirfs/conclave/internal/store"
-	"github.com/Emirfs/conclave/internal/tui"
 )
 
 const defaultAddress = "127.0.0.1:7331"
@@ -37,7 +35,7 @@ func main() {
 }
 
 func run(arguments []string) error {
-	command := "tui"
+	command := "status"
 	if len(arguments) > 0 {
 		command, arguments = arguments[0], arguments[1:]
 	}
@@ -50,8 +48,6 @@ func run(arguments []string) error {
 		return submitRun(arguments)
 	case "chat":
 		return submitChat(arguments)
-	case "tui":
-		return runTUI(arguments)
 	case "help", "-h", "--help":
 		usage()
 		return nil
@@ -243,22 +239,6 @@ func submitChat(arguments []string) error {
 	return nil
 }
 
-func runTUI(arguments []string) error {
-	flags := flag.NewFlagSet("tui", flag.ContinueOnError)
-	address := flags.String("address", defaultAddress, "daemon address")
-	tokenFile := flags.String("token-file", defaultTokenFile(), "daemon token file")
-	if err := flags.Parse(arguments); err != nil {
-		return err
-	}
-	token, err := readToken(*tokenFile)
-	if err != nil {
-		return err
-	}
-	program := tea.NewProgram(tui.New(api.NewClient("http://"+*address, token)), tea.WithAltScreen())
-	_, err = program.Run()
-	return err
-}
-
 func defaultStateDirectory() string {
 	if directory := os.Getenv("LOCALAPPDATA"); directory != "" {
 		return filepath.Join(directory, "conclave")
@@ -320,5 +300,5 @@ func isLoopbackAddress(address string) bool {
 }
 
 func usage() {
-	fmt.Println("conclave [tui|daemon|status|run|chat] [options]")
+	fmt.Println("conclave [status|daemon|run|chat] [options]")
 }
