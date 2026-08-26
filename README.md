@@ -1,37 +1,124 @@
 # Conclave
 
-Conclave is a daemon-first local orchestrator for AI providers and test pipelines. It keeps work running when a client disconnects, exposes the same local API to a desktop canvas client and headless commands, and integrates with Mnemo for project-scoped shared memory.
+**English** | [Türkçe](README.tr.md)
 
-## Status
+Conclave is a local, daemon-first workspace for coordinating multiple AI coding providers and deterministic command pipelines. Its desktop client turns conversations, notes, projects, and provider hand-offs into a persistent infinite canvas, while the daemon keeps work running independently of the UI.
 
-The initial vertical slice provides:
+![Conclave system architecture](assets/conclave-architecture-en.svg)
 
-- a persistent local daemon with bounded concurrent workers;
-- ordered test pipelines stored in SQLite;
-- direct process execution without an intermediate shell;
-- discovery of Claude, Codex, Antigravity, Ollama, and Mnemo CLIs;
-- a JSON headless client and a desktop canvas client;
-- conversations as draggable nodes on an infinite canvas, with sticky notes;
-- solo conversations per provider and group conversations that fan one message out to all of them;
-- a provider-neutral boundary for future subscription CLI and API adapters.
+## Why Conclave?
 
-Provider chat runs the official subscription CLIs in isolated temporary directories with write tools
-disabled. Conversation history is currently replayed into each prompt; real provider sessions
-(`claude --resume`, `codex exec resume`, `agy --conversation`) are the next step. Credentials and provider
-session data are not persisted in SQLite or Mnemo. Mnemo read/write integration is intentionally not
-enabled yet.
+AI coding CLIs are useful in isolation, but coordinating them usually means juggling terminals, repeating context, and losing running work when a client closes. Conclave provides one local control plane that:
+
+- discovers installed Claude Code, Codex, Antigravity, Ollama, and Mnemo CLIs;
+- opens solo or multi-provider conversations on a visual canvas;
+- streams provider output and current activity into conversation cards;
+- preserves provider sessions so later turns continue the same upstream conversation;
+- assigns a project directory and `read` or `edit` access independently to each card;
+- shows Git working-tree changes and unified diffs inside project cards;
+- relays, discusses, or reviews completed answers through configurable canvas links;
+- pairs two cards for a bounded provider-to-provider conversation;
+- runs an optional command after each turn and feeds failures back to the same card;
+- queues ordered build and test pipelines that survive client disconnection;
+- persists conversations, canvas geometry, links, provider quota, sessions, and pipeline state in SQLite.
+
+Conclave does not replace provider CLIs or their subscriptions. It runs the official local executables already installed and authenticated on the machine.
+
+## How It Works
+
+The daemon is the owner of runtime and persisted state. Both the terminal command and Wails desktop application are clients of the same versioned local API.
+
+1. A client creates a conversation turn or pipeline through `127.0.0.1:7331`.
+2. The API validates the bearer token and writes the job to SQLite.
+3. A bounded daemon worker claims the queued job.
+4. The provider adapter builds a direct argument array for the selected CLI. No intermediate shell evaluates it.
+5. The daemon runs the command in the card's project or an isolated temporary directory.
+6. Structured output is decoded, throttled, and persisted while the provider is still working.
+7. Every client sees the same durable result; a linked card can receive the completed answer as its next turn.
+
+![Conclave message flow](assets/conclave-workflow-en.svg)
+
+Closing the desktop window does not stop the daemon. Interrupted queued or running work is recovered from SQLite when the daemon starts again.
+
+## Desktop Canvas
+
+The Wails desktop client uses React Flow as a persistent infinite board.
+
+- Click an available provider to create a solo conversation card.
+- Use **Group conversation** to send each turn to up to four available providers.
+- Double-click empty canvas space to create a note.
+- Drag and resize cards; geometry is stored by the daemon.
+- Select a project directory per card, then toggle between `read` and `edit` access.
+- Open the **Changes** tab to inspect Git status and a file's unified diff.
+- Connect the right port of one conversation card to the left port of another to relay completed answers.
+- Select exactly two conversation cards to pair them in both directions.
+- Select a connection to choose `relay`, `dialogue`, or `review` mode and a round limit.
+- Use a card's **Test** tab to run a command after each turn. A failing exit code and its output become the card's next message, up to the configured retry limit.
+- Press `Enter` to send a message and `Shift+Enter` to insert a newline.
+
+A card without a project runs in a disposable scratch directory. In `read` mode the provider cannot modify the project. In `edit` mode Conclave uses the provider's non-interactive write-capable mode, so it may edit files and run commands without asking for confirmation.
+
+### Card links
+
+Connections turn the canvas into a workflow rather than a collection of independent chats.
+
+| Mode | Behavior |
+|---|---|
+| `relay` | Sends the source answer to the target unchanged |
+| `dialogue` | Presents the source as another participant and asks the target to answer it |
+| `review` | Asks the target to critique the source output for errors, omissions, and risks |
+
+Each link has its own bounded round budget. Pairing creates both directions at once, so two providers can discuss or review each other's work without creating an unbounded loop.
+
+### Test feedback loop
+
+For a project-backed card, the **Test** tab can configure a direct command such as `go test ./...`. Conclave runs it after a completed turn. Success ends the loop; failure output is posted back to the same conversation so the provider can fix the project and try again. The retry count is explicitly bounded, and the command is parsed into arguments without shell expansion.
+
+## Supported Integrations
+
+| Integration | Executable | Role | Streaming | Session resume |
+|---|---|---|---|---|
+| Claude Code | `claude` | Subscription CLI | Yes | Yes |
+| OpenAI Codex | `codex` | Subscription CLI | Yes | Yes |
+| Antigravity | `agy` | Subscription CLI | Yes | Yes |
+| Ollama | `ollama` | Local models | Final output | No |
+| Mnemo | `mnemo` | Shared memory discovery | Not applicable | Not applicable |
+
+Set `CONCLAVE_OLLAMA_MODEL` to choose the default Ollama model. It defaults to `qwen3:4b`.
+
+Mnemo is currently discovered and displayed, but semantic read/write integration is intentionally not enabled yet. Provider credentials are never copied into SQLite or Mnemo.
 
 ## Requirements
 
-- Go 1.26 or newer
-- Wails v2 and Bun, to build the desktop client
-- Optional provider CLIs: `claude`, `codex`, `agy`, `ollama`
-- Optional shared memory CLI: `mnemo`
+- Go `1.26.7` or newer
+- Wails v2 CLI
+- Bun
+- At least one optional chat provider CLI: `claude`, `codex`, `agy`, or `ollama`
+- `mnemo`, optional and currently discovery-only
+
+Provider CLIs must already be installed, available on `PATH`, and authenticated using their own normal setup.
 
 ## Build
 
+Build all Go packages:
+
 ```powershell
 go build ./...
+```
+
+Build the frontend separately:
+
+```powershell
+Set-Location cmd/conclave-desktop/frontend
+bun install
+bun run build
+```
+
+Build the desktop executable:
+
+```powershell
+Set-Location cmd/conclave-desktop
+wails build
 ```
 
 ## Run
@@ -42,38 +129,46 @@ Start the daemon:
 go run ./cmd/conclave daemon
 ```
 
-Open the desktop client in another terminal:
+Start the desktop client from another terminal:
 
 ```powershell
-cd cmd/conclave-desktop
+Set-Location cmd/conclave-desktop
 wails dev
 ```
 
-The client draws an infinite canvas. Click a provider in the left rail to open a solo conversation with
-it, use `Grup konuşması` to open one that every available provider answers, and double-click empty
-canvas to drop a sticky note. Nodes are dragged and resized freely; positions live in the daemon, so
-they survive a restart.
+The packaged desktop client can start the daemon automatically when a `conclave` executable is next to it or available on `PATH`.
 
-Queue a message without the desktop client. This opens a conversation, which then appears on the
-canvas like any other:
+## Command-Line Usage
+
+Check daemon health, discovered providers, and recent pipelines:
 
 ```powershell
-go run ./cmd/conclave chat --provider claude --provider openai "Compare these two approaches"
-```
-
-Continue an existing conversation:
-
-```powershell
-go run ./cmd/conclave chat --conversation 12 "And which one would you pick?"
-```
-
-Inspect daemon state from the terminal:
-
-```powershell
+go run ./cmd/conclave status
 go run ./cmd/conclave status --json
 ```
 
-Submit a pipeline. Each `--stage` is `name=executable,arg,...`; commands are executed directly, not through a shell.
+Open a conversation and queue its first turn:
+
+```powershell
+go run ./cmd/conclave chat --provider claude "Review this repository"
+```
+
+Ask multiple providers in parallel:
+
+```powershell
+go run ./cmd/conclave chat `
+  --provider claude `
+  --provider openai `
+  "Compare the current architecture"
+```
+
+Continue an existing Conclave conversation:
+
+```powershell
+go run ./cmd/conclave chat --conversation 12 "Which approach would you choose?"
+```
+
+Queue an ordered pipeline. Stages stop at the first failure:
 
 ```powershell
 go run ./cmd/conclave run --project . `
@@ -81,11 +176,67 @@ go run ./cmd/conclave run --project . `
   --stage "test=go,test,./..."
 ```
 
-Build a single desktop executable:
+Useful daemon options:
 
-```powershell
-cd cmd/conclave-desktop
-wails build
+```text
+--listen 127.0.0.1:7331   Local API address
+--workers 2               Maximum concurrent pipelines
+--chat-workers 4          Maximum concurrent provider jobs
+--stage-timeout 20m       Timeout for each provider or pipeline command
+--state-dir <path>        Override the state directory
 ```
 
-State is stored under `%LOCALAPPDATA%\conclave` on Windows and the platform user config directory elsewhere. The local HTTP API listens on `127.0.0.1:7331`, requires the generated state-directory bearer token, and rejects browser-origin requests.
+## State and Recovery
+
+On Windows, state is stored under `%LOCALAPPDATA%\conclave`. Other platforms use the operating system's user configuration directory.
+
+| File | Purpose |
+|---|---|
+| `state.sqlite` | Conversations, messages, canvas, links, sessions, quota, and pipelines |
+| `token` | Generated local API bearer token |
+| `daemon.lock` | Prevents two daemons from owning the same state directory |
+
+SQLite migrations are append-only and tracked with `PRAGMA user_version`. Jobs left in a transient state are made recoverable during startup.
+
+## Security Model
+
+- The API only accepts `127.0.0.1` or `localhost` listeners.
+- Every request requires the generated bearer token.
+- Requests carrying a browser `Origin` header are rejected.
+- The React frontend never receives the token or calls HTTP directly; it invokes Go through Wails bindings.
+- Commands are executed directly as argument arrays, without shell expansion.
+- Sensitive environment variables containing token, secret, password, credential, or API-key names are removed from provider processes.
+- Client-supplied paths used for Git inspection reject absolute paths and parent traversal.
+- Provider credentials are not stored in SQLite, prompts, logs, or Mnemo.
+
+`edit` access is intentionally powerful. Use `read` unless a card should be allowed to modify its selected project.
+
+## Project Layout
+
+| Path | Responsibility |
+|---|---|
+| `cmd/conclave/` | CLI entry point and daemon launcher |
+| `cmd/conclave-desktop/` | Wails host and React/TypeScript canvas |
+| `internal/api/` | Authenticated local HTTP API and Go client |
+| `internal/daemon/` | Pipeline and provider worker lifecycle |
+| `internal/domain/` | Shared transport and domain types |
+| `internal/provider/` | CLI discovery, invocation, and stream decoding |
+| `internal/statedir/` | State paths and token management |
+| `internal/store/` | SQLite persistence, migrations, and recovery |
+| `internal/vcs/` | Read-only Git status and diff inspection |
+
+## Development
+
+```powershell
+go build ./...
+go test ./...
+```
+
+Frontend production check:
+
+```powershell
+Set-Location cmd/conclave-desktop/frontend
+bun run build
+```
+
+Conclave is currently an early local-first system. Its API version is `0.1.0`, and no stability guarantee is made for external API consumers yet.
