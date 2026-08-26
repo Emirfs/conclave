@@ -95,17 +95,20 @@ func ChatInvocation(request Request) (Invocation, error) {
 		return Invocation{Command: command, Stdin: request.Prompt, Stream: StreamClaude}, nil
 
 	case "openai":
-		// "exec" starts a session; "exec resume <id>" continues one. The id is a
-		// positional argument, so it has to come before the options.
-		command := []string{path, "exec"}
-		if request.SessionID != "" {
-			command = append(command, "resume", request.SessionID)
-		}
-		command = append(command, "--json", "--skip-git-repo-check", "--color", "never")
+		sandbox := "read-only"
 		if edit {
-			command = append(command, "--sandbox", "workspace-write")
+			sandbox = "workspace-write"
+		}
+		// "exec" and "exec resume" do not take the same options: resume has
+		// neither --color nor --sandbox, and rejects them outright. The sandbox
+		// is set through a config override there instead.
+		var command []string
+		if request.SessionID != "" {
+			command = []string{path, "exec", "resume", request.SessionID,
+				"--json", "--skip-git-repo-check", "-c", "sandbox_mode=" + sandbox}
 		} else {
-			command = append(command, "--sandbox", "read-only")
+			command = []string{path, "exec",
+				"--json", "--skip-git-repo-check", "--color", "never", "--sandbox", sandbox}
 		}
 		if request.Model != "" {
 			command = append(command, "--model", request.Model)
