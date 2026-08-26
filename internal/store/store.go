@@ -35,10 +35,12 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-func (s *Store) init() error {
-	_, err := s.db.Exec(`
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
+// migrations are applied in order and tracked with PRAGMA user_version, so an
+// existing database is upgraded in place rather than recreated. Never edit an
+// applied migration; append a new one instead.
+var migrations = []string{
+	// 1: pipelines and the first, single-stream chat model.
+	`
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project TEXT NOT NULL,
@@ -74,11 +76,88 @@ CREATE TABLE IF NOT EXISTS chat_responses (
     UNIQUE(turn_id, provider)
 );
 CREATE INDEX IF NOT EXISTS chat_responses_status_idx ON chat_responses(status, id);
+`,
+	// 2: conversations own their turns, and the canvas owns node geometry.
+	`
+CREATE TABLE conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE conversation_providers (
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (conversation_id, provider)
+);
+CREATE TABLE canvas_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    width REAL NOT NULL,
+    height REAL NOT NULL,
+    z INTEGER NOT NULL DEFAULT 0,
+    color TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX canvas_nodes_conversation_idx ON canvas_nodes(conversation_id);
+ALTER TABLE chat_turns ADD COLUMN conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE;
+CREATE INDEX chat_turns_conversation_idx ON chat_turns(conversation_id, id);
+`,
+}
+
+func (s *Store) init() error {
+	if _, err := s.db.Exec(`PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;`); err != nil {
+		return err
+	}
+	if err := s.migrate(); err != nil {
+		return err
+	}
+	// Anything the previous process left mid-flight is owned by nobody now, so
+	// it goes back on the queue.
+	_, err := s.db.Exec(`
 UPDATE stages SET status = 'queued' WHERE status = 'running';
 UPDATE runs SET status = 'queued', updated_at = CURRENT_TIMESTAMP WHERE status = 'running';
 UPDATE chat_responses SET status = 'queued', updated_at = CURRENT_TIMESTAMP WHERE status = 'running';
 `)
 	return err
+}
+
+func (s *Store) migrate() error {
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return err
+	}
+	if version > len(migrations) {
+		return fmt.Errorf("database schema version %d is newer than this build supports (%d)", version, len(migrations))
+	}
+	for index := version; index < len(migrations); index++ {
+		if err := s.applyMigration(index + 1); err != nil {
+			return fmt.Errorf("migration %d: %w", index+1, err)
+		}
+	}
+	return nil
+}
+
+// applyMigration runs one migration and its version bump atomically. PRAGMA
+// user_version does not accept a bound parameter, hence the formatted integer.
+func (s *Store) applyMigration(version int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(migrations[version-1]); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) CreateChatTurn(ctx context.Context, request domain.ChatRequest) (int64, error) {
@@ -439,4 +518,238 @@ func (s *Store) stages(ctx context.Context, runID int64) ([]domain.Stage, error)
 		stages = append(stages, stage)
 	}
 	return stages, rows.Err()
+}
+
+// Default node geometry. Clients may resize afterwards; these only decide where
+// a freshly created node lands.
+const (
+	conversationWidth  = 420
+	conversationHeight = 340
+	noteWidth          = 240
+	noteHeight         = 180
+)
+
+// CreateConversation stores a conversation together with the canvas node that
+// represents it, so the board never holds a conversation with no node.
+func (s *Store) CreateConversation(ctx context.Context, request domain.NewConversation) (domain.Conversation, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := tx.ExecContext(ctx,
+		"INSERT INTO conversations(title, kind, created_at) VALUES(?, ?, ?)",
+		request.Title, request.Kind, now)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	for position, provider := range request.Providers {
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO conversation_providers(conversation_id, provider, position) VALUES(?, ?, ?)",
+			id, provider, position); err != nil {
+			return domain.Conversation{}, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO canvas_nodes(kind, conversation_id, x, y, width, height, z, updated_at)
+VALUES(?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), ?)`,
+		domain.NodeConversation, id, request.X, request.Y,
+		conversationWidth, conversationHeight, now); err != nil {
+		return domain.Conversation{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Conversation{}, err
+	}
+	created, _ := time.Parse(time.RFC3339Nano, now)
+	return domain.Conversation{
+		ID: id, Title: request.Title, Kind: request.Kind,
+		Providers: request.Providers, CreatedAt: created,
+	}, nil
+}
+
+// CreateNote adds a standalone sticky note to the canvas.
+func (s *Store) CreateNote(ctx context.Context, request domain.NewNote) (domain.CanvasNode, error) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := s.db.ExecContext(ctx, `
+INSERT INTO canvas_nodes(kind, x, y, width, height, z, color, body, updated_at)
+VALUES(?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), ?, ?, ?)`,
+		domain.NodeNote, request.X, request.Y, noteWidth, noteHeight,
+		request.Color, request.Body, now)
+	if err != nil {
+		return domain.CanvasNode{}, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return domain.CanvasNode{}, err
+	}
+	return domain.CanvasNode{
+		ID: id, Kind: domain.NodeNote, X: request.X, Y: request.Y,
+		Width: noteWidth, Height: noteHeight, Color: request.Color, Body: request.Body,
+	}, nil
+}
+
+// Canvas returns every conversation and node needed to draw the board.
+func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
+	canvas := domain.Canvas{Conversations: []domain.Conversation{}, Nodes: []domain.CanvasNode{}}
+	conversations, err := s.listConversations(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Conversations = conversations
+	nodes, err := s.listCanvasNodes(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Nodes = nodes
+	return canvas, nil
+}
+
+func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, title, kind, created_at FROM conversations ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	conversations := []domain.Conversation{}
+	index := make(map[int64]int)
+	for rows.Next() {
+		var item domain.Conversation
+		var created string
+		if err := rows.Scan(&item.ID, &item.Title, &item.Kind, &created); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		item.Providers = []string{}
+		index[item.ID] = len(conversations)
+		conversations = append(conversations, item)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	// One pass over the join table beats a query per conversation.
+	providerRows, err := s.db.QueryContext(ctx,
+		"SELECT conversation_id, provider FROM conversation_providers ORDER BY conversation_id, position")
+	if err != nil {
+		return nil, err
+	}
+	defer providerRows.Close()
+	for providerRows.Next() {
+		var conversationID int64
+		var provider string
+		if err := providerRows.Scan(&conversationID, &provider); err != nil {
+			return nil, err
+		}
+		if at, known := index[conversationID]; known {
+			conversations[at].Providers = append(conversations[at].Providers, provider)
+		}
+	}
+	return conversations, providerRows.Err()
+}
+
+func (s *Store) listCanvasNodes(ctx context.Context) ([]domain.CanvasNode, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, kind, conversation_id, x, y, width, height, z, color, body
+FROM canvas_nodes ORDER BY z, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	nodes := []domain.CanvasNode{}
+	for rows.Next() {
+		var node domain.CanvasNode
+		var conversationID sql.NullInt64
+		if err := rows.Scan(&node.ID, &node.Kind, &conversationID, &node.X, &node.Y,
+			&node.Width, &node.Height, &node.Z, &node.Color, &node.Body); err != nil {
+			return nil, err
+		}
+		if conversationID.Valid {
+			value := conversationID.Int64
+			node.ConversationID = &value
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, rows.Err()
+}
+
+// PatchCanvasNode updates only the supplied fields. Returns sql.ErrNoRows when
+// the node is gone, so a stale client learns instead of silently succeeding.
+func (s *Store) PatchCanvasNode(ctx context.Context, patch domain.CanvasNodePatch) error {
+	assignments := make([]string, 0, 7)
+	arguments := make([]any, 0, 9)
+	addFloat := func(column string, value *float64) {
+		if value != nil {
+			assignments = append(assignments, column+" = ?")
+			arguments = append(arguments, *value)
+		}
+	}
+	addFloat("x", patch.X)
+	addFloat("y", patch.Y)
+	addFloat("width", patch.Width)
+	addFloat("height", patch.Height)
+	if patch.Z != nil {
+		assignments = append(assignments, "z = ?")
+		arguments = append(arguments, *patch.Z)
+	}
+	if patch.Color != nil {
+		assignments = append(assignments, "color = ?")
+		arguments = append(arguments, *patch.Color)
+	}
+	if patch.Body != nil {
+		assignments = append(assignments, "body = ?")
+		arguments = append(arguments, *patch.Body)
+	}
+	if len(assignments) == 0 {
+		return nil
+	}
+	assignments = append(assignments, "updated_at = ?")
+	arguments = append(arguments, time.Now().UTC().Format(time.RFC3339Nano), patch.ID)
+	result, err := s.db.ExecContext(ctx,
+		"UPDATE canvas_nodes SET "+strings.Join(assignments, ", ")+" WHERE id = ?", arguments...)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// DeleteCanvasNode removes a node and, for a conversation node, the
+// conversation and its history along with it.
+func (s *Store) DeleteCanvasNode(ctx context.Context, id int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var kind string
+	var conversationID sql.NullInt64
+	err = tx.QueryRowContext(ctx,
+		"SELECT kind, conversation_id FROM canvas_nodes WHERE id = ?", id).Scan(&kind, &conversationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return sql.ErrNoRows
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM canvas_nodes WHERE id = ?", id); err != nil {
+		return err
+	}
+	if kind == domain.NodeConversation && conversationID.Valid {
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM conversations WHERE id = ?", conversationID.Int64); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

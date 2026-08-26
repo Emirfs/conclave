@@ -48,6 +48,59 @@ func (a *App) Snapshot() (domain.Snapshot, error) {
 	return client.Snapshot(ctx)
 }
 
+
+// Canvas returns the whole board: conversations and the nodes that place them.
+func (a *App) Canvas() (domain.Canvas, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 3*time.Second)
+	defer cancel()
+	return client.Canvas(ctx)
+}
+
+func (a *App) CreateConversation(input domain.NewConversation) (domain.Conversation, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CreateConversation(ctx, input)
+}
+
+func (a *App) CreateNote(input domain.NewNote) (domain.CanvasNode, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.CanvasNode{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CreateNote(ctx, input)
+}
+
+// PatchCanvasNode persists a move, resize or text edit.
+func (a *App) PatchCanvasNode(patch domain.CanvasNodePatch) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.PatchCanvasNode(ctx, patch)
+}
+
+func (a *App) DeleteCanvasNode(id int64) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.DeleteCanvasNode(ctx, id)
+}
+
 // EnsureDaemon starts the daemon when it is not answering. The daemon's own
 // flock guard makes a redundant start harmless.
 func (a *App) EnsureDaemon() error {

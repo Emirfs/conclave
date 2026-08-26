@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -35,6 +38,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/snapshot", s.snapshot)
 	mux.HandleFunc("POST /v1/runs", s.createRun)
 	mux.HandleFunc("POST /v1/chat/turns", s.createChatTurn)
+	mux.HandleFunc("GET /v1/canvas", s.canvas)
+	mux.HandleFunc("POST /v1/canvas/conversations", s.createConversation)
+	mux.HandleFunc("POST /v1/canvas/notes", s.createNote)
+	mux.HandleFunc("PATCH /v1/canvas/nodes", s.patchCanvasNode)
+	mux.HandleFunc("DELETE /v1/canvas/nodes/{id}", s.deleteCanvasNode)
 	return s.authenticate(mux)
 }
 
@@ -75,15 +83,8 @@ func (s *Server) snapshot(response http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) createChatTurn(response http.ResponseWriter, request *http.Request) {
-	if request.Header.Get("Content-Type") != "application/json" {
-		writeError(response, http.StatusUnsupportedMediaType, errors.New("content type must be application/json"))
-		return
-	}
 	var input domain.ChatRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 64<<10))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil {
-		writeError(response, http.StatusBadRequest, err)
+	if !decodeJSON(response, request, 64<<10, &input) {
 		return
 	}
 	input.Prompt = strings.TrimSpace(input.Prompt)
@@ -91,26 +92,9 @@ func (s *Server) createChatTurn(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusBadRequest, errors.New("prompt requires 1 to 20000 characters"))
 		return
 	}
-	available := make(map[string]bool)
-	for _, item := range provider.Discover() {
-		if item.Available && item.Kind != "memory" {
-			available[item.Name] = true
-		}
-	}
-	seen := make(map[string]bool)
-	selected := make([]string, 0, len(input.Providers))
-	for _, name := range input.Providers {
-		if !available[name] {
-			writeError(response, http.StatusBadRequest, fmt.Errorf("provider %q is not available", name))
-			return
-		}
-		if !seen[name] {
-			seen[name] = true
-			selected = append(selected, name)
-		}
-	}
-	if len(selected) == 0 || len(selected) > 4 {
-		writeError(response, http.StatusBadRequest, errors.New("select 1 to 4 providers"))
+	selected, err := selectProviders(input.Providers)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
 		return
 	}
 	input.Providers = selected
@@ -123,15 +107,8 @@ func (s *Server) createChatTurn(response http.ResponseWriter, request *http.Requ
 }
 
 func (s *Server) createRun(response http.ResponseWriter, request *http.Request) {
-	if request.Header.Get("Content-Type") != "application/json" {
-		writeError(response, http.StatusUnsupportedMediaType, errors.New("content type must be application/json"))
-		return
-	}
 	var input domain.RunRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil {
-		writeError(response, http.StatusBadRequest, err)
+	if !decodeJSON(response, request, 1<<20, &input) {
 		return
 	}
 	if !filepath.IsAbs(input.Project) {
@@ -169,6 +146,154 @@ func (s *Server) createRun(response http.ResponseWriter, request *http.Request) 
 	writeJSON(response, http.StatusAccepted, map[string]int64{"id": id})
 }
 
+
+// decodeJSON enforces the shared request rules: JSON content type, a body size
+// cap, and no unknown fields so a typo in a client is an error, not a silent
+// no-op.
+func decodeJSON(response http.ResponseWriter, request *http.Request, limit int64, target any) bool {
+	if request.Header.Get("Content-Type") != "application/json" {
+		writeError(response, http.StatusUnsupportedMediaType, errors.New("content type must be application/json"))
+		return false
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, limit))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return false
+	}
+	return true
+}
+
+func (s *Server) canvas(response http.ResponseWriter, request *http.Request) {
+	canvas, err := s.store.Canvas(request.Context())
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, canvas)
+}
+
+func (s *Server) createConversation(response http.ResponseWriter, request *http.Request) {
+	var input domain.NewConversation
+	if !decodeJSON(response, request, 16<<10, &input) {
+		return
+	}
+	if input.Kind != domain.KindSolo && input.Kind != domain.KindGroup {
+		writeError(response, http.StatusBadRequest, errors.New("kind must be solo or group"))
+		return
+	}
+	selected, err := selectProviders(input.Providers)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	if input.Kind == domain.KindSolo && len(selected) != 1 {
+		writeError(response, http.StatusBadRequest, errors.New("a solo conversation needs exactly one provider"))
+		return
+	}
+	input.Providers = selected
+	input.Title = strings.TrimSpace(input.Title)
+	if input.Title == "" {
+		input.Title = selected[0]
+	}
+	if utf8.RuneCountInString(input.Title) > 120 {
+		writeError(response, http.StatusBadRequest, errors.New("title is limited to 120 characters"))
+		return
+	}
+	conversation, err := s.store.CreateConversation(request.Context(), input)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, conversation)
+}
+
+func (s *Server) createNote(response http.ResponseWriter, request *http.Request) {
+	var input domain.NewNote
+	if !decodeJSON(response, request, 64<<10, &input) {
+		return
+	}
+	if utf8.RuneCountInString(input.Body) > 20_000 {
+		writeError(response, http.StatusBadRequest, errors.New("note is limited to 20000 characters"))
+		return
+	}
+	note, err := s.store.CreateNote(request.Context(), input)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, note)
+}
+
+func (s *Server) patchCanvasNode(response http.ResponseWriter, request *http.Request) {
+	var input domain.CanvasNodePatch
+	if !decodeJSON(response, request, 64<<10, &input) {
+		return
+	}
+	if input.ID <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("node id is required"))
+		return
+	}
+	if input.Body != nil && utf8.RuneCountInString(*input.Body) > 20_000 {
+		writeError(response, http.StatusBadRequest, errors.New("note is limited to 20000 characters"))
+		return
+	}
+	err := s.store.PatchCanvasNode(request.Context(), input)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusNotFound, errors.New("node does not exist"))
+		return
+	}
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) deleteCanvasNode(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("node id must be a positive integer"))
+		return
+	}
+	err = s.store.DeleteCanvasNode(request.Context(), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusNotFound, errors.New("node does not exist"))
+		return
+	}
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// selectProviders keeps only discovered, chat-capable providers and drops
+// duplicates while preserving the caller's order.
+func selectProviders(requested []string) ([]string, error) {
+	available := make(map[string]bool)
+	for _, item := range provider.Discover() {
+		if item.Available && item.Kind != "memory" {
+			available[item.Name] = true
+		}
+	}
+	seen := make(map[string]bool)
+	selected := make([]string, 0, len(requested))
+	for _, name := range requested {
+		if !available[name] {
+			return nil, fmt.Errorf("provider %q is not available", name)
+		}
+		if !seen[name] {
+			seen[name] = true
+			selected = append(selected, name)
+		}
+	}
+	if len(selected) == 0 || len(selected) > 4 {
+		return nil, errors.New("select 1 to 4 providers")
+	}
+	return selected, nil
+}
+
 func writeJSON(response http.ResponseWriter, status int, value any) {
 	response.Header().Set("Content-Type", "application/json")
 	response.WriteHeader(status)
@@ -191,71 +316,83 @@ func NewClient(baseURL, token string) *Client {
 
 func (c *Client) Snapshot(ctx context.Context) (domain.Snapshot, error) {
 	var snapshot domain.Snapshot
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/snapshot", nil)
-	if err != nil {
-		return snapshot, err
-	}
-	request.Header.Set("Authorization", "Bearer "+c.token)
-	response, err := c.http.Do(request)
-	if err != nil {
-		return snapshot, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return snapshot, fmt.Errorf("daemon returned %s", response.Status)
-	}
-	err = json.NewDecoder(response.Body).Decode(&snapshot)
+	err := c.do(ctx, http.MethodGet, "/v1/snapshot", nil, &snapshot, http.StatusOK)
 	return snapshot, err
 }
 
 func (c *Client) CreateRun(ctx context.Context, input domain.RunRequest) (int64, error) {
-	payload, err := json.Marshal(input)
-	if err != nil {
-		return 0, err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/runs", bytes.NewReader(payload))
-	if err != nil {
-		return 0, err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+c.token)
-	response, err := c.http.Do(request)
-	if err != nil {
-		return 0, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusAccepted {
-		var failure map[string]string
-		_ = json.NewDecoder(response.Body).Decode(&failure)
-		return 0, fmt.Errorf("daemon rejected run: %s", failure["error"])
-	}
 	var result map[string]int64
-	err = json.NewDecoder(response.Body).Decode(&result)
+	err := c.do(ctx, http.MethodPost, "/v1/runs", input, &result, http.StatusAccepted)
 	return result["id"], err
 }
 
 func (c *Client) CreateChatTurn(ctx context.Context, input domain.ChatRequest) (int64, error) {
-	payload, err := json.Marshal(input)
-	if err != nil {
-		return 0, err
+	var result map[string]int64
+	err := c.do(ctx, http.MethodPost, "/v1/chat/turns", input, &result, http.StatusAccepted)
+	return result["id"], err
+}
+
+// do performs an authenticated request and decodes a JSON body into result.
+// A nil result means the caller only cares that the request succeeded.
+func (c *Client) do(ctx context.Context, method, path string, payload, result any, want int) error {
+	var body io.Reader
+	if payload != nil {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		body = bytes.NewReader(encoded)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/turns", bytes.NewReader(payload))
+	request, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	request.Header.Set("Content-Type", "application/json")
+	if payload != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	request.Header.Set("Authorization", "Bearer "+c.token)
 	response, err := c.http.Do(request)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusAccepted {
+	if response.StatusCode != want {
 		var failure map[string]string
 		_ = json.NewDecoder(response.Body).Decode(&failure)
-		return 0, fmt.Errorf("daemon rejected chat: %s", failure["error"])
+		if message := failure["error"]; message != "" {
+			return errors.New(message)
+		}
+		return fmt.Errorf("daemon returned %s", response.Status)
 	}
-	var result map[string]int64
-	err = json.NewDecoder(response.Body).Decode(&result)
-	return result["id"], err
+	if result == nil {
+		return nil
+	}
+	return json.NewDecoder(response.Body).Decode(result)
+}
+
+func (c *Client) Canvas(ctx context.Context) (domain.Canvas, error) {
+	var canvas domain.Canvas
+	err := c.do(ctx, http.MethodGet, "/v1/canvas", nil, &canvas, http.StatusOK)
+	return canvas, err
+}
+
+func (c *Client) CreateConversation(ctx context.Context, input domain.NewConversation) (domain.Conversation, error) {
+	var conversation domain.Conversation
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/conversations", input, &conversation, http.StatusCreated)
+	return conversation, err
+}
+
+func (c *Client) CreateNote(ctx context.Context, input domain.NewNote) (domain.CanvasNode, error) {
+	var node domain.CanvasNode
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/notes", input, &node, http.StatusCreated)
+	return node, err
+}
+
+func (c *Client) PatchCanvasNode(ctx context.Context, patch domain.CanvasNodePatch) error {
+	return c.do(ctx, http.MethodPatch, "/v1/canvas/nodes", patch, nil, http.StatusNoContent)
+}
+
+func (c *Client) DeleteCanvasNode(ctx context.Context, id int64) error {
+	path := "/v1/canvas/nodes/" + strconv.FormatInt(id, 10)
+	return c.do(ctx, http.MethodDelete, path, nil, nil, http.StatusNoContent)
 }

@@ -84,3 +84,73 @@ type ChatJob struct {
 	Provider   string
 	Prompt     string
 }
+
+// Conversation kinds. A solo conversation talks to exactly one provider; a
+// group conversation broadcasts every turn to all of its providers.
+const (
+	KindSolo  = "solo"
+	KindGroup = "group"
+)
+
+// Canvas node kinds.
+const (
+	NodeConversation = "conversation"
+	NodeNote         = "note"
+)
+
+type Conversation struct {
+	ID        int64     `json:"id"`
+	Title     string    `json:"title"`
+	Kind      string    `json:"kind"`
+	Providers []string  `json:"providers"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// CanvasNode is presentation state the daemon owns so a layout survives a
+// restart and is identical for every client.
+type CanvasNode struct {
+	ID             int64   `json:"id"`
+	Kind           string  `json:"kind"`
+	ConversationID *int64  `json:"conversation_id,omitempty"`
+	X              float64 `json:"x"`
+	Y              float64 `json:"y"`
+	Width          float64 `json:"width"`
+	Height         float64 `json:"height"`
+	Z              int     `json:"z"`
+	Color          string  `json:"color,omitempty"`
+	Body           string  `json:"body,omitempty"`
+}
+
+// CanvasNodePatch carries only the fields a client wants to change. A nil field
+// is left alone, which keeps a drag from clobbering a concurrent text edit.
+type CanvasNodePatch struct {
+	ID     int64    `json:"id"`
+	X      *float64 `json:"x,omitempty"`
+	Y      *float64 `json:"y,omitempty"`
+	Width  *float64 `json:"width,omitempty"`
+	Height *float64 `json:"height,omitempty"`
+	Z      *int     `json:"z,omitempty"`
+	Color  *string  `json:"color,omitempty"`
+	Body   *string  `json:"body,omitempty"`
+}
+
+type NewConversation struct {
+	Title     string   `json:"title"`
+	Kind      string   `json:"kind"`
+	Providers []string `json:"providers"`
+	X         float64  `json:"x"`
+	Y         float64  `json:"y"`
+}
+
+type NewNote struct {
+	Body  string  `json:"body"`
+	Color string  `json:"color"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+}
+
+// Canvas is everything the desktop client needs to draw the board.
+type Canvas struct {
+	Conversations []Conversation `json:"conversations"`
+	Nodes         []CanvasNode   `json:"nodes"`
+}
