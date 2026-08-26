@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"errors"
+	"os"
 	"os/exec"
 
 	"github.com/Emirfs/conclave/internal/domain"
@@ -10,6 +12,11 @@ type candidate struct {
 	name    string
 	kind    string
 	aliases []string
+}
+
+type Invocation struct {
+	Command []string
+	Stdin   string
 }
 
 var candidates = []candidate{
@@ -35,4 +42,51 @@ func Discover() []domain.Provider {
 		providers = append(providers, provider)
 	}
 	return providers
+}
+
+func ChatInvocation(name, prompt string) (Invocation, error) {
+	path, err := executable(name)
+	if err != nil {
+		return Invocation{}, err
+	}
+	switch name {
+	case "claude":
+		return Invocation{
+			Command: []string{path, "--print", "--output-format", "text", "--permission-mode", "plan", "--tools", "", "--safe-mode", "--no-session-persistence"},
+			Stdin:   prompt,
+		}, nil
+	case "openai":
+		return Invocation{
+			Command: []string{path, "exec", "--sandbox", "read-only", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--color", "never", "-"},
+			Stdin:   prompt,
+		}, nil
+	case "gemini":
+		return Invocation{
+			Command: []string{path, "--prompt", "Answer the user message provided on stdin.", "--approval-mode", "plan", "--sandbox", "--output-format", "text"},
+			Stdin:   prompt,
+		}, nil
+	case "ollama":
+		model := os.Getenv("CONCLAVE_OLLAMA_MODEL")
+		if model == "" {
+			model = "qwen3:4b"
+		}
+		return Invocation{Command: []string{path, "run", model, "--hidethinking"}, Stdin: prompt}, nil
+	default:
+		return Invocation{}, errors.New("provider does not support chat")
+	}
+}
+
+func executable(name string) (string, error) {
+	for _, item := range candidates {
+		if item.name != name || item.kind == "memory" {
+			continue
+		}
+		for _, alias := range item.aliases {
+			if path, err := exec.LookPath(alias); err == nil {
+				return path, nil
+			}
+		}
+		return "", errors.New("provider CLI is not available")
+	}
+	return "", errors.New("unknown provider")
 }

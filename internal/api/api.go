@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Emirfs/conclave/internal/domain"
 	"github.com/Emirfs/conclave/internal/provider"
@@ -33,6 +34,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/snapshot", s.snapshot)
 	mux.HandleFunc("POST /v1/runs", s.createRun)
+	mux.HandleFunc("POST /v1/chat/turns", s.createChatTurn)
 	return s.authenticate(mux)
 }
 
@@ -42,7 +44,12 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			writeError(response, http.StatusForbidden, errors.New("browser-origin requests are not allowed"))
 			return
 		}
-		provided := strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")
+		authorization := request.Header.Get("Authorization")
+		if s.token == "" || !strings.HasPrefix(authorization, "Bearer ") {
+			writeError(response, http.StatusUnauthorized, errors.New("invalid daemon token"))
+			return
+		}
+		provided := strings.TrimPrefix(authorization, "Bearer ")
 		if len(provided) != len(s.token) || subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) != 1 {
 			writeError(response, http.StatusUnauthorized, errors.New("invalid daemon token"))
 			return
@@ -57,9 +64,62 @@ func (s *Server) snapshot(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusInternalServerError, err)
 		return
 	}
+	turns, err := s.store.ListChatTurns(request.Context(), 20)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(response, http.StatusOK, domain.Snapshot{
-		Healthy: true, Version: Version, Providers: provider.Discover(), Runs: runs,
+		Healthy: true, Version: Version, Providers: provider.Discover(), Runs: runs, Turns: turns,
 	})
+}
+
+func (s *Server) createChatTurn(response http.ResponseWriter, request *http.Request) {
+	if request.Header.Get("Content-Type") != "application/json" {
+		writeError(response, http.StatusUnsupportedMediaType, errors.New("content type must be application/json"))
+		return
+	}
+	var input domain.ChatRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	input.Prompt = strings.TrimSpace(input.Prompt)
+	if input.Prompt == "" || utf8.RuneCountInString(input.Prompt) > 20_000 {
+		writeError(response, http.StatusBadRequest, errors.New("prompt requires 1 to 20000 characters"))
+		return
+	}
+	available := make(map[string]bool)
+	for _, item := range provider.Discover() {
+		if item.Available && item.Kind != "memory" {
+			available[item.Name] = true
+		}
+	}
+	seen := make(map[string]bool)
+	selected := make([]string, 0, len(input.Providers))
+	for _, name := range input.Providers {
+		if !available[name] {
+			writeError(response, http.StatusBadRequest, fmt.Errorf("provider %q is not available", name))
+			return
+		}
+		if !seen[name] {
+			seen[name] = true
+			selected = append(selected, name)
+		}
+	}
+	if len(selected) == 0 || len(selected) > 4 {
+		writeError(response, http.StatusBadRequest, errors.New("select 1 to 4 providers"))
+		return
+	}
+	input.Providers = selected
+	id, err := s.store.CreateChatTurn(request.Context(), input)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusAccepted, map[string]int64{"id": id})
 }
 
 func (s *Server) createRun(response http.ResponseWriter, request *http.Request) {
@@ -168,6 +228,32 @@ func (c *Client) CreateRun(ctx context.Context, input domain.RunRequest) (int64,
 		var failure map[string]string
 		_ = json.NewDecoder(response.Body).Decode(&failure)
 		return 0, fmt.Errorf("daemon rejected run: %s", failure["error"])
+	}
+	var result map[string]int64
+	err = json.NewDecoder(response.Body).Decode(&result)
+	return result["id"], err
+}
+
+func (c *Client) CreateChatTurn(ctx context.Context, input domain.ChatRequest) (int64, error) {
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return 0, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/turns", bytes.NewReader(payload))
+	if err != nil {
+		return 0, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	response, err := c.http.Do(request)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		var failure map[string]string
+		_ = json.NewDecoder(response.Body).Decode(&failure)
+		return 0, fmt.Errorf("daemon rejected chat: %s", failure["error"])
 	}
 	var result map[string]int64
 	err = json.NewDecoder(response.Body).Decode(&result)

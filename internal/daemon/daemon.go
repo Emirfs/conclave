@@ -4,27 +4,34 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Emirfs/conclave/internal/domain"
+	"github.com/Emirfs/conclave/internal/provider"
 	"github.com/Emirfs/conclave/internal/store"
 )
 
 const maxOutputBytes = 64 * 1024
 
 type Daemon struct {
-	store   *store.Store
-	workers int
-	timeout time.Duration
+	store       *store.Store
+	workers     int
+	chatWorkers int
+	timeout     time.Duration
 }
 
-func New(store *store.Store, workers int, timeout time.Duration) *Daemon {
+func New(store *store.Store, workers, chatWorkers int, timeout time.Duration) *Daemon {
 	if workers < 1 {
 		workers = 1
 	}
-	return &Daemon{store: store, workers: workers, timeout: timeout}
+	if chatWorkers < 1 {
+		chatWorkers = 1
+	}
+	return &Daemon{store: store, workers: workers, chatWorkers: chatWorkers, timeout: timeout}
 }
 
 func (d *Daemon) Run(ctx context.Context) {
@@ -36,8 +43,106 @@ func (d *Daemon) Run(ctx context.Context) {
 			d.worker(ctx)
 		}()
 	}
+	for range d.chatWorkers {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			d.chatWorker(ctx)
+		}()
+	}
 	<-ctx.Done()
 	workers.Wait()
+}
+
+func (d *Daemon) chatWorker(ctx context.Context) {
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := d.runNextChat(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (d *Daemon) runNextChat(ctx context.Context) error {
+	job, err := d.store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		return err
+	}
+	persist := context.WithoutCancel(ctx)
+	invocation, err := provider.ChatInvocation(job.Provider, job.Prompt)
+	if err != nil {
+		return d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", err.Error())
+	}
+	content, failure := d.executeChat(ctx, invocation)
+	if ctx.Err() != nil {
+		_ = d.store.RequeueChatResponse(persist, job.ResponseID)
+		return ctx.Err()
+	}
+	if failure != "" {
+		return d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", failure)
+	}
+	return d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusPassed, content, "")
+}
+
+func (d *Daemon) executeChat(parent context.Context, invocation provider.Invocation) (string, string) {
+	workdir, err := os.MkdirTemp("", "conclave-chat-")
+	if err != nil {
+		return "", err.Error()
+	}
+	defer os.RemoveAll(workdir)
+	ctx, cancel := context.WithTimeout(parent, d.timeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, invocation.Command[0], invocation.Command[1:]...)
+	command.Dir = workdir
+	command.Stdin = strings.NewReader(invocation.Stdin)
+	command.Env = safeEnvironment()
+	command.WaitDelay = 10 * time.Second
+	configureProcessTree(command)
+	stdout := &limitedBuffer{limit: maxOutputBytes}
+	stderr := &limitedBuffer{limit: maxOutputBytes}
+	command.Stdout = stdout
+	command.Stderr = stderr
+	if err := command.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", "provider timed out"
+		}
+		failure := strings.TrimSpace(stderr.String())
+		if failure == "" {
+			failure = err.Error()
+		}
+		return "", failure
+	}
+	content := strings.TrimSpace(stdout.String())
+	if content == "" {
+		return "", "provider returned an empty response"
+	}
+	return content, ""
+}
+
+func safeEnvironment() []string {
+	environment := make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		upper := strings.ToUpper(name)
+		if strings.Contains(upper, "TOKEN") || strings.Contains(upper, "SECRET") ||
+			strings.Contains(upper, "PASSWORD") || strings.Contains(upper, "CREDENTIAL") ||
+			strings.HasSuffix(upper, "_KEY") || strings.Contains(upper, "APIKEY") ||
+			strings.Contains(upper, "API_KEY") {
+			continue
+		}
+		environment = append(environment, entry)
+	}
+	return environment
 }
 
 func (d *Daemon) worker(ctx context.Context) {
