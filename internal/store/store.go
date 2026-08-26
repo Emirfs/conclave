@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Emirfs/conclave/internal/domain"
+	"github.com/Emirfs/conclave/internal/provider"
 	_ "modernc.org/sqlite"
 )
 
@@ -107,6 +108,19 @@ CREATE TABLE canvas_nodes (
 CREATE INDEX canvas_nodes_conversation_idx ON canvas_nodes(conversation_id);
 ALTER TABLE chat_turns ADD COLUMN conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE;
 CREATE INDEX chat_turns_conversation_idx ON chat_turns(conversation_id, id);
+`,
+	// 3: the allowance a provider reports about itself, last value wins.
+	`
+CREATE TABLE provider_quota (
+    provider TEXT PRIMARY KEY,
+    short_label TEXT NOT NULL DEFAULT '',
+    short_utilization REAL NOT NULL DEFAULT 0,
+    short_resets_at INTEGER NOT NULL DEFAULT 0,
+    long_label TEXT NOT NULL DEFAULT '',
+    long_utilization REAL NOT NULL DEFAULT 0,
+    long_resets_at INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
 `,
 }
 
@@ -809,4 +823,60 @@ func (s *Store) DeleteCanvasNode(ctx context.Context, id int64) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// UpdateChatResponseContent stores partial output while a provider is still
+// answering. It refuses to touch a response that is no longer running, so a
+// late write cannot overwrite a finished answer or revive a requeued one.
+func (s *Store) UpdateChatResponseContent(ctx context.Context, id int64, content string) error {
+	_, err := s.db.ExecContext(ctx, `
+UPDATE chat_responses SET content = ?, updated_at = ?
+WHERE id = ? AND status = ?`,
+		content, time.Now().UTC().Format(time.RFC3339Nano), id, domain.StatusRunning)
+	return err
+}
+
+
+// RecordProviderQuota stores the most recent allowance a provider reported.
+// Only some providers report one, so a missing row simply means "unknown".
+func (s *Store) RecordProviderQuota(ctx context.Context, name string, quota provider.Quota) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO provider_quota(provider, short_label, short_utilization, short_resets_at,
+                           long_label, long_utilization, long_resets_at, updated_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(provider) DO UPDATE SET
+    short_label = excluded.short_label,
+    short_utilization = excluded.short_utilization,
+    short_resets_at = excluded.short_resets_at,
+    long_label = excluded.long_label,
+    long_utilization = excluded.long_utilization,
+    long_resets_at = excluded.long_resets_at,
+    updated_at = excluded.updated_at`,
+		name, quota.ShortLabel, quota.ShortUtilization, quota.ShortResetsAt,
+		quota.LongLabel, quota.LongUtilization, quota.LongResetsAt,
+		time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+// ProviderQuota returns the last reported allowance per provider name.
+func (s *Store) ProviderQuota(ctx context.Context) (map[string]domain.Quota, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT provider, short_label, short_utilization, short_resets_at,
+       long_label, long_utilization, long_resets_at
+FROM provider_quota`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	quota := make(map[string]domain.Quota)
+	for rows.Next() {
+		var name string
+		var item domain.Quota
+		if err := rows.Scan(&name, &item.ShortLabel, &item.ShortUtilization, &item.ShortResetsAt,
+			&item.LongLabel, &item.LongUtilization, &item.LongResetsAt); err != nil {
+			return nil, err
+		}
+		quota[name] = item
+	}
+	return quota, rows.Err()
 }

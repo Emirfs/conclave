@@ -229,8 +229,55 @@ function ProviderRow({
         <span className="provider__kind">{provider.kind}</span>
       </span>
       <span className="provider__state">{provider.available ? 'hazır' : 'yok'}</span>
+      {provider.quota && (
+        <div className="provider__quota" style={{ ['--badge-accent' as string]: style.accent }}>
+          <QuotaBar
+            label={provider.quota.short_label}
+            utilization={provider.quota.short_utilization}
+            resetsAt={provider.quota.short_resets_at}
+          />
+          <QuotaBar
+            label={provider.quota.long_label}
+            utilization={provider.quota.long_utilization}
+            resetsAt={provider.quota.long_resets_at}
+          />
+        </div>
+      )}
     </div>
   )
+}
+
+/** Shows how much of a window is spent, using the provider's own numbers. */
+function QuotaBar({
+  label,
+  utilization,
+  resetsAt,
+}: {
+  label?: string
+  utilization: number
+  resetsAt?: number
+}) {
+  if (!label) return null
+  const percent = Math.min(100, Math.max(0, Math.round(utilization * 100)))
+  return (
+    <div className="quota" title={`${label}: %${percent} kullanıldı${resetsIn(resetsAt)}`}>
+      <span className="quota__label">{label}</span>
+      <span className="quota__track">
+        <span className="quota__fill" style={{ width: `${percent}%` }} />
+      </span>
+      <span className="quota__value">%{percent}</span>
+    </div>
+  )
+}
+
+/** Reset times arrive as Unix seconds; zero means the provider did not say. */
+function resetsIn(resetsAt?: number): string {
+  if (!resetsAt) return ''
+  const remaining = resetsAt * 1000 - Date.now()
+  if (remaining <= 0) return ', yenilendi'
+  const hours = Math.floor(remaining / 3_600_000)
+  const minutes = Math.floor((remaining % 3_600_000) / 60_000)
+  return hours > 0 ? `, ${hours}s ${minutes}d sonra yenilenir` : `, ${minutes}d sonra yenilenir`
 }
 
 function Stage({

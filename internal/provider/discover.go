@@ -17,6 +17,9 @@ type candidate struct {
 type Invocation struct {
 	Command []string
 	Stdin   string
+	// Stream says how the daemon should read stdout. JSON formats let an answer
+	// be shown while it is still being written.
+	Stream StreamFormat
 }
 
 var candidates = []candidate{
@@ -52,24 +55,33 @@ func ChatInvocation(name, prompt string) (Invocation, error) {
 	switch name {
 	case "claude":
 		return Invocation{
-			Command: []string{path, "--print", "--output-format", "text", "--permission-mode", "plan", "--tools", "", "--safe-mode", "--no-session-persistence"},
+			Command: []string{path, "--print", "--output-format", "stream-json", "--include-partial-messages", "--verbose", "--permission-mode", "plan", "--tools", "", "--safe-mode", "--no-session-persistence"},
 			Stdin:   prompt,
+			Stream:  StreamClaude,
 		}, nil
 	case "openai":
 		return Invocation{
-			Command: []string{path, "exec", "--sandbox", "read-only", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--color", "never", "-"},
+			Command: []string{path, "exec", "--json", "--sandbox", "read-only", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--color", "never", "-"},
 			Stdin:   prompt,
+			Stream:  StreamCodex,
 		}, nil
 	case "gemini":
 		return Invocation{
-			Command: []string{path, "--print", prompt, "--mode", "plan", "--output-format", "text"},
+			Command: []string{path, "--print", prompt, "--mode", "plan", "--output-format", "stream-json"},
+			Stream:  StreamAntigravity,
 		}, nil
 	case "ollama":
 		model := os.Getenv("CONCLAVE_OLLAMA_MODEL")
 		if model == "" {
 			model = "qwen3:4b"
 		}
-		return Invocation{Command: []string{path, "run", model, "--hidethinking"}, Stdin: prompt}, nil
+		// ollama writes nothing to stdout until it finishes when stdout is not a
+		// terminal, so there is no progress to report for this provider.
+		return Invocation{
+			Command: []string{path, "run", model, "--hidethinking"},
+			Stdin:   prompt,
+			Stream:  StreamPlain,
+		}, nil
 	default:
 		return Invocation{}, errors.New("provider does not support chat")
 	}

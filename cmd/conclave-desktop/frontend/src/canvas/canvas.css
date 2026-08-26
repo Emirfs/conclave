@@ -154,6 +154,7 @@
 /* ---------- note node ---------- */
 
 .node--note {
+  position: relative;
   border: 1px solid color-mix(in srgb, var(--note-accent) 40%, var(--line));
   background: color-mix(in srgb, var(--note-accent) 9%, var(--surface-raised));
 }
@@ -319,4 +320,66 @@
 
 .node__input:disabled {
   opacity: 0.6;
+}
+
+/* ---------- close affordance ---------- */
+
+.node__close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: default;
+  opacity: 0;
+  transition: opacity 120ms var(--ease), background 120ms var(--ease),
+    color 120ms var(--ease);
+}
+
+/* Revealed on hover or when the node is selected, so the frame stays quiet. */
+.node:hover .node__close,
+.node--selected .node__close,
+.node__close:focus-visible {
+  opacity: 1;
+}
+
+.node__close:hover {
+  background: var(--negative);
+  color: var(--text-inverse);
+}
+
+/* A note has no header, so its button floats over the top-right corner. */
+.node--note .node__close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+}
+
+/* A caret trailing the text while the provider is still writing. */
+.reply__text--streaming::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--reply-accent);
+  animation: caret 1s steps(2, start) infinite;
+}
+
+@keyframes caret {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
 }

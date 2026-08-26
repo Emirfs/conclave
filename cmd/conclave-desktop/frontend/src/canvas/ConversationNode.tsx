@@ -2,15 +2,19 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { NodeResizer, type NodeProps } from '@xyflow/react'
 
 import { providerStyle } from '../providers'
+import { CloseButton } from './CloseButton'
 import { domain } from '../../wailsjs/go/models'
 import type { ConversationNodeData } from './useCanvas'
 
 type Props = NodeProps & {
-  data: ConversationNodeData & { onSend: (conversationID: number, prompt: string) => Promise<void> }
+  data: ConversationNodeData & {
+    onSend: (conversationID: number, prompt: string) => Promise<void>
+    onClose: (id: string) => void
+  }
 }
 
-export const ConversationNode = memo(function ConversationNode({ data, selected }: Props) {
-  const { conversation, onSend } = data
+export const ConversationNode = memo(function ConversationNode({ id, data, selected }: Props) {
+  const { conversation, onSend, onClose } = data
   const providers = conversation.providers ?? []
   const turns = conversation.turns ?? []
   const lead = providerStyle(providers[0] ?? conversation.title)
@@ -81,6 +85,7 @@ export const ConversationNode = memo(function ConversationNode({ data, selected 
         </span>
         <span className="node__title">{conversation.title}</span>
         <span className="node__kind">{group ? 'grup' : 'tekil'}</span>
+        <CloseButton onClose={() => onClose(id)} label="Konuşmayı kapat" />
       </header>
 
       <div className="node__body node__transcript nowheel" ref={transcript}>
@@ -125,22 +130,27 @@ function Turn({ turn, group }: { turn: domain.ChatTurn; group: boolean }) {
 function Response({ response, showName }: { response: domain.ChatResponse; showName: boolean }) {
   const style = providerStyle(response.provider)
   const working = response.status === 'queued' || response.status === 'running'
+  const partial = response.content ?? ''
+
   return (
     <div className="reply" style={{ ['--reply-accent' as string]: style.accent }}>
       {showName && <span className="reply__name">{style.label}</span>}
       {response.error ? (
         <p className="reply__error">{response.error}</p>
-      ) : working ? (
-        <Working status={response.status} />
+      ) : working && partial === '' ? (
+        <Waiting status={response.status} />
       ) : (
-        <p className="reply__text">{response.content}</p>
+        <p className={working ? 'reply__text reply__text--streaming' : 'reply__text'}>
+          {partial}
+        </p>
       )}
     </div>
   )
 }
 
-/** Small activity indicator: the user chose activity over a quota gauge. */
-function Working({ status }: { status: string }) {
+/** Shown only until the first characters arrive; after that the growing answer
+ *  is the activity indicator, with a caret marking that it is still coming. */
+function Waiting({ status }: { status: string }) {
   return (
     <p className="reply__working">
       <span className="reply__pips">

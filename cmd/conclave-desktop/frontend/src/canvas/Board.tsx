@@ -31,6 +31,9 @@ export function Board({ canvas }: { canvas: BoardHandle }) {
 
 function BoardSurface({ canvas }: { canvas: BoardHandle }) {
   const { nodes, setNodes, patch, remove, setNoteBody, send } = canvas
+
+  // Closing removes the node and, for a conversation, its history with it.
+  const close = useCallback((id: string) => void remove(id), [remove])
   const flow = useReactFlow()
 
   // Notes need a callback in their data so the textarea can report edits, but
@@ -39,10 +42,10 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
     () =>
       nodes.map((node) =>
         node.data.kind === 'note'
-          ? { ...node, data: { ...node.data, onBodyChange: setNoteBody } }
-          : { ...node, data: { ...node.data, onSend: send } },
+          ? { ...node, data: { ...node.data, onBodyChange: setNoteBody, onClose: close } }
+          : { ...node, data: { ...node.data, onSend: send, onClose: close } },
       ),
-    [nodes, setNoteBody, send],
+    [nodes, setNoteBody, send, close],
   )
 
   const onNodesChange = useCallback(

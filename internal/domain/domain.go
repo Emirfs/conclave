@@ -17,6 +17,19 @@ type Provider struct {
 	Kind      string `json:"kind"`
 	Available bool   `json:"available"`
 	Command   string `json:"command,omitempty"`
+	// Quota is present only for providers that report their own allowance.
+	Quota *Quota `json:"quota,omitempty"`
+}
+
+// Quota mirrors provider.Quota for transport. Utilisation is a fraction between
+// 0 and 1; reset times are Unix seconds, zero when unknown.
+type Quota struct {
+	ShortLabel       string  `json:"short_label,omitempty"`
+	ShortUtilization float64 `json:"short_utilization"`
+	ShortResetsAt    int64   `json:"short_resets_at,omitempty"`
+	LongLabel        string  `json:"long_label,omitempty"`
+	LongUtilization  float64 `json:"long_utilization"`
+	LongResetsAt     int64   `json:"long_resets_at,omitempty"`
 }
 
 type StageSpec struct {

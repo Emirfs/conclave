@@ -230,11 +230,34 @@ export namespace domain {
 	        this.y = source["y"];
 	    }
 	}
+	export class Quota {
+	    short_label?: string;
+	    short_utilization: number;
+	    short_resets_at?: number;
+	    long_label?: string;
+	    long_utilization: number;
+	    long_resets_at?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Quota(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.short_label = source["short_label"];
+	        this.short_utilization = source["short_utilization"];
+	        this.short_resets_at = source["short_resets_at"];
+	        this.long_label = source["long_label"];
+	        this.long_utilization = source["long_utilization"];
+	        this.long_resets_at = source["long_resets_at"];
+	    }
+	}
 	export class Provider {
 	    name: string;
 	    kind: string;
 	    available: boolean;
 	    command?: string;
+	    quota?: Quota;
 	
 	    static createFrom(source: any = {}) {
 	        return new Provider(source);
@@ -246,8 +269,28 @@ export namespace domain {
 	        this.kind = source["kind"];
 	        this.available = source["available"];
 	        this.command = source["command"];
+	        this.quota = this.convertValues(source["quota"], Quota);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
+	
 	export class Stage {
 	    id: number;
 	    run_id: number;

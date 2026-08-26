@@ -151,6 +151,7 @@
 .provider {
   display: grid;
   grid-template-columns: 26px 1fr auto;
+  row-gap: 0;
   align-items: center;
   gap: 10px;
   padding: 8px 8px;
@@ -285,4 +286,43 @@
   font-size: 11px;
   line-height: 1.5;
   color: var(--text-muted);
+}
+
+/* ---------- quota ---------- */
+
+.provider__quota {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.quota {
+  display: grid;
+  grid-template-columns: 34px 1fr 30px;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+.quota__track {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--line-subtle);
+  overflow: hidden;
+}
+
+.quota__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--badge-accent);
+  transition: width 400ms var(--ease);
+}
+
+.quota__value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }

@@ -72,8 +72,19 @@ func (s *Server) snapshot(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusInternalServerError, err)
 		return
 	}
+	providers := provider.Discover()
+	quota, err := s.store.ProviderQuota(request.Context())
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	for index := range providers {
+		if item, known := quota[providers[index].Name]; known {
+			providers[index].Quota = &item
+		}
+	}
 	writeJSON(response, http.StatusOK, domain.Snapshot{
-		Healthy: true, Version: Version, Providers: provider.Discover(), Runs: runs,
+		Healthy: true, Version: Version, Providers: providers, Runs: runs,
 	})
 }
 

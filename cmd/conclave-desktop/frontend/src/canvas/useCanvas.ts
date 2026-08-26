@@ -27,8 +27,11 @@ export type BoardNode = Node<ConversationNodeData | NoteNodeData>
 /** How long a drag or keystroke settles before it is written to the daemon. */
 const PATCH_DEBOUNCE = 350
 
-/** How often transcripts are refetched. Stage 3 replaces this with streaming. */
-const REFRESH_INTERVAL = 1200
+/** Refetch cadence. Answers are written to the daemon as they are produced, so
+ *  the board polls quickly while a provider is mid-answer and backs off when
+ *  everything is settled. */
+const REFRESH_ACTIVE = 400
+const REFRESH_IDLE = 1500
 
 function toBoardNode(
   node: domain.CanvasNode,
@@ -59,13 +62,23 @@ export function useCanvas(connected: boolean) {
   const [nodes, setNodes] = useState<BoardNode[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [busy, setBusy] = useState(false)
   const timers = useRef(new Map<string, number>())
 
   const load = useCallback(async () => {
     try {
       const canvas = await LoadCanvas()
       const conversations = new Map<number, domain.Conversation>()
-      for (const item of canvas.conversations ?? []) conversations.set(item.id, item)
+      let working = false
+      for (const item of canvas.conversations ?? []) {
+        conversations.set(item.id, item)
+        for (const turn of item.turns ?? []) {
+          for (const response of turn.responses ?? []) {
+            if (response.status === 'queued' || response.status === 'running') working = true
+          }
+        }
+      }
+      setBusy(working)
       const mapped = (canvas.nodes ?? [])
         .map((node) => toBoardNode(node, conversations))
         .filter((node): node is BoardNode => node !== null)
@@ -100,9 +113,9 @@ export function useCanvas(connected: boolean) {
   useEffect(() => {
     if (!connected) return
     void load()
-    const timer = window.setInterval(() => void load(), REFRESH_INTERVAL)
+    const timer = window.setInterval(() => void load(), busy ? REFRESH_ACTIVE : REFRESH_IDLE)
     return () => window.clearInterval(timer)
-  }, [connected, load])
+  }, [connected, load, busy])
 
   // Clear pending writes on unmount so a timer cannot fire into a dead tree.
   useEffect(() => {
