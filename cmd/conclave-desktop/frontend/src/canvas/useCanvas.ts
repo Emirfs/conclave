@@ -21,6 +21,7 @@ import {
   UpdateLink,
 } from '../../wailsjs/go/main/App'
 import { domain } from '../../wailsjs/go/models'
+import { providerStyle } from '../providers'
 
 export type ConversationNodeData = {
   kind: 'conversation'
@@ -113,25 +114,46 @@ export function useCanvas(connected: boolean) {
       const noteNodes = new Set(
         (canvas.nodes ?? []).filter((node) => node.kind === 'note').map((node) => String(node.id)),
       )
+      // The colour a card is drawn in is its lead provider's. Carrying those
+      // two colours into the line is what makes the board say who is talking to
+      // whom without a label on every edge.
+      const accents = new Map<string, string>()
+      const producing = new Set<string>()
+      for (const node of canvas.nodes ?? []) {
+        if (node.conversation_id === undefined) continue
+        const conversation = conversations.get(node.conversation_id)
+        if (!conversation) continue
+        accents.set(String(node.id), providerStyle(conversation.providers?.[0] ?? '').accent)
+        for (const turn of conversation.turns ?? []) {
+          for (const response of turn.responses ?? []) {
+            if (response.status === 'queued' || response.status === 'running') {
+              producing.add(String(node.id))
+            }
+          }
+        }
+      }
       const mappedEdges = (canvas.links ?? []).map((link) => {
           const toNote = noteNodes.has(String(link.target_id))
           return {
             id: String(link.id),
             source: String(link.source_id),
             target: String(link.target_id),
-            // Provider activity is already visible in its card. Animating every
-            // edge whenever any card works keeps the WebView GPU busy and makes
-            // large boards stutter.
+            // React Flow's own animation runs on every edge it is set on.
+            // Only the one edge whose target is actually producing an answer
+            // moves, and it does so in CSS.
             animated: false,
-            type: 'smoothstep',
-            label: toNote ? undefined : linkLabel(link),
-            style: toNote ? { strokeDasharray: '4 4', opacity: 0.55 } : undefined,
+            type: 'provider',
+            style: undefined,
             data: {
               mode: link.mode,
               maxRounds: link.max_rounds,
               untilDone: link.until_done,
               briefing: link.briefing ?? '',
               toNote,
+              label: toNote ? undefined : linkLabel(link),
+              sourceAccent: accents.get(String(link.source_id)),
+              targetAccent: accents.get(String(link.target_id)),
+              active: !toNote && producing.has(String(link.target_id)),
             },
           }
         })
@@ -141,8 +163,12 @@ export function useCanvas(connected: boolean) {
           mappedEdges.every((edge, index) => {
             const existing = current[index]
             return existing.id === edge.id && existing.source === edge.source &&
-              existing.target === edge.target && existing.label === edge.label &&
-              existing.data?.briefing === edge.data.briefing
+              existing.target === edge.target &&
+              existing.data?.label === edge.data.label &&
+              existing.data?.briefing === edge.data.briefing &&
+              // A link that starts or stops carrying an answer has to be
+              // redrawn, or the board never shows the work moving.
+              existing.data?.active === edge.data.active
           })
         ) {
           return current

@@ -21,9 +21,11 @@ import { BranchPanel } from './BranchPanel'
 import { ConversationNode } from './ConversationNode'
 import { LinkPanel } from './LinkPanel'
 import { NoteNode } from './NoteNode'
+import { ProviderEdge } from './ProviderEdge'
 import type { BoardNode, useCanvas } from './useCanvas'
 
 const nodeTypes = { conversation: ConversationNode, note: NoteNode }
+const edgeTypes = { provider: ProviderEdge }
 
 export type BoardHandle = ReturnType<typeof useCanvas>
 
@@ -286,6 +288,7 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
         nodes={decorated}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}

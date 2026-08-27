@@ -1036,13 +1036,83 @@
   stroke-width: 1.6;
 }
 
-.react-flow__edge.selected .react-flow__edge-path {
-  stroke: var(--accent);
+/* Links between cards.
+
+   The stroke is a gradient from the source card's provider colour to the
+   target's, set by ProviderEdge, so a glance at a line says which model is
+   speaking to which. The working mode is in the line's texture instead of a
+   permanent label: a handoff is thin, a dialogue is heavier, a review is
+   dotted. */
+.edge {
+  fill: none;
+  stroke-linecap: round;
+  transition: stroke-width 140ms var(--ease), opacity 140ms var(--ease);
 }
 
-/* An animated link means an answer is on its way along it. */
-.react-flow__edge.animated .react-flow__edge-path {
-  stroke: var(--accent);
+.edge--relay {
+  stroke-width: 1.5;
+  opacity: 0.75;
+}
+
+.edge--dialogue {
+  stroke-width: 2.6;
+  opacity: 0.9;
+}
+
+.edge--review {
+  stroke-width: 1.8;
+  stroke-dasharray: 1 6;
+  opacity: 0.85;
+}
+
+/* A record of where a result came from, not a route anything travels. */
+.edge--note {
+  stroke: var(--line);
+  stroke-width: 1.2;
+  stroke-dasharray: 3 6;
+  opacity: 0.4;
+}
+
+.edge--selected {
+  opacity: 1;
+  stroke-width: 3.2;
+}
+
+.edge--note.edge--selected {
+  stroke: var(--line-strong);
+  opacity: 0.8;
+  stroke-width: 1.6;
+}
+
+/* An answer is being produced at the far end of this link right now. Only the
+   one edge actually carrying work moves; animating all of them keeps the
+   WebView compositing the whole board. */
+.edge--active {
+  stroke-dasharray: 5 7;
+  animation: edge-flow 0.9s linear infinite;
+  opacity: 1;
+}
+
+@keyframes edge-flow {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+/* Mode and round budget, shown while the edge is selected — which is exactly
+   when the panel for changing them is open. */
+.edge__label {
+  position: absolute;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-panel);
 }
 
 .react-flow__connectionline .react-flow__connection-path {
