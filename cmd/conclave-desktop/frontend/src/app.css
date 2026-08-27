@@ -1,8 +1,10 @@
+/* A column, not a grid with named rows: the update banner is there only when
+   there is a release to announce, and a grid would hand its row to whatever
+   element came next — the canvas would take the banner's height instead of the
+   space that was left over. */
 .shell {
-  display: grid;
-  /* The middle row is the update banner. It collapses to nothing when there is
-     no release to announce, so the canvas keeps its full height. */
-  grid-template-rows: var(--titlebar-height) auto 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   background: var(--surface-base);
 }
@@ -11,6 +13,7 @@
 
 .update {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 10px;
   padding: 7px 12px 7px 14px;
@@ -112,6 +115,8 @@
 
 .titlebar {
   display: flex;
+  flex: none;
+  height: var(--titlebar-height);
   align-items: center;
   gap: 12px;
   padding-left: 14px;
@@ -222,6 +227,9 @@
 
 .body {
   display: grid;
+  /* Takes whatever the title bar and the banner leave, and min-height:0 lets
+     the rail and the canvas scroll inside it rather than stretching it. */
+  flex: 1;
   grid-template-columns: var(--rail-width) 1fr;
   min-height: 0;
 }
