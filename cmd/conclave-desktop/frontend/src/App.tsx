@@ -6,6 +6,7 @@ import { domain } from '../wailsjs/go/models'
 import { providerStyle } from './providers'
 import { Board } from './canvas/Board'
 import { useCanvas } from './canvas/useCanvas'
+import { UpdateBanner } from './UpdateBanner'
 import './canvas/canvas.css'
 
 type Connection = 'connecting' | 'online' | 'offline'
@@ -92,6 +93,7 @@ export function App() {
   return (
     <div className="shell">
       <TitleBar connection={connection} version={snapshot?.version} />
+      <UpdateBanner online={connection === 'online'} />
       <div className="body">
         <aside className="rail">
           <ProviderGroup heading="Sağlayıcılar" providers={providers} onPick={addSolo} />
