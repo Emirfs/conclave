@@ -36,6 +36,22 @@
   --provider-ollama: #c79bff;
   --provider-unknown: #6b7488;
 
+  /* Type scale.
+     Five steps, and nothing outside them. The rule this replaces was eleven
+     ad-hoc sizes from 9px up, three quarters of them below 12px — small enough
+     that a card had to be zoomed to be read, which defeats a canvas.
+
+     --text-xs is the floor: legible, but only ever for a word or two that
+     labels something already visible. Anything the reader has to follow as a
+     sentence starts at --text-sm, and anything they read for minutes at a time
+     — an answer, a note — gets --text-lg. If a new rule wants a size between
+     two steps, the answer is one of the steps, not a sixth value. */
+  --text-xs: 12.5px;
+  --text-sm: 13.5px;
+  --text-md: 15px;
+  --text-lg: 16.5px;
+  --text-xl: 18px;
+
   /* Geometry. */
   --radius-sm: 6px;
   --radius: 10px;
@@ -72,7 +88,7 @@ body {
   background: var(--surface-base);
   color: var(--text-primary);
   font-family: var(--font-ui);
-  font-size: 13.5px;
+  font-size: var(--text-md);
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
