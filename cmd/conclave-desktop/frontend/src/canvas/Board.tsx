@@ -347,17 +347,19 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
         </Panel>
         <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="#232838" />
         <Controls showInteractive={false} position="bottom-right" />
-        <Panel position="bottom-left" className="mappanel">
-          {map && (
-            <MiniMap
-              pannable
-              zoomable
-              className="mappanel__map"
-              position={undefined}
-              maskColor="rgba(8, 9, 13, 0.72)"
-              nodeColor={(node) => (node.type === 'note' ? '#f2c55c' : '#7aa8ff')}
-            />
-          )}
+        {/* MiniMap positions itself; wrapping it in a Panel only fights that.
+            The toggle is its own panel, lifted clear of the map when shown. */}
+        {map && (
+          <MiniMap
+            pannable
+            zoomable
+            className="mappanel__map"
+            position="bottom-left"
+            maskColor="rgba(8, 9, 13, 0.72)"
+            nodeColor={(node) => (node.type === 'note' ? '#f2c55c' : '#7aa8ff')}
+          />
+        )}
+        <Panel position="bottom-left" className={`mappanel${map ? ' mappanel--raised' : ''}`}>
           <button
             className="mappanel__toggle"
             onClick={() => setMap(!map)}
