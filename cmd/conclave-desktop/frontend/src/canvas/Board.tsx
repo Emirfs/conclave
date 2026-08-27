@@ -42,6 +42,22 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
   // The answer a branch would start from, held while the user picks providers.
   const [branching, setBranching] = useState<{ conversationID: number; answer: string } | null>(null)
+  // The minimap earns its corner on a large board and wastes it on a small one,
+  // so the choice is the user's and it is remembered.
+  const [map, setMap] = useState(() => {
+    try {
+      return localStorage.getItem('conclave.minimap') !== 'off'
+    } catch {
+      return true
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem('conclave.minimap', map ? 'on' : 'off')
+    } catch {
+      // A browser that refuses storage still gets a working toggle.
+    }
+  }, [map])
 
   // Closing removes the node and, for a conversation, its history with it.
   const close = useCallback((id: string) => void remove(id), [remove])
@@ -331,13 +347,25 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
         </Panel>
         <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="#232838" />
         <Controls showInteractive={false} position="bottom-right" />
-        <MiniMap
-          pannable
-          zoomable
-          position="bottom-left"
-          maskColor="rgba(8, 9, 13, 0.72)"
-          nodeColor={(node) => (node.type === 'note' ? '#f2c55c' : '#7aa8ff')}
-        />
+        <Panel position="bottom-left" className="mappanel">
+          {map && (
+            <MiniMap
+              pannable
+              zoomable
+              className="mappanel__map"
+              position={undefined}
+              maskColor="rgba(8, 9, 13, 0.72)"
+              nodeColor={(node) => (node.type === 'note' ? '#f2c55c' : '#7aa8ff')}
+            />
+          )}
+          <button
+            className="mappanel__toggle"
+            onClick={() => setMap(!map)}
+            title={map ? 'Haritayı gizle' : 'Haritayı göster'}
+          >
+            {map ? 'harita ✕' : 'harita'}
+          </button>
+        </Panel>
       </ReactFlow>
     </div>
   )

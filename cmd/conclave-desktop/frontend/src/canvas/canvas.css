@@ -36,6 +36,42 @@
   box-shadow: var(--shadow-panel);
 }
 
+/* The map and its toggle share the corner. Its default size takes a bite out
+   of the board that a glance at the layout does not repay. */
+.mappanel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 0;
+}
+
+.mappanel__map {
+  position: relative !important;
+  width: 150px !important;
+  height: 105px !important;
+  margin: 0 !important;
+}
+
+.mappanel__toggle {
+  align-self: flex-start;
+  padding: 3px 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: default;
+  box-shadow: var(--shadow-panel);
+  transition: border-color 120ms var(--ease), color 120ms var(--ease);
+}
+
+.mappanel__toggle:hover {
+  border-color: var(--line);
+  color: var(--text-secondary);
+}
+
 .react-flow__node {
   /* The node components draw their own frame and shadow. */
   border: 0;
