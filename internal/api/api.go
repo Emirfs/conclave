@@ -53,6 +53,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/canvas/links/{id}", s.deleteLink)
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/loop", s.setLoop)
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/loop/running", s.setLoopRunning)
+	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/role", s.setRole)
+	mux.HandleFunc("POST /v1/canvas/conversations/{id}/resume", s.resumeDialogue)
 	return s.authenticate(mux)
 }
 
@@ -354,6 +356,43 @@ func (s *Server) setProject(response http.ResponseWriter, request *http.Request)
 	response.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) setRole(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	var input domain.RoleRequest
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	err = s.store.SetConversationRole(request.Context(), id, input.Normalised().Role)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusNotFound, errors.New("conversation does not exist"))
+		return
+	}
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// resumeDialogue clears the parked state so a stalled exchange can be pushed on
+// without the user having to remember what it was waiting for.
+func (s *Server) resumeDialogue(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	if err := s.store.ResumeDialogue(request.Context(), id); err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) conversationProject(ctx context.Context, id int64) (string, error) {
 	canvas, err := s.store.Canvas(ctx)
 	if err != nil {
@@ -412,14 +451,19 @@ func (s *Server) projectDiff(response http.ResponseWriter, request *http.Request
 
 func (s *Server) createLink(response http.ResponseWriter, request *http.Request) {
 	var input domain.NewLink
-	if !decodeJSON(response, request, 4<<10, &input) {
+	// A briefing is free text the user writes, so the body has to have room for
+	// it on top of the link itself.
+	if !decodeJSON(response, request, 16<<10, &input) {
 		return
 	}
 	if input.SourceID <= 0 || input.TargetID <= 0 {
 		writeError(response, http.StatusBadRequest, errors.New("source and target node ids are required"))
 		return
 	}
-	options := domain.LinkOptions{Mode: input.Mode, MaxRounds: input.MaxRounds, UntilDone: input.UntilDone}
+	options := domain.LinkOptions{
+		Mode: input.Mode, MaxRounds: input.MaxRounds,
+		UntilDone: input.UntilDone, Briefing: input.Briefing,
+	}
 	if input.Pair {
 		// Pairing links both ways, so the two cards answer each other.
 		links, err := s.store.PairNodes(request.Context(), input.SourceID, input.TargetID, options)
@@ -445,7 +489,7 @@ func (s *Server) updateLink(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	var input domain.LinkOptions
-	if !decodeJSON(response, request, 4<<10, &input) {
+	if !decodeJSON(response, request, 16<<10, &input) {
 		return
 	}
 	err = s.store.UpdateLink(request.Context(), id, input)
@@ -658,6 +702,16 @@ func (c *Client) PatchCanvasNode(ctx context.Context, patch domain.CanvasNodePat
 func (c *Client) SetProject(ctx context.Context, conversationID int64, input domain.ProjectRequest) error {
 	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/project"
 	return c.do(ctx, http.MethodPut, path, input, nil, http.StatusNoContent)
+}
+
+func (c *Client) SetRole(ctx context.Context, conversationID int64, input domain.RoleRequest) error {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/role"
+	return c.do(ctx, http.MethodPut, path, input, nil, http.StatusNoContent)
+}
+
+func (c *Client) ResumeDialogue(ctx context.Context, conversationID int64) error {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/resume"
+	return c.do(ctx, http.MethodPost, path, nil, nil, http.StatusNoContent)
 }
 
 func (c *Client) ProjectChanges(ctx context.Context, conversationID int64) (vcs.Status, error) {

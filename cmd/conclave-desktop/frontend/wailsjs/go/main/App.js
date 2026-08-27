@@ -30,8 +30,8 @@ export function LinkNodes(arg1, arg2) {
   return window['go']['main']['App']['LinkNodes'](arg1, arg2);
 }
 
-export function PairNodes(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['PairNodes'](arg1, arg2, arg3, arg4);
+export function PairNodes(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['PairNodes'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function PatchCanvasNode(arg1) {
@@ -44,6 +44,10 @@ export function PickProjectDirectory(arg1) {
 
 export function ProjectChanges(arg1) {
   return window['go']['main']['App']['ProjectChanges'](arg1);
+}
+
+export function ResumeDialogue(arg1) {
+  return window['go']['main']['App']['ResumeDialogue'](arg1);
 }
 
 export function SendTurn(arg1, arg2) {
@@ -62,6 +66,10 @@ export function SetProject(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetProject'](arg1, arg2, arg3);
 }
 
+export function SetRole(arg1, arg2) {
+  return window['go']['main']['App']['SetRole'](arg1, arg2);
+}
+
 export function Snapshot() {
   return window['go']['main']['App']['Snapshot']();
 }
@@ -70,6 +78,6 @@ export function UnlinkNodes(arg1) {
   return window['go']['main']['App']['UnlinkNodes'](arg1);
 }
 
-export function UpdateLink(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['UpdateLink'](arg1, arg2, arg3, arg4);
+export function UpdateLink(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['UpdateLink'](arg1, arg2, arg3, arg4, arg5);
 }

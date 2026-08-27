@@ -18,6 +18,8 @@ type Props = NodeProps & {
     onToggleAccess: (conversationID: number, project: string, access: string) => Promise<void>
     onSaveLoop: (conversationID: number, config: domain.LoopConfig) => Promise<void>
     onToggleLoop: (conversationID: number, running: boolean) => Promise<void>
+    onSaveRole: (conversationID: number, role: string) => Promise<void>
+    onResumeDialogue: (conversationID: number) => Promise<void>
     onResize: (id: string, direction: -1 | 1) => void
   }
 }
@@ -25,7 +27,8 @@ type Props = NodeProps & {
 type Tab = 'chat' | 'changes' | 'tests'
 
 export const ConversationNode = memo(function ConversationNode({ id, data, selected }: Props) {
-  const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop, onResize } = data
+  const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop,
+    onSaveRole, onResumeDialogue, onResize } = data
   const project = conversation.project_path ?? ''
   const access = conversation.access ?? 'edit'
   const [tab, setTab] = useState<Tab>('chat')
@@ -38,6 +41,12 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const dialogueState = conversation.dialogue_state ?? ''
+  // The role is edited locally and written on blur, so the poll that refreshes
+  // the board cannot overwrite a half-typed line.
+  const savedRole = conversation.role ?? ''
+  const [role, setRole] = useState(savedRole)
+  useEffect(() => setRole(savedRole), [savedRole])
   const transcript = useRef<HTMLDivElement>(null)
   const card = useRef<HTMLDivElement>(null)
 
@@ -195,6 +204,39 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
           click on its header, buttons and input. */}
       {linking && (
         <Handle type="target" position={Position.Left} id="anywhere" className="node__dropzone" />
+      )}
+
+      {tab === 'chat' && dialogueState !== '' && (
+        <div className={`node__dialogue node__dialogue--${dialogueState}`}>
+          {dialogueState === 'done' ? (
+            <span className="node__dialogue-text">Konuşma tamamlandı.</span>
+          ) : (
+            <>
+              <span className="node__dialogue-text">Kart senin kararını bekliyor.</span>
+              <button
+                className="node__dialogue-resume nodrag"
+                onClick={() => void onResumeDialogue(conversation.id)}
+                title="Beklemeyi kaldır; yazacağın mesaj konuşmayı yeniden başlatır"
+              >
+                devam ettir
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {tab === 'chat' && (
+        <div className="node__role nodrag">
+          <span className="node__role-label">rol</span>
+          <input
+            className="node__role-input"
+            value={role}
+            placeholder="Bağlı kartla çalışırken bu kartın işi ne?"
+            onChange={(event) => setRole(event.target.value)}
+            onBlur={() => role !== savedRole && void onSaveRole(conversation.id, role)}
+            spellCheck={false}
+          />
+        </div>
       )}
 
       <div className="node__composer">

@@ -10,10 +10,12 @@ import {
   PairNodes,
   PatchCanvasNode,
   PickProjectDirectory,
+  ResumeDialogue,
   SetProject,
   SendTurn,
   SetLoop,
   SetLoopRunning,
+  SetRole,
   UnlinkNodes,
   UpdateLink,
 } from '../../wailsjs/go/main/App'
@@ -114,7 +116,12 @@ export function useCanvas(connected: boolean) {
           animated: false,
           type: 'smoothstep',
           label: linkLabel(link),
-          data: { mode: link.mode, maxRounds: link.max_rounds, untilDone: link.until_done },
+          data: {
+            mode: link.mode,
+            maxRounds: link.max_rounds,
+            untilDone: link.until_done,
+            briefing: link.briefing ?? '',
+          },
         }))
       setEdges((current) => {
         if (
@@ -122,7 +129,8 @@ export function useCanvas(connected: boolean) {
           mappedEdges.every((edge, index) => {
             const existing = current[index]
             return existing.id === edge.id && existing.source === edge.source &&
-              existing.target === edge.target && existing.label === edge.label
+              existing.target === edge.target && existing.label === edge.label &&
+              existing.data?.briefing === edge.data.briefing
           })
         ) {
           return current
@@ -269,9 +277,9 @@ export function useCanvas(connected: boolean) {
   )
 
   const pair = useCallback(
-    async (firstID: string, secondID: string, mode: string, rounds: number) => {
+    async (firstID: string, secondID: string, mode: string, rounds: number, briefing: string) => {
       try {
-        await PairNodes(Number(firstID), Number(secondID), mode, rounds)
+        await PairNodes(Number(firstID), Number(secondID), mode, rounds, briefing)
         await load()
       } catch (cause) {
         setError(String(cause))
@@ -281,9 +289,35 @@ export function useCanvas(connected: boolean) {
   )
 
   const configureLink = useCallback(
-    async (id: string, mode: string, rounds: number, untilDone: boolean) => {
+    async (id: string, mode: string, rounds: number, untilDone: boolean, briefing: string) => {
       try {
-        await UpdateLink(Number(id), mode, rounds, untilDone)
+        await UpdateLink(Number(id), mode, rounds, untilDone, briefing)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  const saveRole = useCallback(
+    async (conversationID: number, role: string) => {
+      try {
+        await SetRole(conversationID, role)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  // Clearing the parked state is what lets a stalled pair be pushed on: the
+  // next message starts the exchange again instead of being swallowed.
+  const resumeDialogue = useCallback(
+    async (conversationID: number) => {
+      try {
+        await ResumeDialogue(conversationID)
         await load()
       } catch (cause) {
         setError(String(cause))
@@ -372,9 +406,10 @@ export function useCanvas(connected: boolean) {
       nodes, setNodes, edges, error, loaded, load, patch,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
+      saveRole, resumeDialogue,
     }),
     [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
-     saveLoop, toggleLoop],
+     saveLoop, toggleLoop, saveRole, resumeDialogue],
   )
 }

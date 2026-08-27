@@ -36,7 +36,8 @@ export function Board({ canvas }: { canvas: BoardHandle }) {
 
 function BoardSurface({ canvas }: { canvas: BoardHandle }) {
   const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink,
-    pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop } = canvas
+    pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
+    saveRole, resumeDialogue } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
 
   // Closing removes the node and, for a conversation, its history with it.
@@ -78,11 +79,14 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
                 onToggleAccess: setAccess,
                 onSaveLoop: saveLoop,
                 onToggleLoop: toggleLoop,
+                onSaveRole: saveRole,
+                onResumeDialogue: resumeDialogue,
                 onResize: resize,
               },
             },
       ),
-    [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop, resize],
+    [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop,
+     saveRole, resumeDialogue, resize],
   )
 
   const onNodesChange = useCallback(
@@ -234,7 +238,7 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
                 <>
                   <button
                     className="boardpanel__action"
-                    onClick={() => void pair(selectedCards[0].id, selectedCards[1].id, 'dialogue', 3)}
+                    onClick={() => void pair(selectedCards[0].id, selectedCards[1].id, 'dialogue', 3, '')}
                     title="İki kart birbirine cevap verir"
                   >
                     karşılıklı bağla

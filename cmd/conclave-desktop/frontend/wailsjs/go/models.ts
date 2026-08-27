@@ -7,6 +7,7 @@ export namespace domain {
 	    mode: string;
 	    max_rounds: number;
 	    until_done: boolean;
+	    briefing?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new CanvasLink(source);
@@ -20,6 +21,7 @@ export namespace domain {
 	        this.mode = source["mode"];
 	        this.max_rounds = source["max_rounds"];
 	        this.until_done = source["until_done"];
+	        this.briefing = source["briefing"];
 	    }
 	}
 	export class CanvasNode {
@@ -202,6 +204,8 @@ export namespace domain {
 	    loop: LoopConfig;
 	    loop_running: boolean;
 	    runs?: CardRun[];
+	    role?: string;
+	    dialogue_state?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Conversation(source);
@@ -220,6 +224,8 @@ export namespace domain {
 	        this.loop = this.convertValues(source["loop"], LoopConfig);
 	        this.loop_running = source["loop_running"];
 	        this.runs = this.convertValues(source["runs"], CardRun);
+	        this.role = source["role"];
+	        this.dialogue_state = source["dialogue_state"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

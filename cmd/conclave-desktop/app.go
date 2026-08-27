@@ -161,8 +161,9 @@ func (a *App) LinkNodes(sourceID, targetID int64) (domain.CanvasLink, error) {
 	return client.CreateLink(ctx, domain.NewLink{SourceID: sourceID, TargetID: targetID})
 }
 
-// PairNodes links two cards both ways so they answer each other.
-func (a *App) PairNodes(firstID, secondID int64, mode string, rounds int) ([]domain.CanvasLink, error) {
+// PairNodes links two cards both ways so they answer each other. The briefing
+// is what each card is told once, before its first message from the other.
+func (a *App) PairNodes(firstID, secondID int64, mode string, rounds int, briefing string) ([]domain.CanvasLink, error) {
 	client, err := a.client()
 	if err != nil {
 		return nil, err
@@ -170,19 +171,45 @@ func (a *App) PairNodes(firstID, secondID int64, mode string, rounds int) ([]dom
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
 	return client.PairLink(ctx, domain.NewLink{
-		SourceID: firstID, TargetID: secondID, Mode: mode, MaxRounds: rounds,
+		SourceID: firstID, TargetID: secondID, Mode: mode, MaxRounds: rounds, Briefing: briefing,
 	})
 }
 
-// UpdateLink changes how an existing link works.
-func (a *App) UpdateLink(id int64, mode string, rounds int, untilDone bool) error {
+// UpdateLink changes how an existing link works. Changing the briefing re-briefs
+// both cards before their next relayed message.
+func (a *App) UpdateLink(id int64, mode string, rounds int, untilDone bool, briefing string) error {
 	client, err := a.client()
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
-	return client.UpdateLink(ctx, id, domain.LinkOptions{Mode: mode, MaxRounds: rounds, UntilDone: untilDone})
+	return client.UpdateLink(ctx, id, domain.LinkOptions{
+		Mode: mode, MaxRounds: rounds, UntilDone: untilDone, Briefing: briefing,
+	})
+}
+
+// SetRole says what a card is meant to do when it works with another card.
+// Without it two paired cards both wait to be led.
+func (a *App) SetRole(conversationID int64, role string) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.SetRole(ctx, conversationID, domain.RoleRequest{Role: role})
+}
+
+// ResumeDialogue clears a parked exchange so the next message starts it again.
+func (a *App) ResumeDialogue(conversationID int64) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.ResumeDialogue(ctx, conversationID)
 }
 
 // SetLoop replaces a card's step list and how its cycle repeats.

@@ -197,6 +197,17 @@ CREATE INDEX card_runs_conversation_idx ON card_runs(conversation_id, id DESC);
 	`
 ALTER TABLE canvas_links ADD COLUMN until_done INTEGER NOT NULL DEFAULT 0;
 `,
+	// 10: linked cards are briefed once instead of being reminded of the
+	// arrangement on every hop. kind separates an ordinary turn from a relayed
+	// one and from the nudge that answers a card asking for a human decision;
+	// dialogue_state is how a stalled exchange is told apart from a finished one.
+	`
+ALTER TABLE chat_turns ADD COLUMN kind TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE conversations ADD COLUMN role TEXT NOT NULL DEFAULT '';
+ALTER TABLE conversations ADD COLUMN briefed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE conversations ADD COLUMN dialogue_state TEXT NOT NULL DEFAULT '';
+ALTER TABLE canvas_links ADD COLUMN briefing TEXT NOT NULL DEFAULT '';
+`,
 }
 
 func (s *Store) init() error {
@@ -264,8 +275,13 @@ func (s *Store) CreateConversationTurn(ctx context.Context, conversationID int64
 	if len(providers) == 0 {
 		return 0, fmt.Errorf("conversation %d has no providers", conversationID)
 	}
-	turnID, err := insertTurn(ctx, tx, conversationID, prompt, providers)
+	turnID, err := insertTurn(ctx, tx, conversationID, prompt, providers, domain.TurnUser)
 	if err != nil {
+		return 0, err
+	}
+	// A person speaking is the answer a parked exchange was waiting for.
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE conversations SET dialogue_state = '' WHERE id = ?", conversationID); err != nil {
 		return 0, err
 	}
 	return turnID, tx.Commit()
@@ -290,11 +306,11 @@ func conversationProviders(ctx context.Context, tx *sql.Tx, conversationID int64
 	return providers, rows.Err()
 }
 
-func insertTurn(ctx context.Context, tx *sql.Tx, conversationID int64, prompt string, providers []string) (int64, error) {
+func insertTurn(ctx context.Context, tx *sql.Tx, conversationID int64, prompt string, providers []string, kind string) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := tx.ExecContext(ctx,
-		"INSERT INTO chat_turns(conversation_id, prompt, created_at) VALUES(?, ?, ?)",
-		conversationID, prompt, now)
+		"INSERT INTO chat_turns(conversation_id, prompt, created_at, kind) VALUES(?, ?, ?, ?)",
+		conversationID, prompt, now, kind)
 	if err != nil {
 		return 0, err
 	}
@@ -358,10 +374,16 @@ ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	job.Prompt, err = s.chatContext(ctx, job.ConversationID, job.Provider, job.TurnID)
-	if err != nil {
-		_ = s.RequeueChatResponse(context.WithoutCancel(ctx), job.ResponseID)
-		return nil, err
+	// A provider that resumes its own session already holds this conversation's
+	// history; replaying a transcript into the prompt would send it twice. The
+	// transcript is only what stands in for a session the provider does not
+	// keep, or has not started yet.
+	if job.SessionID == "" {
+		job.Prompt, err = s.chatContext(ctx, job.ConversationID, job.Provider, job.TurnID)
+		if err != nil {
+			_ = s.RequeueChatResponse(context.WithoutCancel(ctx), job.ResponseID)
+			return nil, err
+		}
 	}
 	return &job, nil
 }
@@ -792,7 +814,8 @@ func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, e
 		`SELECT id, title, kind, created_at, project_path, access,
 		        COALESCE(test_rounds, 0),
 		        COALESCE(loop_mode, 'off'), COALESCE(loop_interval_seconds, 5),
-		        COALESCE(loop_running, 0)
+		        COALESCE(loop_running, 0),
+		        COALESCE(role, ''), COALESCE(dialogue_state, '')
 		 FROM conversations ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -806,7 +829,8 @@ func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, e
 		var notify int
 		if err := rows.Scan(&item.ID, &item.Title, &item.Kind, &created,
 			&item.ProjectPath, &item.Access, &notify,
-			&item.Loop.Mode, &item.Loop.IntervalSeconds, &loopRunning); err != nil {
+			&item.Loop.Mode, &item.Loop.IntervalSeconds, &loopRunning,
+			&item.Role, &item.DialogueState); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1021,13 +1045,14 @@ WHERE id IN (?, ?) AND kind = ? AND conversation_id IS NOT NULL`,
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := s.db.ExecContext(ctx, `
-INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done)
-VALUES(?, ?, ?, ?, ?, ?)
+INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done, briefing)
+VALUES(?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(source_id, target_id) DO UPDATE SET
     mode = excluded.mode,
     max_rounds = excluded.max_rounds,
-    until_done = excluded.until_done`,
-		sourceID, targetID, now, options.Mode, options.MaxRounds, options.UntilDone)
+    until_done = excluded.until_done,
+    briefing = excluded.briefing`,
+		sourceID, targetID, now, options.Mode, options.MaxRounds, options.UntilDone, options.Briefing)
 	if err != nil {
 		return domain.CanvasLink{}, err
 	}
@@ -1054,6 +1079,7 @@ ON CONFLICT(source_id, target_id) DO UPDATE SET
 	return domain.CanvasLink{
 		ID: id, SourceID: sourceID, TargetID: targetID,
 		Mode: options.Mode, MaxRounds: options.MaxRounds, UntilDone: options.UntilDone,
+		Briefing: options.Briefing,
 	}, nil
 }
 
@@ -1061,14 +1087,15 @@ ON CONFLICT(source_id, target_id) DO UPDATE SET
 // existing reverse link alone apart from matching its mode and budget.
 func (s *Store) ensureReverseLink(ctx context.Context, sourceID, targetID int64, options domain.LinkOptions) error {
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done)
-VALUES(?, ?, ?, ?, ?, ?)
+INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done, briefing)
+VALUES(?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(source_id, target_id) DO UPDATE SET
     mode = excluded.mode,
     max_rounds = excluded.max_rounds,
-    until_done = excluded.until_done`,
+    until_done = excluded.until_done,
+    briefing = excluded.briefing`,
 		targetID, sourceID, time.Now().UTC().Format(time.RFC3339Nano),
-		options.Mode, options.MaxRounds, options.UntilDone)
+		options.Mode, options.MaxRounds, options.UntilDone, options.Briefing)
 	return err
 }
 
@@ -1099,8 +1126,17 @@ func (s *Store) UpdateLink(ctx context.Context, id int64, options domain.LinkOpt
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx,
-		"UPDATE canvas_links SET mode = ?, max_rounds = ?, until_done = ? WHERE id = ?",
-		options.Mode, options.MaxRounds, options.UntilDone, id); err != nil {
+		"UPDATE canvas_links SET mode = ?, max_rounds = ?, until_done = ?, briefing = ? WHERE id = ?",
+		options.Mode, options.MaxRounds, options.UntilDone, options.Briefing, id); err != nil {
+		return err
+	}
+	// A changed arrangement is worth explaining again, so both cards are
+	// re-briefed before their next relayed message.
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE conversations SET briefed = 0 WHERE id IN (
+    SELECT conversation_id FROM canvas_nodes
+    WHERE id IN (?, ?) AND conversation_id IS NOT NULL
+)`, sourceID, targetID); err != nil {
 		return err
 	}
 	// Choosing "dialogue" on a one-way link is a request for a conversation,
@@ -1128,7 +1164,7 @@ func (s *Store) DeleteLink(ctx context.Context, id int64) error {
 
 func (s *Store) listLinks(ctx context.Context) ([]domain.CanvasLink, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, source_id, target_id, mode, max_rounds, until_done FROM canvas_links ORDER BY id")
+		"SELECT id, source_id, target_id, mode, max_rounds, until_done, COALESCE(briefing, '') FROM canvas_links ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -1136,7 +1172,7 @@ func (s *Store) listLinks(ctx context.Context) ([]domain.CanvasLink, error) {
 	links := []domain.CanvasLink{}
 	for rows.Next() {
 		var link domain.CanvasLink
-		if err := rows.Scan(&link.ID, &link.SourceID, &link.TargetID, &link.Mode, &link.MaxRounds, &link.UntilDone); err != nil {
+		if err := rows.Scan(&link.ID, &link.SourceID, &link.TargetID, &link.Mode, &link.MaxRounds, &link.UntilDone, &link.Briefing); err != nil {
 			return nil, err
 		}
 		links = append(links, link)
@@ -1191,11 +1227,11 @@ func (s *Store) RelayPayload(ctx context.Context, turnID int64) (string, bool, e
 func (s *Store) RelayTurn(ctx context.Context, turnID int64) (int, error) {
 	var conversationID int64
 	var depth int
-	var sourceTitle string
+	var sourceTitle, sourceKind string
 	err := s.db.QueryRowContext(ctx, `
-SELECT COALESCE(t.conversation_id, 0), t.relay_depth, COALESCE(c.title, '')
+SELECT COALESCE(t.conversation_id, 0), t.relay_depth, COALESCE(c.title, ''), t.kind
 FROM chat_turns t LEFT JOIN conversations c ON c.id = t.conversation_id
-WHERE t.id = ?`, turnID).Scan(&conversationID, &depth, &sourceTitle)
+WHERE t.id = ?`, turnID).Scan(&conversationID, &depth, &sourceTitle, &sourceKind)
 	if err != nil {
 		return 0, err
 	}
@@ -1208,7 +1244,7 @@ WHERE t.id = ?`, turnID).Scan(&conversationID, &depth, &sourceTitle)
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-SELECT target.conversation_id, link.mode, link.max_rounds, link.until_done
+SELECT target.conversation_id, link.mode, link.max_rounds, link.until_done, link.briefing
 FROM canvas_links link
 JOIN canvas_nodes source ON source.id = link.source_id
 JOIN canvas_nodes target ON target.id = link.target_id
@@ -1221,11 +1257,12 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 		mode         string
 		maxRounds    int
 		untilDone    bool
+		briefing     string
 	}
 	var targets []destination
 	for rows.Next() {
 		var item destination
-		if err := rows.Scan(&item.conversation, &item.mode, &item.maxRounds, &item.untilDone); err != nil {
+		if err := rows.Scan(&item.conversation, &item.mode, &item.maxRounds, &item.untilDone, &item.briefing); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -1237,21 +1274,44 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 
 	delivered := 0
 	for _, target := range targets {
+		kind := domain.TurnRelay
+		nudge := false
 		if target.untilDone {
-			complete, err := s.dialogueComplete(ctx, conversationID, target.conversation, payload)
+			outcome, err := s.dialogueOutcome(ctx, conversationID, target.conversation, payload, sourceKind)
 			if err != nil {
 				return delivered, err
 			}
-			if complete {
+			switch outcome {
+			case dialogueOutcomeDone, dialogueOutcomeParked:
+				// The exchange is over. Record which of the two it was, so the
+				// card can say "finished" or "waiting for you" rather than
+				// simply falling silent.
+				state := domain.DialogueDone
+				if outcome == dialogueOutcomeParked {
+					state = domain.DialogueWaiting
+				}
+				if err := s.setDialogueState(ctx, conversationID, target.conversation, state); err != nil {
+					return delivered, err
+				}
 				continue
+			case dialogueOutcomeNudge:
+				// One card asked for a decision. Rather than stopping the whole
+				// exchange on a single question, the other card gets one chance
+				// to answer it on the user's behalf.
+				kind = domain.TurnNudge
+				nudge = true
 			}
 		}
 		// Each link decides for itself when the exchange has gone far enough.
 		if !target.untilDone && depth >= target.maxRounds {
 			continue
 		}
-		prompt := framePayload(target.mode, sourceTitle, payload, target.untilDone)
-		if err := s.createRelayTurn(ctx, target.conversation, prompt, depth+1); err != nil {
+		briefing, err := s.takeBriefing(ctx, target.conversation, target.briefing, sourceTitle, target.mode, target.untilDone)
+		if err != nil {
+			return delivered, err
+		}
+		prompt := framePayload(target.mode, sourceTitle, payload, briefing, nudge)
+		if err := s.createRelayTurn(ctx, target.conversation, prompt, depth+1, kind); err != nil {
 			return delivered, err
 		}
 		delivered++
@@ -1259,44 +1319,80 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 	return delivered, nil
 }
 
-// framePayload presents a relayed answer the way the link's mode intends. The
-// wording is what turns a handoff into a conversation or a review.
-func framePayload(mode, sourceTitle, payload string, untilDone bool) string {
+// framePayload presents a relayed answer the way the link's mode intends. Once
+// a card has been briefed it receives the answer plainly, prefixed only by who
+// said it: repeating the arrangement on every hop wastes tokens and reads like
+// the two cards keep being introduced to each other.
+func framePayload(mode, sourceTitle, payload, briefing string, nudge bool) string {
 	// Naming the speaker is what makes the two cards aware of each other
 	// instead of receiving anonymous text.
 	speaker := sourceTitle
 	if speaker == "" {
 		speaker = "Bağlı olduğun kart"
 	}
+	var message string
 	switch mode {
 	case domain.LinkDialogue:
-		instruction := speaker + " kartı sana şunu söyledi. Doğrudan ona cevap ver ve " +
-			"konuşmayı sürdürecek bir şey ekle:\n\n" + payload
-		if untilDone {
-			instruction += "\n\nİş doğrulanarak tamamlandıysa cevabını [CONCLAVE_DONE] ile; " +
-				"devam etmek için kullanıcı kararı gerekiyorsa [CONCLAVE_USER_INPUT] ile bitir. " +
-				"Bu işaretleri yalnızca gerçekten durmak gerektiğinde kullan."
-		}
-		return instruction
+		message = speaker + ": " + payload
 	case domain.LinkReview:
-		return speaker + " kartının çıktısı aşağıda. İncele; hata, eksik veya risk " +
+		message = speaker + " kartının çıktısı aşağıda. İncele; hata, eksik veya risk " +
 			"görüyorsan açıkça yaz, sorun yoksa kısaca uygun olduğunu söyle.\n\n" + payload
 	default:
-		return payload
+		message = payload
 	}
+	if nudge {
+		message += "\n\n" + nudgeInstruction
+	}
+	if briefing == "" {
+		return message
+	}
+	return briefing + "\n\n---\n\n" + message
 }
+
+// nudgeInstruction answers a card that stopped for a decision. Nobody is
+// watching a dialogue turn by turn, so the other card decides once and says
+// what it assumed; only a second question in a row parks the exchange.
+const nudgeInstruction = "Karşındaki kart senden bir karar bekliyor. Şu an cevaplayacak bir " +
+	"kullanıcı yok: en makul varsayımı kendin seç, ne varsaydığını tek cümleyle yaz ve işe devam et. " +
+	"Yalnızca bu karar gerçekten insana aitse (geri alınamaz bir işlem, dışarıya açılan bir değişiklik " +
+	"veya senin bilemeyeceğin bir tercih) [CONCLAVE_USER_INPUT] ile bitir."
 
 const (
 	dialogueDoneMarker      = "[CONCLAVE_DONE]"
 	dialogueUserInputMarker = "[CONCLAVE_USER_INPUT]"
 )
 
-// dialogueComplete combines objective test completion with explicit provider
+// How an exchange should continue after one card has spoken.
+type dialogueOutcome int
+
+const (
+	// dialogueOutcomeContinue relays the answer as an ordinary turn.
+	dialogueOutcomeContinue dialogueOutcome = iota
+	// dialogueOutcomeDone stops because the work is finished.
+	dialogueOutcomeDone
+	// dialogueOutcomeParked stops because a decision really does need a person.
+	dialogueOutcomeParked
+	// dialogueOutcomeNudge relays the answer with one push to decide and go on.
+	dialogueOutcomeNudge
+)
+
+// dialogueOutcome combines objective test completion with explicit provider
 // terminal states. If both cards define until-pass loops, every loop must pass.
-func (s *Store) dialogueComplete(ctx context.Context, sourceID, targetID int64, payload string) (bool, error) {
+//
+// A request for user input is not by itself the end of an exchange: a card that
+// simply opens with a question would otherwise stop the dialogue before it
+// started. The first such request is answered with a nudge; only when the card
+// asks again after being nudged is the exchange parked for the user.
+func (s *Store) dialogueOutcome(ctx context.Context, sourceID, targetID int64, payload, sourceKind string) (dialogueOutcome, error) {
 	trimmed := strings.TrimSpace(payload)
-	if strings.HasSuffix(trimmed, dialogueDoneMarker) || strings.HasSuffix(trimmed, dialogueUserInputMarker) {
-		return true, nil
+	if strings.HasSuffix(trimmed, dialogueDoneMarker) {
+		return dialogueOutcomeDone, nil
+	}
+	if strings.HasSuffix(trimmed, dialogueUserInputMarker) {
+		if sourceKind == domain.TurnNudge {
+			return dialogueOutcomeParked, nil
+		}
+		return dialogueOutcomeNudge, nil
 	}
 	var configured, passed int
 	err := s.db.QueryRowContext(ctx, `
@@ -1305,12 +1401,92 @@ FROM conversations
 WHERE id IN (?, ?) AND loop_mode = ?`, sourceID, targetID, domain.LoopUntilPass).
 		Scan(&configured, &passed)
 	if err != nil {
-		return false, err
+		return dialogueOutcomeContinue, err
 	}
-	return configured > 0 && passed == configured, nil
+	if configured > 0 && passed == configured {
+		return dialogueOutcomeDone, nil
+	}
+	return dialogueOutcomeContinue, nil
 }
 
-func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, prompt string, depth int) error {
+// takeBriefing returns the briefing a card should be given before its first
+// relayed message, and marks the card as briefed so it is never sent twice.
+// An empty result means the card already knows the arrangement.
+//
+// The briefing rides along with the first real message rather than arriving as
+// a turn of its own: a turn would cost an answer nobody asked for, and the card
+// would spend it introducing itself.
+func (s *Store) takeBriefing(ctx context.Context, conversationID int64, custom, speaker, mode string, untilDone bool) (string, error) {
+	if mode == domain.LinkRelay {
+		// A plain handoff is not a working arrangement; there is nothing to
+		// explain beyond the text itself.
+		return "", nil
+	}
+	result, err := s.db.ExecContext(ctx,
+		"UPDATE conversations SET briefed = 1 WHERE id = ? AND briefed = 0", conversationID)
+	if err != nil {
+		return "", err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if changed == 0 {
+		return "", nil
+	}
+	var role string
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT role FROM conversations WHERE id = ?", conversationID).Scan(&role); err != nil {
+		return "", err
+	}
+	return buildBriefing(custom, role, speaker, mode, untilDone), nil
+}
+
+// buildBriefing writes the one-off explanation of who a card is talking to and
+// what is expected of it.
+func buildBriefing(custom, role, speaker, mode string, untilDone bool) string {
+	var builder strings.Builder
+	builder.WriteString("Bağlam: Bu kart artık doğrudan başka bir yapay zekâ kartıyla konuşuyor. ")
+	builder.WriteString("Karşındaki kartın adı: ")
+	if speaker == "" {
+		builder.WriteString("bağlı kart")
+	} else {
+		builder.WriteString(speaker)
+	}
+	builder.WriteString(". Bundan sonra alacağın mesajlar onun çıktısıdır ve senin cevabın " +
+		"doğrudan ona iletilir — arada bir insan yok.\n\n")
+	builder.WriteString("Buna göre yaz: karşındaki de bir yapay zekâ olduğu için nezaket kalıbı, " +
+		"giriş cümlesi ve özet tekrarı gereksiz. Ona işe yarayacak olanı ver.\n")
+	if role != "" {
+		builder.WriteString("\nSenin rolün: ")
+		builder.WriteString(role)
+		builder.WriteString("\n")
+	}
+	if mode == domain.LinkReview {
+		builder.WriteString("\nSenin işin onun çıktısını incelemek: hata, eksik ve riskleri açıkça yaz.\n")
+	}
+	if untilDone {
+		builder.WriteString("\nBu konuşma iş bitene kadar sürer. İş doğrulanarak tamamlandığında " +
+			"cevabını [CONCLAVE_DONE] ile bitir. Konuşmayı ancak gerçekten insana ait bir karar " +
+			"gerekiyorsa [CONCLAVE_USER_INPUT] ile durdur — soru sormak için değil, yalnızca " +
+			"sensiz ilerlenemeyecek bir tercih varsa.\n")
+	}
+	if custom != "" {
+		builder.WriteString("\nGörev: ")
+		builder.WriteString(custom)
+		builder.WriteString("\n")
+	}
+	return strings.TrimRight(builder.String(), "\n")
+}
+
+// setDialogueState records how an exchange ended on both of its cards.
+func (s *Store) setDialogueState(ctx context.Context, sourceID, targetID int64, state string) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE conversations SET dialogue_state = ? WHERE id IN (?, ?)", state, sourceID, targetID)
+	return err
+}
+
+func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, prompt string, depth int, kind string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -1323,7 +1499,7 @@ func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, promp
 	if len(providers) == 0 {
 		return nil
 	}
-	turnID, err := insertTurn(ctx, tx, conversationID, prompt, providers)
+	turnID, err := insertTurn(ctx, tx, conversationID, prompt, providers, kind)
 	if err != nil {
 		return err
 	}
@@ -1348,6 +1524,31 @@ ON CONFLICT(conversation_id, provider) DO UPDATE SET
     model = excluded.model,
     updated_at = excluded.updated_at`,
 		conversationID, name, sessionID, model, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+// SetConversationRole says what this card is meant to do when it works with
+// another card. Changing it re-briefs the card before its next relayed message.
+func (s *Store) SetConversationRole(ctx context.Context, conversationID int64, role string) error {
+	result, err := s.db.ExecContext(ctx,
+		"UPDATE conversations SET role = ?, briefed = 0 WHERE id = ?", role, conversationID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// ResumeDialogue clears a parked exchange so the cards can be pushed on again.
+func (s *Store) ResumeDialogue(ctx context.Context, conversationID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE conversations SET dialogue_state = '' WHERE id = ?", conversationID)
 	return err
 }
 

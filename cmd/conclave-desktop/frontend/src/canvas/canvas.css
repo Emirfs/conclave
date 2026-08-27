@@ -430,6 +430,87 @@
   background: var(--surface-overlay);
 }
 
+/* How a dialogue ended. "Done" is quiet; "waiting" asks for the user and gives
+   them the one button that clears it. */
+.node__dialogue {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-top: 1px solid var(--line-subtle);
+  font-size: 11px;
+}
+
+.node__dialogue--done {
+  background: color-mix(in srgb, var(--positive) 10%, transparent);
+  color: var(--text-secondary);
+}
+
+.node__dialogue--waiting {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+}
+
+.node__dialogue-text {
+  flex: 1;
+}
+
+.node__dialogue-resume {
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: default;
+}
+
+.node__dialogue-resume:hover {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+/* What this card is for when it works with another one. Empty on a card that
+   has never been linked, which is why it stays this quiet. */
+.node__role {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px 0;
+}
+
+.node__role-label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.node__role-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.node__role-input:hover {
+  border-color: var(--line-subtle);
+}
+
+.node__role-input:focus {
+  border-color: var(--line);
+  background: var(--surface-input);
+  color: var(--text-primary);
+}
+
 .node__input {
   width: 100%;
   padding: 7px 9px;
@@ -953,6 +1034,32 @@
   font-size: 10.5px;
   line-height: 1.5;
   color: var(--text-muted);
+}
+
+.linkpanel__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The shared goal, sent to each card once rather than on every hop. */
+.linkpanel__briefing {
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  outline: none;
+  resize: vertical;
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.linkpanel__briefing:focus {
+  border-color: var(--accent, var(--line));
 }
 
 .linkpanel__remove {

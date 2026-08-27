@@ -26,6 +26,12 @@ nodes the daemon persists, so a layout survives a restart.
 - Commands are argument arrays and bypass the command shell.
 - Chat context is scoped by conversation *and* provider. Two conversations with the same provider must
   never see each other's history.
+- A provider that resumes its own session already holds that history, so the transcript is not replayed
+  into the prompt. The transcript stands in for a session, it does not accompany one.
+- Linked cards are briefed once, before their first relayed message, rather than being told the
+  arrangement on every hop. A briefing rides along with a real message; it never costs a turn.
+- A card asking for a user decision does not end an exchange by itself: the other card is nudged to
+  decide and go on. Two such requests in a row park the dialogue for the user.
 - A provider runs at most one chat job at a time.
 - Each card carries its own project directory and access level; providers run there, as they would in
   a terminal. `edit` access auto-approves file changes and commands, because `--print` runs cannot ask.
