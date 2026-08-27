@@ -44,6 +44,9 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
   const turns = conversation.turns ?? []
   const lead = providerStyle(providers[0] ?? conversation.title)
   const group = conversation.kind === 'group'
+  // A group card has one model per provider and shows them on its chips, so
+  // only a solo card can carry its model in the title.
+  const soloModel = group ? '' : (conversation.models?.[providers[0]] ?? '')
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -116,7 +119,13 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
             )
           })}
         </span>
-        <span className="node__title">{conversation.title}</span>
+        {/* A solo card is named after what it actually is: the provider and the
+            model it runs on. Which of several cards to read is decided by that
+            far more often than by the title the card was created with. */}
+        <span className="node__title">
+          {group ? conversation.title : lead.label}
+          {soloModel !== '' && <span className="node__title-model">{soloModel}</span>}
+        </span>
         {/* The role belongs in the title bar: which card does what is the first
             thing you need from a board of several. */}
         {savedRole !== '' && (

@@ -204,6 +204,16 @@
   color: var(--text-primary);
 }
 
+/* The model rides along with the provider name, one step quieter: the card is
+   still "Claude", running opus. */
+.node__title-model {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 .node__kind {
   flex: none;
   padding: 2px 7px;
