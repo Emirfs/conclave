@@ -90,7 +90,38 @@ Varsayılan Ollama modelini seçmek için `CONCLAVE_OLLAMA_MODEL` ortam değişk
 
 Mnemo şu anda keşfedilip arayüzde gösterilir; anlamsal okuma/yazma entegrasyonu bilinçli olarak henüz etkin değildir. Sağlayıcı kimlik bilgileri SQLite'a veya Mnemo'ya kopyalanmaz.
 
+## Kurulum
+
+64 bit Windows'ta, PowerShell'de tek satır:
+
+```powershell
+irm https://raw.githubusercontent.com/Emirfs/conclave/main/install.ps1 | iex
+```
+
+Betik en son yayını indirir, SHA256'sını yayındaki `checksums.txt` ile doğrular, `%LOCALAPPDATA%\Programs\Conclave` altına açar, **Conclave** ve **Conclave - Kapat** kısayollarını oluşturur ve `conclave` komutunu `PATH`'e ekler.
+
+Belirli bir sürümü kurmak veya başka bir dizine kurmak için betiği boru yerine parametreyle çalıştırın:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Emirfs/conclave/main/install.ps1))) -Version v0.2.0
+```
+
+`-InstallDir`, `-NoShortcuts` ve `-NoPath` da kabul edilir.
+
+Sihirbaz tercih ediyorsanız her yayında `conclave-windows-amd64-setup.exe` de var: yönetici hakkı istemeyen, aynı iki binary'yi taşıyan kullanıcı kapsamlı bir kurulum.
+
+## Güncelleme
+
+Daemon günde bir kez GitHub'a yeni bir yayın olup olmadığını sorar. Yalnızca bakar: istenmeden hiçbir şey indirilmez, hiçbir dosya değiştirilmez.
+
+- Yeni sürüm varsa canvas'ın üstünde **Notları oku** ve **Güncelle** düğmeleriyle bir bant çıkar.
+- **Güncelle**, uygulamanın yanındaki `install.ps1`'i çalıştırır; betik uygulamanın kapanmasını bekler, binary'leri değiştirir ve yeni yapıyı açar. Çalışan bir program kendi dosyalarını değiştiremez — güncellemenin pencereyi kapatmasının sebebi bu.
+- Terminalden `conclave update`, günlük kontrolü beklemeden hemen sorar.
+- Kaynaktan derlenen bir yapı sürümünü `dev` olarak bildirir ve hiç kontrol etmez.
+
 ## Gereksinimler
+
+Kurulu bir yayını çalıştırmak için Windows ve sağlayıcı CLI'larından başka bir şey gerekmez. Aşağıdakiler kaynaktan derlemek içindir:
 
 - Go `1.26.7` veya üzeri
 - Wails v2 CLI
@@ -170,6 +201,13 @@ Mevcut bir Conclave konuşmasını sürdürün:
 go run ./cmd/conclave chat --conversation 12 "Hangi yaklaşımı seçerdin?"
 ```
 
+Çalışan yapıyı bildirin, GitHub'a yenisini sorun:
+
+```powershell
+conclave version
+conclave update
+```
+
 Sıralı bir pipeline kuyruğa ekleyin. İlk hata sonraki aşamaları durdurur:
 
 ```powershell
@@ -225,7 +263,10 @@ SQLite migration'ları yalnızca sona eklenir ve `PRAGMA user_version` ile izlen
 | `internal/provider/` | CLI keşfi, çağırma ve akış çözümleme |
 | `internal/statedir/` | Durum yolları ve token yönetimi |
 | `internal/store/` | SQLite kalıcılığı, migration'lar ve kurtarma |
+| `internal/update/` | GitHub'daki yayın kontrolü; yalnızca bakar, kurmaz |
 | `internal/vcs/` | Salt okunur Git durum ve diff incelemesi |
+| `internal/version/` | Çalışan yapının sürümü, bağlama anında gömülür |
+| `install.ps1` | Yayınlanan yapılar için kurulum ve güncelleme betiği |
 
 ## Geliştirme
 

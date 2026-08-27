@@ -9,6 +9,14 @@ Conclave'i çalıştırmak ve durdurmak için. Masaüstünde `Conclave` ve
 | `conclave-durdur.cmd` | Önce arayüzü, sonra daemon'u kapatır. |
 | `conclave-gelistir.cmd` | `wails dev` ile canlı yeniden yükleme; frontend değişikliği için build gerekmez. |
 
+`conclave-baslat.cmd` ve `conclave-durdur.cmd` hem geliştirme ağacında hem kurulu
+bir Conclave'de çalışır: başlatma betiği önce kendi yanındaki `conclave.exe` ve
+`conclave-desktop.exe`'ye bakar, bulamazsa repo düzenini dener.
+
+Kurulum ve güncelleme betiği ayrı yerde: repo kökündeki `install.ps1`. Yayınlanan
+zip'e ve installer'a o dosya giriyor, uygulamadaki **Güncelle** düğmesi de onu
+çağırıyor.
+
 ## Pencereyi kapatmak daemon'u durdurmaz
 
 Bu bilerek böyle: arayüz kapalıyken de kartlar çalışmaya devam eder, sağlayıcılar

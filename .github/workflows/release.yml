@@ -1,0 +1,126 @@
+name: release
+
+# A release is cut by pushing a tag. Nothing else publishes: a build that
+# nobody asked for is not something the update check should ever offer.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Yeniden yayınlanacak etiket (örn. v0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Sürümü etiketten çıkar
+        id: release
+        shell: pwsh
+        run: |
+          $tag = if ('${{ github.event.inputs.tag }}') { '${{ github.event.inputs.tag }}' } else { '${{ github.ref_name }}' }
+          $version = $tag -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+') {
+            throw "Etiket vMAJOR.MINOR.PATCH olmali, gelen: $tag"
+          }
+          "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Wails kur
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+
+      - name: NSIS hazır mı
+        shell: pwsh
+        run: |
+          # Runner imajinda genelde kurulu; degilse installer sessizce
+          # uretilmez, bu yuzden burada kesinlestiriyoruz.
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+            "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
+          }
+
+      - name: Testler
+        run: go test ./...
+
+      - name: Daemon derle
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          # -X ile gomulen surum, guncelleme kontrolunun karsilastirdigi tek
+          # sayidir; damgasiz bir yapi kendini "dev" sayar ve hic sormaz.
+          go build -trimpath `
+            -ldflags "-s -w -X github.com/Emirfs/conclave/internal/version.Version=$env:VERSION" `
+            -o dist/conclave.exe ./cmd/conclave
+
+      - name: Arayüz derle
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        working-directory: cmd/conclave-desktop
+        run: |
+          # Installer'in surum alanlari wails.json'dan okunuyor.
+          $config = Get-Content wails.json -Raw | ConvertFrom-Json
+          $config.info.productVersion = $env:VERSION
+          $config | ConvertTo-Json -Depth 10 | Set-Content wails.json -Encoding utf8
+          # Daemon installer'a da girecegi icin wails'in bin dizininde durmali.
+          New-Item -ItemType Directory -Path build/bin -Force | Out-Null
+          Copy-Item ../../dist/conclave.exe build/bin/conclave.exe -Force
+          wails build -platform windows/amd64 -trimpath -nsis -installscope user `
+            -ldflags "-X github.com/Emirfs/conclave/internal/version.Version=$env:VERSION"
+
+      - name: Paketle
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          $staging = 'dist/conclave-windows-amd64'
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item dist/conclave.exe $staging -Force
+          Copy-Item cmd/conclave-desktop/build/bin/conclave-desktop.exe $staging -Force
+          # install.ps1 pakete girer: uygulama icindeki "Guncelle" dugmesi
+          # kurulumun yanindaki bu kopyayi calistirir.
+          Copy-Item install.ps1 $staging -Force
+          Copy-Item scripts/conclave-durdur.cmd $staging -Force
+          Copy-Item README.md, README.tr.md $staging -Force
+
+          Compress-Archive -Path "$staging/*" -DestinationPath dist/conclave-windows-amd64.zip -Force
+          Copy-Item cmd/conclave-desktop/build/bin/conclave-windows-amd64-setup.exe dist/ -Force
+
+          # Kurulum betigi indirdigini bu dosyayla dogruluyor; eksikse kurulum
+          # devam eder ama uyarir.
+          Push-Location dist
+          Get-FileHash -Algorithm SHA256 conclave-windows-amd64.zip, conclave-windows-amd64-setup.exe |
+            ForEach-Object { "{0}  {1}" -f $_.Hash, (Split-Path $_.Path -Leaf) } |
+            Set-Content checksums.txt -Encoding ascii
+          Get-Content checksums.txt
+          Pop-Location
+
+      - name: Yayınla
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: Conclave ${{ steps.release.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            dist/conclave-windows-amd64.zip
+            dist/conclave-windows-amd64-setup.exe
+            dist/checksums.txt
