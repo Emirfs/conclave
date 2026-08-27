@@ -755,8 +755,8 @@
   z-index: 5;
   display: flex;
   flex-direction: column;
-  min-width: 150px;
-  max-height: 240px;
+  min-width: 190px;
+  max-height: 260px;
   overflow-y: auto;
   padding: 3px;
   border: 1px solid var(--line);
@@ -766,16 +766,30 @@
 }
 
 .node__model-option {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   padding: 4px 7px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
-  font-family: var(--font-mono);
+  font-family: inherit;
   font-size: var(--text-xs);
   text-align: left;
   white-space: nowrap;
   cursor: default;
+}
+
+/* What the provider calls the model, over the id the CLI is actually given. */
+.node__model-label {
+  color: inherit;
+}
+
+.node__model-id {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 .node__model-option:hover {

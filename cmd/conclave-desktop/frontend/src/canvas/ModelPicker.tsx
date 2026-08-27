@@ -4,19 +4,22 @@ import { ProviderModels } from '../../wailsjs/go/main/App'
 import { domain } from '../../wailsjs/go/models'
 import { providerStyle } from '../providers'
 
-/** One request per provider per session. The lists barely change, and opening a
- *  card must not cost a process launch for every other card on the board. */
-const catalog = new Map<string, Promise<domain.ProviderModels>>()
+/** How long a fetched list is reused before the provider is asked again. The
+ *  daemon caches for longer; this is only what keeps opening the same menu
+ *  twice in a row from crossing the wire, while a model pulled a minute ago
+ *  still shows up without restarting the app. */
+const CATALOG_TTL = 60_000
+
+const catalog = new Map<string, { at: number; list: Promise<domain.ProviderModels> }>()
 
 function models(name: string): Promise<domain.ProviderModels> {
-  let pending = catalog.get(name)
-  if (!pending) {
-    pending = ProviderModels(name).catch(
-      () => ({ provider: name, models: [], default: '' }) as domain.ProviderModels,
-    )
-    catalog.set(name, pending)
-  }
-  return pending
+  const entry = catalog.get(name)
+  if (entry && Date.now() - entry.at < CATALOG_TTL) return entry.list
+  const list = ProviderModels(name).catch(() =>
+    domain.ProviderModels.createFrom({ provider: name, models: [], default: '' }),
+  )
+  catalog.set(name, { at: Date.now(), list })
+  return list
 }
 
 type Props = {
@@ -59,9 +62,10 @@ function ModelChip({
 
   useEffect(() => setDraft(model), [model])
 
-  // The list is only worth fetching once the user asks to see it.
+  // The list is only worth fetching once the user asks to see it, and is asked
+  // for again on a later open so a newly installed model appears.
   useEffect(() => {
-    if (!open || known) return
+    if (!open) return
     let live = true
     void models(provider).then((list) => {
       if (live) setKnown(list)
@@ -69,7 +73,7 @@ function ModelChip({
     return () => {
       live = false
     }
-  }, [open, known, provider])
+  }, [open, provider])
 
   // A menu that stays open behind a click elsewhere on the board would cover
   // the card underneath it.
@@ -84,7 +88,12 @@ function ModelChip({
 
   const listed = known?.models ?? []
   const fallback = known?.default ?? ''
-  const options = model !== '' && !listed.includes(model) ? [model, ...listed] : listed
+  // A model chosen before the provider dropped it from its list still runs, so
+  // it stays on the menu rather than disappearing from under the user.
+  const options =
+    model !== '' && !listed.some((item) => item.id === model)
+      ? [domain.Model.createFrom({ id: model }), ...listed]
+      : listed
 
   const commit = (value: string) => {
     setOpen(false)
@@ -116,13 +125,19 @@ function ModelChip({
           >
             {fallback ? `varsayılan (${fallback})` : 'varsayılan'}
           </button>
-          {options.map((name) => (
+          {options.map((item) => (
             <button
-              key={name}
-              className={`node__model-option${name === model ? ' node__model-option--active' : ''}`}
-              onClick={() => commit(name)}
+              key={item.id}
+              className={`node__model-option${item.id === model ? ' node__model-option--active' : ''}`}
+              onClick={() => commit(item.id)}
+              title={item.id}
             >
-              {name}
+              {/* The provider's own name for it, with the id underneath: the id
+                  is what the CLI is given, and models differ only by suffix. */}
+              <span className="node__model-label">{item.label || item.id}</span>
+              {item.label && item.label !== item.id && (
+                <span className="node__model-id">{item.id}</span>
+              )}
             </button>
           ))}
           {known === null && <span className="node__model-empty">yükleniyor…</span>}

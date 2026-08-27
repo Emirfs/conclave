@@ -252,11 +252,19 @@ func (r ModelRequest) Normalised() ModelRequest {
 	return r
 }
 
+// Model is one entry of a provider's own model list. ID is what the CLI is
+// given; Label is what that provider calls it, so a card offers the same names
+// the provider's own client does.
+type Model struct {
+	ID    string `json:"id"`
+	Label string `json:"label,omitempty"`
+}
+
 // ProviderModels is the model list one provider offers, plus which of them it
 // falls back to when a card picks nothing.
 type ProviderModels struct {
-	Provider string   `json:"provider"`
-	Models   []string `json:"models"`
+	Provider string  `json:"provider"`
+	Models   []Model `json:"models"`
 	// Default is the model the CLI uses on its own; empty when only the
 	// provider knows.
 	Default string `json:"default,omitempty"`

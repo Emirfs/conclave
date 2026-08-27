@@ -52,7 +52,7 @@ Wails masaüstü istemcisi React Flow tabanlı kalıcı bir sonsuz pano sunar.
 - Uzun cevaplar ve belgeler için kartı büyütün, küçültün veya tam ekran açın.
 - Sağlayıcı cevaplarını GitHub Flavored Markdown olarak okuyun; not kartlarında yerel `.md` dosyası açıp düzenleme ve önizleme arasında geçiş yapın.
 - Her kart için proje dizini seçin, ardından `read` ile `edit` erişimi arasında geçiş yapın.
-- Kartın her sağlayıcısı için modeli seçin; listede olmayan bir model adını elle de yazabilirsiniz. Model değişince o sağlayıcının oturumu yenilenir ve konuşma yeni modele taşınır.
+- Kartın her sağlayıcısı için modeli o sağlayıcının kendi listesinden seçin; listede olmayan bir model adını elle de yazabilirsiniz. Model değişince o sağlayıcının oturumu yenilenir ve konuşma yeni modele taşınır.
 - **Değişiklikler** sekmesinden Git durumunu ve dosyanın unified diff'ini inceleyin.
 - Tamamlanan yanıtları aktarmak için bir konuşma kartının sağ portunu diğerinin sol portuna bağlayın.
 - Tam olarak iki konuşma kartını seçerek iki yönlü eşleştirin.

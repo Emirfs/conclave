@@ -318,6 +318,20 @@ export namespace domain {
 	
 	
 	
+	export class Model {
+	    id: string;
+	    label?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Model(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
+	    }
+	}
 	export class NewConversation {
 	    title: string;
 	    kind: string;
@@ -422,7 +436,7 @@ export namespace domain {
 	}
 	export class ProviderModels {
 	    provider: string;
-	    models: string[];
+	    models: Model[];
 	    default?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -432,9 +446,27 @@ export namespace domain {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.provider = source["provider"];
-	        this.models = source["models"];
+	        this.models = this.convertValues(source["models"], Model);
 	        this.default = source["default"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	
 	export class Stage {

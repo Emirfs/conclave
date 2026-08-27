@@ -52,7 +52,7 @@ The Wails desktop client uses React Flow as a persistent infinite board.
 - Grow, shrink, or open a card fullscreen for long answers and documents.
 - Read provider answers as GitHub Flavored Markdown; note cards can open local `.md` files and switch between editing and preview.
 - Select a project directory per card, then toggle between `read` and `edit` access.
-- Pick the model each of a card's providers runs on, or type one the list does not offer. Changing it starts a new provider session on the new model and carries the conversation over.
+- Pick the model each of a card's providers runs on from that provider's own list, or type one it does not offer. Changing it starts a new provider session on the new model and carries the conversation over.
 - Open the **Changes** tab to inspect Git status and a file's unified diff.
 - Connect the right port of one conversation card to the left port of another to relay completed answers.
 - Select exactly two conversation cards to pair them in both directions.

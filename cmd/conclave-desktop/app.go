@@ -217,14 +217,15 @@ func (a *App) SetModel(conversationID int64, providerName, model string) error {
 	return client.SetModel(ctx, conversationID, domain.ModelRequest{Provider: providerName, Model: model})
 }
 
-// ProviderModels lists what a provider can be asked for. Ollama is read from the
-// machine, so this can change between calls; the rest answer from a fixed list.
+// ProviderModels lists what a provider can be asked for. Most of them are asked
+// directly, and one of those answers over the network, so this is slower than
+// the rest of the canvas calls and is only made when a list is opened.
 func (a *App) ProviderModels(providerName string) (domain.ProviderModels, error) {
 	client, err := a.client()
 	if err != nil {
 		return domain.ProviderModels{}, err
 	}
-	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(a.ctx, 12*time.Second)
 	defer cancel()
 	return client.ProviderModels(ctx, providerName)
 }
