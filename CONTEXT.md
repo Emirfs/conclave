@@ -32,6 +32,10 @@ nodes the daemon persists, so a layout survives a restart.
   arrangement on every hop. A briefing rides along with a real message; it never costs a turn.
 - A card asking for a user decision does not end an exchange by itself: the other card is nudged to
   decide and go on. Two such requests in a row park the dialogue for the user.
+- A role is only text in the briefing. It never changes a card's access or what it may decide, so any
+  provider can take any position in a workflow.
+- Context size is read from each provider's own usage report. A large window restates the card's role;
+  a full one drops the provider session and lets the transcript carry the conversation into a new one.
 - A provider runs at most one chat job at a time.
 - Each card carries its own project directory and access level; providers run there, as they would in
   a terminal. `edit` access auto-approves file changes and commands, because `--print` runs cannot ask.

@@ -208,6 +208,14 @@ ALTER TABLE conversations ADD COLUMN briefed INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE conversations ADD COLUMN dialogue_state TEXT NOT NULL DEFAULT '';
 ALTER TABLE canvas_links ADD COLUMN briefing TEXT NOT NULL DEFAULT '';
 `,
+	// 11: how full a provider's context window was on its last turn. A session
+	// that fills up drifts from its role and eventually cannot be resumed at
+	// all, so the number is what decides when to restate the role and when to
+	// start the session over.
+	`
+ALTER TABLE provider_sessions ADD COLUMN context_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE provider_sessions ADD COLUMN resets INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 func (s *Store) init() error {
@@ -335,10 +343,13 @@ func (s *Store) ClaimChatResponse(ctx context.Context) (*domain.ChatJob, error) 
 	}
 	defer tx.Rollback()
 	var job domain.ChatJob
+	var role string
+	var contextTokens int
 	err = tx.QueryRowContext(ctx, `
 SELECT r.id, r.turn_id, r.provider, t.prompt, COALESCE(t.conversation_id, 0),
        COALESCE(c.project_path, ''), COALESCE(c.access, 'edit'),
-       COALESCE(ps.session_id, ''), COALESCE(ps.model, '')
+       COALESCE(ps.session_id, ''), COALESCE(ps.model, ''),
+       COALESCE(c.role, ''), COALESCE(ps.context_tokens, 0)
 FROM chat_responses r
 JOIN chat_turns t ON t.id = r.turn_id
 LEFT JOIN conversations c ON c.id = t.conversation_id
@@ -351,7 +362,8 @@ WHERE r.status = ?
   )
 ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
 		Scan(&job.ResponseID, &job.TurnID, &job.Provider, &job.Prompt, &job.ConversationID,
-			&job.ProjectPath, &job.Access, &job.SessionID, &job.Model)
+			&job.ProjectPath, &job.Access, &job.SessionID, &job.Model,
+			&role, &contextTokens)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -374,6 +386,17 @@ ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	// A session that has grown past what it can carry is started over. Dropping
+	// it here rather than at the end of the previous turn means the decision is
+	// made with the window size that turn actually reported.
+	if job.SessionID != "" && contextTokens >= contextResetAt {
+		if err := s.recycleSession(context.WithoutCancel(ctx), job.ConversationID, job.Provider); err != nil {
+			_ = s.RequeueChatResponse(context.WithoutCancel(ctx), job.ResponseID)
+			return nil, err
+		}
+		job.SessionID = ""
+		contextTokens = 0
+	}
 	// A provider that resumes its own session already holds this conversation's
 	// history; replaying a transcript into the prompt would send it twice. The
 	// transcript is only what stands in for a session the provider does not
@@ -384,6 +407,12 @@ ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
 			_ = s.RequeueChatResponse(context.WithoutCancel(ctx), job.ResponseID)
 			return nil, err
 		}
+	}
+	// Deep into a long session a card drifts from what it was asked to be. One
+	// line costs almost nothing next to a window this full, and it is only sent
+	// once the window is actually large.
+	if role != "" && contextTokens >= contextRemindAt {
+		job.Prompt = "Hatırlatma — senin rolün: " + role + "\n\n" + job.Prompt
 	}
 	return &job, nil
 }
@@ -1525,6 +1554,47 @@ ON CONFLICT(conversation_id, provider) DO UPDATE SET
     updated_at = excluded.updated_at`,
 		conversationID, name, sessionID, model, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
+}
+
+// Context window thresholds, as a count of tokens carried into one turn.
+// A long exchange drifts from its role well before the window is actually full,
+// and a session that reaches the ceiling stops being resumable at all.
+const (
+	// contextRemindAt is where a card starts being reminded what its role is.
+	contextRemindAt = 120_000
+	// contextResetAt is where the provider session is dropped and started over.
+	// The transcript takes over as context, so the work is not lost.
+	contextResetAt = 170_000
+)
+
+// RecordSessionContext stores how full the provider's window was on this turn.
+func (s *Store) RecordSessionContext(ctx context.Context, conversationID int64, provider string, tokens int) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE provider_sessions SET context_tokens = ? WHERE conversation_id = ? AND provider = ?",
+		tokens, conversationID, provider)
+	return err
+}
+
+// recycleSession drops a provider session that has grown too large to keep
+// resuming. The next turn starts a new one, and because there is no session to
+// resume, the transcript is sent instead — so the conversation continues rather
+// than restarting. The card is re-briefed for the same reason.
+func (s *Store) recycleSession(ctx context.Context, conversationID int64, provider string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx,
+		"DELETE FROM provider_sessions WHERE conversation_id = ? AND provider = ?",
+		conversationID, provider); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE conversations SET briefed = 0 WHERE id = ?", conversationID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SetConversationRole says what this card is meant to do when it works with

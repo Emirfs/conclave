@@ -1,20 +1,23 @@
 import { useEffect, useState } from 'react'
 import type { Edge } from '@xyflow/react'
 
+import { ROLE_PAIRS } from './roles'
 import { LINK_MODES } from './useCanvas'
 
 const ROUND_CHOICES = [1, 2, 3, 5, 8]
 
 /** Options for the selected link: how the two cards work together, for how many
- *  rounds, and what they are both working on. Shown only while a link is
- *  selected. */
+ *  rounds, what they are both working on, and which side does what. Shown only
+ *  while a link is selected. */
 export function LinkPanel({
   edge,
   onConfigure,
+  onAssignRoles,
   onUnlink,
 }: {
   edge: Edge
   onConfigure: (id: string, mode: string, rounds: number, untilDone: boolean, briefing: string) => void
+  onAssignRoles: (sourceNodeID: string, targetNodeID: string, sourceRole: string, targetRole: string) => void
   onUnlink: (id: string) => void
 }) {
   const mode = (edge.data?.mode as string) ?? 'relay'
@@ -70,6 +73,25 @@ export function LinkPanel({
       >
         {untilDone ? 'bitene kadar açık' : 'iş bitene kadar sürdür'}
       </button>
+      {mode !== 'relay' && (
+        <div className="linkpanel__field">
+          {/* A role only means something next to the other card's role, which is
+              why the pair is chosen here rather than on each card. */}
+          <span className="linkpanel__label">rol çifti</span>
+          <div className="linkpanel__pairs">
+            {ROLE_PAIRS.map((pair) => (
+              <button
+                key={pair.label}
+                className="linkpanel__pair"
+                onClick={() => onAssignRoles(edge.source, edge.target, pair.source.text, pair.target.text)}
+                title={`${edge.source === edge.target ? '' : 'Kaynak kart: '}${pair.source.text}\n\nHedef kart: ${pair.target.text}`}
+              >
+                {pair.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {mode !== 'relay' && (
         <label className="linkpanel__field">
           <span className="linkpanel__label">görev</span>

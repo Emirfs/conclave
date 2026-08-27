@@ -476,9 +476,73 @@
 .node__role {
   flex: none;
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 9px 0;
+}
+
+.node__role-line {
+  display: flex;
   align-items: center;
   gap: 7px;
-  padding: 5px 9px 0;
+}
+
+.node__role-clear {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: default;
+}
+
+.node__role-clear:hover {
+  color: var(--negative);
+}
+
+/* Starting points, not a fixed set: the text stays editable underneath. */
+.node__role-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.node__role-chip {
+  padding: 2px 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: default;
+  transition: border-color 120ms var(--ease), color 120ms var(--ease);
+}
+
+.node__role-chip:hover {
+  border-color: var(--line);
+  color: var(--text-secondary);
+}
+
+.node__role-chip--active {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+/* Which card does what, readable from the board without opening anything. */
+.node__badge {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
 }
 
 .node__role-label {
@@ -1040,6 +1104,31 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* Complementary roles, assigned to both cards in one click. */
+.linkpanel__pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.linkpanel__pair {
+  padding: 4px 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  text-align: left;
+  cursor: default;
+  transition: border-color 120ms var(--ease), color 120ms var(--ease);
+}
+
+.linkpanel__pair:hover {
+  border-color: var(--line);
+  color: var(--text-primary);
 }
 
 /* The shared goal, sent to each card once rather than on every hop. */

@@ -312,6 +312,29 @@ export function useCanvas(connected: boolean) {
     [load],
   )
 
+  // Roles come in complementary pairs, so both cards of a link are assigned
+  // together. Node ids are what a link carries; the conversation behind each
+  // one is what carries the role.
+  const assignRoles = useCallback(
+    async (sourceNodeID: string, targetNodeID: string, sourceRole: string, targetRole: string) => {
+      const conversationOf = (nodeID: string) => {
+        const node = nodes.find((item) => item.id === nodeID)
+        return node?.data.kind === 'conversation' ? node.data.conversation.id : null
+      }
+      const source = conversationOf(sourceNodeID)
+      const target = conversationOf(targetNodeID)
+      if (source === null || target === null) return
+      try {
+        await SetRole(source, sourceRole)
+        await SetRole(target, targetRole)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [nodes, load],
+  )
+
   // Clearing the parked state is what lets a stalled pair be pushed on: the
   // next message starts the exchange again instead of being swallowed.
   const resumeDialogue = useCallback(
@@ -406,10 +429,10 @@ export function useCanvas(connected: boolean) {
       nodes, setNodes, edges, error, loaded, load, patch,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
-      saveRole, resumeDialogue,
+      saveRole, resumeDialogue, assignRoles,
     }),
     [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
-     saveLoop, toggleLoop, saveRole, resumeDialogue],
+     saveLoop, toggleLoop, saveRole, resumeDialogue, assignRoles],
   )
 }

@@ -8,6 +8,7 @@ import { Changes } from './Changes'
 import { LoopPanel } from './LoopPanel'
 import { Markdown } from './Markdown'
 import { domain } from '../../wailsjs/go/models'
+import { ROLES, roleName } from './roles'
 import type { ConversationNodeData } from './useCanvas'
 
 type Props = NodeProps & {
@@ -111,6 +112,13 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
           })}
         </span>
         <span className="node__title">{conversation.title}</span>
+        {/* The role belongs in the title bar: which card does what is the first
+            thing you need from a board of several. */}
+        {savedRole !== '' && (
+          <span className="node__badge" title={savedRole}>
+            {roleName(savedRole)}
+          </span>
+        )}
         <span className="node__kind">{group ? 'grup' : 'tekil'}</span>
         <CardControls
           target={card}
@@ -227,15 +235,46 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
 
       {tab === 'chat' && (
         <div className="node__role nodrag">
-          <span className="node__role-label">rol</span>
-          <input
-            className="node__role-input"
-            value={role}
-            placeholder="Bağlı kartla çalışırken bu kartın işi ne?"
-            onChange={(event) => setRole(event.target.value)}
-            onBlur={() => role !== savedRole && void onSaveRole(conversation.id, role)}
-            spellCheck={false}
-          />
+          <div className="node__role-line">
+            <span className="node__role-label">rol</span>
+            <input
+              className="node__role-input"
+              value={role}
+              placeholder="Bağlı kartla çalışırken bu kartın işi ne?"
+              onChange={(event) => setRole(event.target.value)}
+              onBlur={() => role !== savedRole && void onSaveRole(conversation.id, role)}
+              spellCheck={false}
+            />
+            {role !== '' && (
+              <button
+                className="node__role-clear"
+                onClick={() => {
+                  setRole('')
+                  void onSaveRole(conversation.id, '')
+                }}
+                title="Rolü kaldır"
+              >
+                ×
+              </button>
+            )}
+          </div>
+          {/* Templates are a starting point, not a constraint: the text stays
+              editable and a card can be given anything at all. */}
+          <div className="node__role-templates">
+            {ROLES.map((item) => (
+              <button
+                key={item.name}
+                className={`node__role-chip${roleName(role) === item.name ? ' node__role-chip--active' : ''}`}
+                onClick={() => {
+                  setRole(item.text)
+                  void onSaveRole(conversation.id, item.text)
+                }}
+                title={item.text}
+              >
+                {item.name}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

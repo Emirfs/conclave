@@ -116,6 +116,11 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 	if outcome.sessionID != "" {
 		_ = d.store.RecordProviderSession(persist, job.ConversationID, job.Provider, outcome.sessionID, job.Model)
 	}
+	// How full the window was decides whether the next turn needs its role
+	// restated, or a fresh session altogether.
+	if outcome.contextTokens > 0 {
+		_ = d.store.RecordSessionContext(persist, job.ConversationID, job.Provider, outcome.contextTokens)
+	}
 	if outcome.failure != "" {
 		if err := d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", outcome.failure); err != nil {
 			return err
@@ -162,6 +167,8 @@ type chatResult struct {
 	failure   string
 	sessionID string
 	quota     *provider.Quota
+	// contextTokens is how full the provider's context window was on this turn.
+	contextTokens int
 }
 
 // executeChat runs a provider and reads its stdout line by line so a streaming
@@ -289,6 +296,9 @@ func (d *Daemon) consumeStream(stdout io.Reader, format provider.StreamFormat, p
 		}
 		if update.Activity != "" {
 			activity = update.Activity
+		}
+		if update.ContextTokens > 0 {
+			result.contextTokens = update.ContextTokens
 		}
 		if update.Delta != "" && !capped {
 			if accumulated.Len()+len(update.Delta) > maxOutputBytes {

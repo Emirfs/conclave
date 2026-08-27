@@ -1,6 +1,9 @@
 package provider
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The fixtures below are real lines captured from each CLI, so a format change
 // upstream shows up here rather than as a silently empty answer.
@@ -90,6 +93,50 @@ func TestAntigravityStreamReportsNonSuccess(t *testing.T) {
 	}
 	if update.Final != "" {
 		t.Fatalf("content = %q, want empty", update.Final)
+	}
+}
+
+// Every provider names its token counts differently, and reading the wrong
+// field fails silently as a zero — which would leave a full window unnoticed.
+// The payloads below are trimmed copies of real output from each CLI.
+func TestEveryStreamFormatReportsItsContextSize(t *testing.T) {
+	claude := DecodeStreamLine(StreamClaude,
+		`{"type":"result","result":"tamam","session_id":"s","usage":{"input_tokens":2,`+
+			`"cache_creation_input_tokens":17694,"cache_read_input_tokens":12227,"output_tokens":38}}`)
+	if claude.ContextTokens != 2+17694+12227 {
+		t.Fatalf("claude context = %d", claude.ContextTokens)
+	}
+
+	// Codex counts cached input inside input_tokens, so it must not be added.
+	codex := DecodeStreamLine(StreamCodex,
+		`{"type":"turn.completed","usage":{"input_tokens":23390,"cached_input_tokens":6912,"output_tokens":12}}`)
+	if codex.ContextTokens != 23390 {
+		t.Fatalf("codex context = %d", codex.ContextTokens)
+	}
+
+	// Antigravity reports cache reads outside input_tokens.
+	antigravity := DecodeStreamLine(StreamAntigravity,
+		`{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","response":"tamam",`+
+			`"usage":{"input_tokens":20159,"output_tokens":1059,"cache_read_tokens":16297}}}`)
+	if antigravity.ContextTokens != 20159+16297 {
+		t.Fatalf("antigravity context = %d", antigravity.ContextTokens)
+	}
+}
+
+// A turn that reports no usage must not read as an empty window, which would
+// look like a session that had just been reset.
+func TestMissingUsageReportsNoContextSize(t *testing.T) {
+	for _, line := range []string{
+		`{"type":"result","result":"tamam","session_id":"s"}`,
+		`{"type":"turn.completed"}`,
+	} {
+		format := StreamClaude
+		if strings.Contains(line, "turn.completed") {
+			format = StreamCodex
+		}
+		if update := DecodeStreamLine(format, line); update.ContextTokens != 0 {
+			t.Fatalf("%s: context = %d, want 0", line, update.ContextTokens)
+		}
 	}
 }
 

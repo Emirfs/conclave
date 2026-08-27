@@ -913,6 +913,112 @@ func TestRelayLinkStaysOneWay(t *testing.T) {
 }
 
 // The receiving card must be told which card is speaking to it.
+// A long session drifts from the role it was given, so the role is restated
+// once the window is actually large — and not before, because the reminder is
+// only worth its tokens against a full window.
+func TestRoleIsRestatedOnlyWhenTheWindowIsFull(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	conversation, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "A", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.SetConversationRole(ctx, conversation.ID, "gözden geçiren"); err != nil {
+		t.Fatalf("role: %v", err)
+	}
+	if err := store.RecordProviderSession(ctx, conversation.ID, "claude", "sid", ""); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+
+	// A small window carries no reminder.
+	if err := store.RecordSessionContext(ctx, conversation.ID, "claude", 1_000); err != nil {
+		t.Fatalf("context: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, conversation.ID, "soru"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if strings.Contains(job.Prompt, "Hatırlatma") {
+		t.Fatalf("role restated on a small window: %q", job.Prompt)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, "cevap", ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	// A large one does.
+	if err := store.RecordSessionContext(ctx, conversation.ID, "claude", contextRemindAt+1); err != nil {
+		t.Fatalf("context 2: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, conversation.ID, "ikinci"); err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	next, err := store.ClaimChatResponse(ctx)
+	if err != nil || next == nil {
+		t.Fatalf("claim 2: %v", err)
+	}
+	if !strings.Contains(next.Prompt, "gözden geçiren") {
+		t.Fatalf("role was not restated on a full window: %q", next.Prompt)
+	}
+}
+
+// A session too large to keep resuming is started over. The transcript takes
+// over as context, so the conversation continues instead of restarting.
+func TestFullContextRecyclesTheSessionAndKeepsTheHistory(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	conversation, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "A", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, conversation.ID, "ilk soru"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, "ilk cevap", ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if err := store.RecordProviderSession(ctx, conversation.ID, "claude", "sid", ""); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if err := store.RecordSessionContext(ctx, conversation.ID, "claude", contextResetAt+1); err != nil {
+		t.Fatalf("context: %v", err)
+	}
+
+	if _, err := store.CreateConversationTurn(ctx, conversation.ID, "ikinci soru"); err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	next, err := store.ClaimChatResponse(ctx)
+	if err != nil || next == nil {
+		t.Fatalf("claim 2: %v", err)
+	}
+	if next.SessionID != "" {
+		t.Fatalf("a full session was still resumed: %q", next.SessionID)
+	}
+	// Dropping the session must not drop the conversation with it.
+	if !strings.Contains(next.Prompt, "ilk cevap") {
+		t.Fatalf("history was lost when the session was recycled: %q", next.Prompt)
+	}
+	var sessions int
+	if err := store.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM provider_sessions WHERE conversation_id = ?", conversation.ID).
+		Scan(&sessions); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if sessions != 0 {
+		t.Fatalf("recycled session row still present: %d", sessions)
+	}
+}
+
 // A card that opens by asking a question must not end the exchange on its own:
 // two cards would otherwise stall before either has done any work. The first
 // request is nudged along; only a second one in a row parks the dialogue.

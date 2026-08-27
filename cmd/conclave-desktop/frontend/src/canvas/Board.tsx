@@ -37,7 +37,7 @@ export function Board({ canvas }: { canvas: BoardHandle }) {
 function BoardSurface({ canvas }: { canvas: BoardHandle }) {
   const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink,
     pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
-    saveRole, resumeDialogue } = canvas
+    saveRole, resumeDialogue, assignRoles } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
 
   // Closing removes the node and, for a conversation, its history with it.
@@ -267,6 +267,7 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
             <LinkPanel
               edge={edges.find((edge) => edge.id === selectedEdge) ?? { id: selectedEdge } as never}
               onConfigure={configureLink}
+              onAssignRoles={assignRoles}
               onUnlink={(id) => {
                 setSelectedEdge(null)
                 void unlink(id)
