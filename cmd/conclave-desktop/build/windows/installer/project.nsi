@@ -18,15 +18,28 @@ Unicode true
 ##   wails build --target windows/amd64 --nsis
 ####
 
+# Every define here is guarded, because `wails build` passes some of these to
+# makensis on the command line and NSIS treats a second !define of the same name
+# as a fatal error, not an override. Whichever side speaks first wins; this file
+# only fills in what nobody set.
+
 # The window's binary is conclave-desktop.exe, but the product is Conclave;
 # without this the installed folder and the uninstall entry would both carry
 # the internal name.
-!define INFO_PRODUCTNAME "Conclave"
-!define PRODUCT_EXECUTABLE "conclave-desktop.exe"
+!ifndef INFO_PRODUCTNAME
+  !define INFO_PRODUCTNAME "Conclave"
+!endif
+!ifndef PRODUCT_EXECUTABLE
+  !define PRODUCT_EXECUTABLE "conclave-desktop.exe"
+!endif
 
 # A per-user install: Conclave keeps its state under the user's profile and
 # runs provider CLIs as that user, so nothing here needs administrator rights.
-!define REQUEST_EXECUTION_LEVEL "user"
+# `wails build -installscope user` defines this itself; the guard is what makes
+# a direct makensis run land on the same footing.
+!ifndef REQUEST_EXECUTION_LEVEL
+  !define REQUEST_EXECUTION_LEVEL "user"
+!endif
 
 !include "wails_tools.nsh"
 
@@ -63,8 +76,9 @@ ManifestDPIAware true
 
 !insertmacro MUI_UNPAGE_INSTFILES # Uinstalling page
 
+# One language only. A second one makes NSIS open with a language picker before
+# the installer proper, which is a question nobody needs to be asked.
 !insertmacro MUI_LANGUAGE "Turkish"
-!insertmacro MUI_LANGUAGE "English"
 
 Name "${INFO_PRODUCTNAME}"
 # Named for the platform rather than the Wails project, so the release asset
