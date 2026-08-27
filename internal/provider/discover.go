@@ -2,7 +2,6 @@ package provider
 
 import (
 	"errors"
-	"os"
 	"os/exec"
 
 	"github.com/Emirfs/conclave/internal/domain"
@@ -140,10 +139,7 @@ func ChatInvocation(request Request) (Invocation, error) {
 	case "ollama":
 		model := request.Model
 		if model == "" {
-			model = os.Getenv("CONCLAVE_OLLAMA_MODEL")
-		}
-		if model == "" {
-			model = "qwen3:4b"
+			model = defaultOllamaModel()
 		}
 		// ollama writes nothing to stdout until it finishes when stdout is not a
 		// terminal, so there is no progress to report for this provider.

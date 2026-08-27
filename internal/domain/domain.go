@@ -147,6 +147,10 @@ type Conversation struct {
 	// Role is what this card is supposed to do in an exchange with another
 	// card. It goes into the briefing, so the two do not both wait to be led.
 	Role string `json:"role,omitempty"`
+	// Models is the model chosen per provider for this card, keyed by provider
+	// name. A provider missing from the map runs on its own default, which is
+	// what the CLI would pick in a terminal.
+	Models map[string]string `json:"models,omitempty"`
 	// DialogueState reports how the last exchange ended: empty while it runs,
 	// DialogueDone when the work was finished, DialogueWaiting when a card
 	// stopped for a decision only a person can make.
@@ -232,6 +236,31 @@ func (r RoleRequest) Normalised() RoleRequest {
 }
 
 const maxRoleBytes = 500
+
+// ModelRequest picks the model one provider of a card runs on. An empty model
+// hands the choice back to the provider's own default.
+type ModelRequest struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+// Normalised trims the model name. It is passed to a CLI as a single argument,
+// so whitespace and an over-long value are rejected rather than carried.
+func (r ModelRequest) Normalised() ModelRequest {
+	r.Provider = strings.TrimSpace(r.Provider)
+	r.Model = strings.TrimSpace(r.Model)
+	return r
+}
+
+// ProviderModels is the model list one provider offers, plus which of them it
+// falls back to when a card picks nothing.
+type ProviderModels struct {
+	Provider string   `json:"provider"`
+	Models   []string `json:"models"`
+	// Default is the model the CLI uses on its own; empty when only the
+	// provider knows.
+	Default string `json:"default,omitempty"`
+}
 
 // ProjectRequest repoints a card at a directory and access level.
 type ProjectRequest struct {

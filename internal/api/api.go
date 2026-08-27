@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/Emirfs/conclave/internal/domain"
@@ -57,6 +58,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/loop", s.setLoop)
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/loop/running", s.setLoopRunning)
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/role", s.setRole)
+	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/model", s.setModel)
+	mux.HandleFunc("GET /v1/providers/{name}/models", s.providerModels)
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/resume", s.resumeDialogue)
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/branch", s.branch)
 	mux.HandleFunc("GET /v1/update", s.updateStatus)
@@ -404,6 +407,77 @@ func (s *Server) setRole(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
+}
+
+// setModel picks the model one provider of a card runs on. The name is not
+// checked against a list: a CLI gains models without this build changing, and
+// refusing an unknown one would only stop the user from using them.
+func (s *Server) setModel(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	var input domain.ModelRequest
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	input = input.Normalised()
+	if input.Provider == "" {
+		writeError(response, http.StatusBadRequest, errors.New("provider is required"))
+		return
+	}
+	if err := validModel(input.Model); err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	err = s.store.SetConversationModel(request.Context(), id, input.Provider, input.Model)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusNotFound, errors.New("conversation does not exist"))
+		return
+	}
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// validModel keeps the value usable as a single command argument. A model name
+// becomes one element of an argument array, so whitespace would split it and a
+// leading dash would be read as a flag.
+func validModel(model string) error {
+	if model == "" {
+		return nil
+	}
+	if utf8.RuneCountInString(model) > 120 {
+		return errors.New("model is limited to 120 characters")
+	}
+	if strings.HasPrefix(model, "-") {
+		return errors.New("model must not start with a dash")
+	}
+	for _, character := range model {
+		if unicode.IsSpace(character) || unicode.IsControl(character) {
+			return errors.New("model must not contain spaces or control characters")
+		}
+	}
+	return nil
+}
+
+// providerModels lists what a provider can be asked for, so a card offers real
+// choices instead of a blank field.
+func (s *Server) providerModels(response http.ResponseWriter, request *http.Request) {
+	name := request.PathValue("name")
+	if name == "" {
+		writeError(response, http.StatusBadRequest, errors.New("provider name is required"))
+		return
+	}
+	models, err := provider.Models(request.Context(), name)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, models)
 }
 
 // resumeDialogue clears the parked state so a stalled exchange can be pushed on
@@ -755,6 +829,19 @@ func (c *Client) SetProject(ctx context.Context, conversationID int64, input dom
 func (c *Client) SetRole(ctx context.Context, conversationID int64, input domain.RoleRequest) error {
 	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/role"
 	return c.do(ctx, http.MethodPut, path, input, nil, http.StatusNoContent)
+}
+
+func (c *Client) SetModel(ctx context.Context, conversationID int64, input domain.ModelRequest) error {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/model"
+	return c.do(ctx, http.MethodPut, path, input, nil, http.StatusNoContent)
+}
+
+func (c *Client) ProviderModels(ctx context.Context, name string) (domain.ProviderModels, error) {
+	var models domain.ProviderModels
+	if err := c.do(ctx, http.MethodGet, "/v1/providers/"+url.PathEscape(name)+"/models", nil, &models, http.StatusOK); err != nil {
+		return domain.ProviderModels{}, err
+	}
+	return models, nil
 }
 
 func (c *Client) ResumeDialogue(ctx context.Context, conversationID int64) error {

@@ -207,6 +207,7 @@ export namespace domain {
 	    loop_running: boolean;
 	    runs?: CardRun[];
 	    role?: string;
+	    models?: Record<string, string>;
 	    dialogue_state?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -227,6 +228,7 @@ export namespace domain {
 	        this.loop_running = source["loop_running"];
 	        this.runs = this.convertValues(source["runs"], CardRun);
 	        this.role = source["role"];
+	        this.models = source["models"];
 	        this.dialogue_state = source["dialogue_state"];
 	    }
 	
@@ -417,6 +419,22 @@ export namespace domain {
 		    }
 		    return a;
 		}
+	}
+	export class ProviderModels {
+	    provider: string;
+	    models: string[];
+	    default?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderModels(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.models = source["models"];
+	        this.default = source["default"];
+	    }
 	}
 	
 	export class Stage {

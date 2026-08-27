@@ -695,6 +695,51 @@
   color: var(--text-primary);
 }
 
+/* Which model each provider of this card runs on. One row per provider: a group
+   card is only worth having if its providers can differ. */
+.node__models {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 5px 9px 0;
+}
+
+.node__model {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.node__model-select,
+.node__model-input {
+  min-width: 0;
+  max-width: 190px;
+  padding: 2px 5px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.node__model-select:hover,
+.node__model-input:hover {
+  border-color: var(--line);
+  color: var(--text-primary);
+}
+
+.node__model-input:focus {
+  border-color: var(--line);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  cursor: text;
+}
+
 /* Fold a long answer, or carry it into new cards. Sits under the reply so it
    does not compete with the text itself. */
 .reply__actions {

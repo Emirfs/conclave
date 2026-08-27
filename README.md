@@ -15,6 +15,7 @@ AI coding CLIs are useful in isolation, but coordinating them usually means jugg
 - streams provider output and current activity into conversation cards;
 - preserves provider sessions so later turns continue the same upstream conversation;
 - assigns a project directory and `read` or `edit` access independently to each card;
+- runs each card's providers on a model chosen per card, or on the CLI's own default;
 - shows Git working-tree changes and unified diffs inside project cards;
 - relays, discusses, or reviews completed answers through configurable canvas links;
 - pairs two cards for a bounded conversation or an explicit work-until-done exchange;
@@ -51,6 +52,7 @@ The Wails desktop client uses React Flow as a persistent infinite board.
 - Grow, shrink, or open a card fullscreen for long answers and documents.
 - Read provider answers as GitHub Flavored Markdown; note cards can open local `.md` files and switch between editing and preview.
 - Select a project directory per card, then toggle between `read` and `edit` access.
+- Pick the model each of a card's providers runs on, or type one the list does not offer. Changing it starts a new provider session on the new model and carries the conversation over.
 - Open the **Changes** tab to inspect Git status and a file's unified diff.
 - Connect the right port of one conversation card to the left port of another to relay completed answers.
 - Select exactly two conversation cards to pair them in both directions.

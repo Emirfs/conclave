@@ -7,6 +7,7 @@ import { CloseButton } from './CloseButton'
 import { Changes } from './Changes'
 import { LoopPanel } from './LoopPanel'
 import { Markdown } from './Markdown'
+import { ModelPicker } from './ModelPicker'
 import { domain } from '../../wailsjs/go/models'
 import { ROLES, roleName } from './roles'
 import type { ConversationNodeData } from './useCanvas'
@@ -20,6 +21,7 @@ type Props = NodeProps & {
     onSaveLoop: (conversationID: number, config: domain.LoopConfig) => Promise<void>
     onToggleLoop: (conversationID: number, running: boolean) => Promise<void>
     onSaveRole: (conversationID: number, role: string) => Promise<void>
+    onSaveModel: (conversationID: number, provider: string, model: string) => Promise<void>
     onResumeDialogue: (conversationID: number) => Promise<void>
     onBranch: (conversationID: number, answer: string) => void
     /** Puts text on the board as its own note card, next to this one. */
@@ -32,7 +34,7 @@ type Tab = 'chat' | 'changes' | 'tests'
 
 export const ConversationNode = memo(function ConversationNode({ id, data, selected }: Props) {
   const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop,
-    onSaveRole, onResumeDialogue, onBranch, onPinNote, onResize } = data
+    onSaveRole, onSaveModel, onResumeDialogue, onBranch, onPinNote, onResize } = data
   const project = conversation.project_path ?? ''
   const access = conversation.access ?? 'edit'
   const [tab, setTab] = useState<Tab>('chat')
@@ -245,6 +247,16 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
             </>
           )}
         </div>
+      )}
+
+      {/* Which model each provider runs on. Changing it drops that provider's
+          session, so the next answer really comes from the model named here. */}
+      {tab === 'chat' && (
+        <ModelPicker
+          providers={providers}
+          chosen={conversation.models ?? {}}
+          onSave={(name, model) => onSaveModel(conversation.id, name, model)}
+        />
       )}
 
       {tab === 'chat' && (

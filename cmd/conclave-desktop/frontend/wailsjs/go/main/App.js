@@ -62,6 +62,10 @@ export function ProjectChanges(arg1) {
   return window['go']['main']['App']['ProjectChanges'](arg1);
 }
 
+export function ProviderModels(arg1) {
+  return window['go']['main']['App']['ProviderModels'](arg1);
+}
+
 export function ResumeDialogue(arg1) {
   return window['go']['main']['App']['ResumeDialogue'](arg1);
 }
@@ -76,6 +80,10 @@ export function SetLoop(arg1, arg2) {
 
 export function SetLoopRunning(arg1, arg2) {
   return window['go']['main']['App']['SetLoopRunning'](arg1, arg2);
+}
+
+export function SetModel(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetModel'](arg1, arg2, arg3);
 }
 
 export function SetProject(arg1, arg2, arg3) {

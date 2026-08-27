@@ -43,6 +43,10 @@ nodes the daemon persists, so a layout survives a restart.
   not something the user should have to scroll a card to find.
 - Branching forks an answer into one card per provider, never a single group card: the paths are
   supposed to diverge, and a group card would merge them again.
+- The model a provider runs on belongs to the card, not to the session: the session only records
+  what the last run reported. Changing a card's model drops that provider's session, so the
+  transcript carries the conversation into a session that really is on the new model. A card that
+  chooses nothing runs on the CLI's own default.
 - A provider runs at most one chat job at a time.
 - Each card carries its own project directory and access level; providers run there, as they would in
   a terminal. `edit` access auto-approves file changes and commands, because `--print` runs cannot ask.

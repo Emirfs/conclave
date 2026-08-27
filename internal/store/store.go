@@ -217,6 +217,17 @@ ALTER TABLE canvas_links ADD COLUMN briefing TEXT NOT NULL DEFAULT '';
 ALTER TABLE provider_sessions ADD COLUMN context_tokens INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE provider_sessions ADD COLUMN resets INTEGER NOT NULL DEFAULT 0;
 `,
+	// 12: the model a card runs a provider on. It is the user's choice and
+	// belongs to the card, so it survives the session being recycled — unlike
+	// provider_sessions.model, which only records what the last run reported.
+	`
+CREATE TABLE conversation_models (
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (conversation_id, provider)
+);
+`,
 }
 
 func (s *Store) init() error {
@@ -346,16 +357,22 @@ func (s *Store) ClaimChatResponse(ctx context.Context) (*domain.ChatJob, error) 
 	var job domain.ChatJob
 	var role string
 	var contextTokens int
+	// The card's own choice and what the live session was last run on are read
+	// apart, because a session started on another model has to be dropped
+	// rather than resumed.
+	var chosenModel, sessionModel string
 	err = tx.QueryRowContext(ctx, `
 SELECT r.id, r.turn_id, r.provider, t.prompt, COALESCE(t.conversation_id, 0),
        COALESCE(c.project_path, ''), COALESCE(c.access, 'edit'),
-       COALESCE(ps.session_id, ''), COALESCE(ps.model, ''),
+       COALESCE(ps.session_id, ''), COALESCE(cm.model, ''), COALESCE(ps.model, ''),
        COALESCE(c.role, ''), COALESCE(ps.context_tokens, 0)
 FROM chat_responses r
 JOIN chat_turns t ON t.id = r.turn_id
 LEFT JOIN conversations c ON c.id = t.conversation_id
 LEFT JOIN provider_sessions ps
        ON ps.conversation_id = t.conversation_id AND ps.provider = r.provider
+LEFT JOIN conversation_models cm
+       ON cm.conversation_id = t.conversation_id AND cm.provider = r.provider
 WHERE r.status = ?
   AND NOT EXISTS (
     SELECT 1 FROM chat_responses active
@@ -363,7 +380,7 @@ WHERE r.status = ?
   )
 ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
 		Scan(&job.ResponseID, &job.TurnID, &job.Provider, &job.Prompt, &job.ConversationID,
-			&job.ProjectPath, &job.Access, &job.SessionID, &job.Model,
+			&job.ProjectPath, &job.Access, &job.SessionID, &chosenModel, &sessionModel,
 			&role, &contextTokens)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -387,10 +404,17 @@ ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	// A session that has grown past what it can carry is started over. Dropping
-	// it here rather than at the end of the previous turn means the decision is
-	// made with the window size that turn actually reported.
-	if job.SessionID != "" && contextTokens >= contextResetAt {
+	job.Model = chosenModel
+	if job.Model == "" {
+		job.Model = sessionModel
+	}
+	// A session that has grown past what it can carry is started over, and so is
+	// one the user has since pointed at another model. Dropping it here rather
+	// than at the end of the previous turn means the decision is made with the
+	// window size that turn actually reported, and covers a model changed while
+	// that turn was still running.
+	staleModel := chosenModel != "" && sessionModel != "" && chosenModel != sessionModel
+	if job.SessionID != "" && (contextTokens >= contextResetAt || staleModel) {
 		if err := s.recycleSession(context.WithoutCancel(ctx), job.ConversationID, job.Provider); err != nil {
 			_ = s.RequeueChatResponse(context.WithoutCancel(ctx), job.ResponseID)
 			return nil, err
@@ -975,7 +999,19 @@ func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, e
 			conversations[at].Providers = append(conversations[at].Providers, provider)
 		}
 	}
-	return conversations, providerRows.Err()
+	if err := providerRows.Err(); err != nil {
+		return nil, err
+	}
+	models, err := s.conversationModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for id, chosen := range models {
+		if at, known := index[id]; known {
+			conversations[at].Models = chosen
+		}
+	}
+	return conversations, nil
 }
 
 func (s *Store) listCanvasNodes(ctx context.Context) ([]domain.CanvasNode, error) {
@@ -1845,6 +1881,86 @@ func (s *Store) SetConversationRole(ctx context.Context, conversationID int64, r
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// SetConversationModel picks the model one provider of a card runs on. An empty
+// model removes the choice and hands it back to the provider's own default.
+//
+// The provider session is dropped along with it: resuming a session started on
+// another model either continues on the old one or is refused outright,
+// depending on the CLI. Without a session the transcript is sent instead, so
+// the card changes model without losing the conversation.
+func (s *Store) SetConversationModel(ctx context.Context, conversationID int64, name, model string) error {
+	var exists int
+	err := s.db.QueryRowContext(ctx, "SELECT 1 FROM conversations WHERE id = ?", conversationID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return sql.ErrNoRows
+	}
+	if err != nil {
+		return err
+	}
+	var current string
+	err = s.db.QueryRowContext(ctx,
+		"SELECT model FROM conversation_models WHERE conversation_id = ? AND provider = ?",
+		conversationID, name).Scan(&current)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if current == model {
+		return nil
+	}
+	if model == "" {
+		if _, err := s.db.ExecContext(ctx,
+			"DELETE FROM conversation_models WHERE conversation_id = ? AND provider = ?",
+			conversationID, name); err != nil {
+			return err
+		}
+	} else if _, err := s.db.ExecContext(ctx, `
+INSERT INTO conversation_models(conversation_id, provider, model) VALUES(?, ?, ?)
+ON CONFLICT(conversation_id, provider) DO UPDATE SET model = excluded.model`,
+		conversationID, name, model); err != nil {
+		return err
+	}
+	// Only a session that is actually running on another model has to go. One
+	// already on the chosen model is worth keeping: it holds the history.
+	var sessionModel string
+	err = s.db.QueryRowContext(ctx,
+		"SELECT model FROM provider_sessions WHERE conversation_id = ? AND provider = ?",
+		conversationID, name).Scan(&sessionModel)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if sessionModel == model {
+		return nil
+	}
+	return s.recycleSession(ctx, conversationID, name)
+}
+
+// conversationModels reads every card's model choices in one pass, keyed by
+// conversation and then by provider.
+func (s *Store) conversationModels(ctx context.Context) (map[int64]map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT conversation_id, provider, model FROM conversation_models")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	models := make(map[int64]map[string]string)
+	for rows.Next() {
+		var conversationID int64
+		var name, model string
+		if err := rows.Scan(&conversationID, &name, &model); err != nil {
+			return nil, err
+		}
+		if models[conversationID] == nil {
+			models[conversationID] = make(map[string]string)
+		}
+		models[conversationID][name] = model
+	}
+	return models, rows.Err()
 }
 
 // ResumeDialogue clears a parked exchange so the cards can be pushed on again.
