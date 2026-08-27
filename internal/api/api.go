@@ -21,18 +21,21 @@ import (
 	"github.com/Emirfs/conclave/internal/domain"
 	"github.com/Emirfs/conclave/internal/provider"
 	"github.com/Emirfs/conclave/internal/store"
+	"github.com/Emirfs/conclave/internal/update"
 	"github.com/Emirfs/conclave/internal/vcs"
+	"github.com/Emirfs/conclave/internal/version"
 )
-
-const Version = "0.1.0"
 
 type Server struct {
 	store *store.Store
 	token string
+	// updates may be nil: a daemon built without a release check still serves
+	// everything else, it just has nothing to say about newer versions.
+	updates *update.Checker
 }
 
-func NewServer(store *store.Store, token string) *Server {
-	return &Server{store: store, token: token}
+func NewServer(store *store.Store, token string, updates *update.Checker) *Server {
+	return &Server{store: store, token: token, updates: updates}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -56,6 +59,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/role", s.setRole)
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/resume", s.resumeDialogue)
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/branch", s.branch)
+	mux.HandleFunc("GET /v1/update", s.updateStatus)
+	mux.HandleFunc("POST /v1/update/check", s.checkUpdate)
 	return s.authenticate(mux)
 }
 
@@ -97,8 +102,30 @@ func (s *Server) snapshot(response http.ResponseWriter, request *http.Request) {
 		}
 	}
 	writeJSON(response, http.StatusOK, domain.Snapshot{
-		Healthy: true, Version: Version, Providers: providers, Runs: runs,
+		Healthy: true, Version: version.Version, Providers: providers, Runs: runs,
 	})
+}
+
+// updateStatus answers from the cached check. Reading it never reaches the
+// network, so a canvas poll cannot be slowed down by GitHub.
+func (s *Server) updateStatus(response http.ResponseWriter, request *http.Request) {
+	if s.updates == nil {
+		writeJSON(response, http.StatusOK, update.Status{Current: version.Version})
+		return
+	}
+	writeJSON(response, http.StatusOK, s.updates.Status())
+}
+
+// checkUpdate refreshes the answer now, for a user who asks instead of waiting
+// for the next daily check.
+func (s *Server) checkUpdate(response http.ResponseWriter, request *http.Request) {
+	if s.updates == nil {
+		writeJSON(response, http.StatusOK, update.Status{Current: version.Version})
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), 15*time.Second)
+	defer cancel()
+	writeJSON(response, http.StatusOK, s.updates.CheckNow(ctx))
 }
 
 func (s *Server) createTurn(response http.ResponseWriter, request *http.Request) {
@@ -794,4 +821,16 @@ func (c *Client) DeleteLink(ctx context.Context, id int64) error {
 func (c *Client) DeleteCanvasNode(ctx context.Context, id int64) error {
 	path := "/v1/canvas/nodes/" + strconv.FormatInt(id, 10)
 	return c.do(ctx, http.MethodDelete, path, nil, nil, http.StatusNoContent)
+}
+
+func (c *Client) UpdateStatus(ctx context.Context) (update.Status, error) {
+	var status update.Status
+	err := c.do(ctx, http.MethodGet, "/v1/update", nil, &status, http.StatusOK)
+	return status, err
+}
+
+func (c *Client) CheckUpdate(ctx context.Context) (update.Status, error) {
+	var status update.Status
+	err := c.do(ctx, http.MethodPost, "/v1/update/check", nil, &status, http.StatusOK)
+	return status, err
 }

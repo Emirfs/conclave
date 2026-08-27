@@ -90,7 +90,38 @@ Set `CONCLAVE_OLLAMA_MODEL` to choose the default Ollama model. It defaults to `
 
 Mnemo is currently discovered and displayed, but semantic read/write integration is intentionally not enabled yet. Provider credentials are never copied into SQLite or Mnemo.
 
+## Install
+
+Windows 64-bit, one line in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Emirfs/conclave/main/install.ps1 | iex
+```
+
+It downloads the latest release, verifies its SHA256 against the published `checksums.txt`, unpacks it into `%LOCALAPPDATA%\Programs\Conclave`, creates the **Conclave** and **Conclave - Kapat** shortcuts, and puts the `conclave` command on `PATH`.
+
+To pin a version or install somewhere else, run the script with parameters instead of piping it:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Emirfs/conclave/main/install.ps1))) -Version v0.2.0
+```
+
+`-InstallDir`, `-NoShortcuts`, and `-NoPath` are also accepted.
+
+Prefer a wizard? Each release also ships `conclave-windows-amd64-setup.exe`, a per-user installer that needs no administrator rights and carries the same two binaries.
+
+## Updates
+
+The daemon asks GitHub once a day whether a newer release exists. It only ever looks: nothing is downloaded or replaced without being asked for.
+
+- When a release is available, a banner appears above the canvas with **Notları oku** and **Güncelle**.
+- **Güncelle** hands the work to the `install.ps1` that sits next to the application, which waits for the app to exit, swaps the binaries, and starts the new build. A running program cannot replace its own files, which is why the update always closes the window.
+- From a terminal, `conclave update` asks now instead of waiting for the daily check.
+- A build made from source reports its version as `dev` and never checks at all.
+
 ## Requirements
+
+Running an installed release needs nothing but Windows and the provider CLIs. The following are for building from source:
 
 - Go `1.26.7` or newer
 - Wails v2 CLI
@@ -170,6 +201,13 @@ Continue an existing Conclave conversation:
 go run ./cmd/conclave chat --conversation 12 "Which approach would you choose?"
 ```
 
+Report the running build, and ask GitHub for a newer one:
+
+```powershell
+conclave version
+conclave update
+```
+
 Queue an ordered pipeline. Stages stop at the first failure:
 
 ```powershell
@@ -225,7 +263,10 @@ SQLite migrations are append-only and tracked with `PRAGMA user_version`. Jobs l
 | `internal/provider/` | CLI discovery, invocation, and stream decoding |
 | `internal/statedir/` | State paths and token management |
 | `internal/store/` | SQLite persistence, migrations, and recovery |
+| `internal/update/` | Release check against GitHub; looks only, never installs |
 | `internal/vcs/` | Read-only Git status and diff inspection |
+| `internal/version/` | The running build's version, stamped in at link time |
+| `install.ps1` | Installer and updater for released builds |
 
 ## Development
 

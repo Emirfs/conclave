@@ -3,10 +3,17 @@ setlocal
 rem Conclave'i baslatir: daemon calismiyorsa arka planda ayaga kaldirir,
 rem sonra masaustu penceresini acar. Pencere kapansa da daemon calismaya
 rem devam eder; devam eden isler kesilmez.
+rem
+rem Hem kurulu bir Conclave'de (iki exe yan yana) hem gelistirme agacinda
+rem calisir: once yanindaki dosyalara bakar, bulamazsa repo duzenini dener.
 
+set "HERE=%~dp0"
 set "ROOT=%~dp0.."
-set "DAEMON=%ROOT%\build\conclave.exe"
-set "DESKTOP=%ROOT%\cmd\conclave-desktop\build\bin\conclave-desktop.exe"
+
+set "DAEMON=%HERE%conclave.exe"
+set "DESKTOP=%HERE%conclave-desktop.exe"
+if not exist "%DAEMON%"  set "DAEMON=%ROOT%\build\conclave.exe"
+if not exist "%DESKTOP%" set "DESKTOP=%ROOT%\cmd\conclave-desktop\build\bin\conclave-desktop.exe"
 
 if not exist "%DAEMON%" (
   echo Daemon bulunamadi: %DAEMON%

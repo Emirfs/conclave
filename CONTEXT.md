@@ -14,7 +14,10 @@ nodes the daemon persists, so a layout survives a restart.
 | `internal/provider/` | Provider CLI discovery and invocation. |
 | `internal/statedir/` | State directory and daemon token shared by every local client. |
 | `internal/store/` | SQLite persistence, migrations and restart recovery. |
+| `internal/update/` | Cached release check against GitHub. Looks only. |
 | `internal/vcs/` | Read-only git status and diff for a card's project. |
+| `internal/version/` | The running build's version, stamped in at link time. |
+| `install.ps1` | Installs and updates a released build on Windows. |
 
 ## Invariants
 
@@ -44,6 +47,10 @@ nodes the daemon persists, so a layout survives a restart.
 - Each card carries its own project directory and access level; providers run there, as they would in
   a terminal. `edit` access auto-approves file changes and commands, because `--print` runs cannot ask.
 - Client-supplied paths are untrusted: reject absolute paths and parent traversal before touching disk.
+- Nothing installs itself. The daemon only ever *looks* for a newer release, on a timer, and caches
+  the answer; the bytes are fetched and the binaries replaced by `install.ps1`, and only after a
+  person clicks Güncelle or runs the script. A build that cannot say which release it is reports
+  `dev` and does not check at all.
 - SQLite is operational state; Mnemo is shared semantic memory. Neither stores credentials.
 - Schema changes are append-only migrations tracked with `PRAGMA user_version`. Never edit an applied
   migration.

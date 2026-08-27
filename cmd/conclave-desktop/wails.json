@@ -8,5 +8,12 @@
   "frontend:dev:serverUrl": "auto",
   "author": {
     "name": "Emir Furkan Sarı"
+  },
+  "info": {
+    "companyName": "Emir Furkan Sarı",
+    "productName": "Conclave",
+    "productVersion": "0.0.0",
+    "copyright": "© 2026 Emir Furkan Sarı",
+    "comments": "Yerel yapay zekâ sağlayıcı ve test hattı düzenleyicisi"
   }
 }
