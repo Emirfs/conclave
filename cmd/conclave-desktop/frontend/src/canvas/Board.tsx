@@ -204,6 +204,27 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
     [unlink],
   )
 
+  // Closing the panel has to clear the edge's own selected flag too, or the
+  // edge stays selected and clicking it again produces no change to react to —
+  // leaving no way to reopen it.
+  const closeLinkPanel = useCallback(() => {
+    setSelectedEdge(null)
+    flow.setEdges((current) =>
+      current.map((edge) => (edge.selected ? { ...edge, selected: false } : edge)),
+    )
+  }, [flow])
+
+  // Escape closes whatever is open, which is the first thing anyone tries.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setBranching(null)
+      closeLinkPanel()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [closeLinkPanel])
+
   // Ctrl+A selects every card and note, the way a canvas is expected to behave.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -268,6 +289,7 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onPaneClick={closeLinkPanel}
         proOptions={{ hideAttribution: true }}
         minZoom={0.2}
         maxZoom={2}
@@ -328,9 +350,10 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
               onConfigure={configureLink}
               onAssignRoles={assignRoles}
               onUnlink={(id) => {
-                setSelectedEdge(null)
+                closeLinkPanel()
                 void unlink(id)
               }}
+              onClose={closeLinkPanel}
             />
           )}
           {branching && (

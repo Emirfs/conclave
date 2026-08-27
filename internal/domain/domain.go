@@ -91,8 +91,12 @@ type ChatResponse struct {
 }
 
 type ChatTurn struct {
-	ID        int64          `json:"id"`
-	Prompt    string         `json:"prompt"`
+	ID     int64  `json:"id"`
+	Prompt string `json:"prompt"`
+	// Kind says where the prompt came from: a person, another card's answer, or
+	// the nudge that pushes a stalled exchange on. A transcript that does not
+	// separate these reads as though the user wrote everything.
+	Kind      string         `json:"kind,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
 	Responses []ChatResponse `json:"responses"`
 }

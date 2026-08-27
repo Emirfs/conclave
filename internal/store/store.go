@@ -477,7 +477,7 @@ func (s *Store) RequeueChatResponse(ctx context.Context, id int64) error {
 // chronological order, which is how a transcript is read.
 func (s *Store) conversationTurns(ctx context.Context, conversationID int64, limit int) ([]domain.ChatTurn, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, prompt, created_at FROM chat_turns
+SELECT id, prompt, created_at, COALESCE(kind, 'user') FROM chat_turns
 WHERE conversation_id = ? ORDER BY id DESC LIMIT ?`, conversationID, limit)
 	if err != nil {
 		return nil, err
@@ -486,7 +486,7 @@ WHERE conversation_id = ? ORDER BY id DESC LIMIT ?`, conversationID, limit)
 	for rows.Next() {
 		var turn domain.ChatTurn
 		var created string
-		if err := rows.Scan(&turn.ID, &turn.Prompt, &created); err != nil {
+		if err := rows.Scan(&turn.ID, &turn.Prompt, &created, &turn.Kind); err != nil {
 			rows.Close()
 			return nil, err
 		}

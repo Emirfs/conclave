@@ -157,6 +157,7 @@ export namespace domain {
 	export class ChatTurn {
 	    id: number;
 	    prompt: string;
+	    kind?: string;
 	    // Go type: time
 	    created_at: any;
 	    responses: ChatResponse[];
@@ -169,6 +170,7 @@ export namespace domain {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.prompt = source["prompt"];
+	        this.kind = source["kind"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.responses = this.convertValues(source["responses"], ChatResponse);
 	    }

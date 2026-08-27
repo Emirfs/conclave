@@ -14,11 +14,13 @@ export function LinkPanel({
   onConfigure,
   onAssignRoles,
   onUnlink,
+  onClose,
 }: {
   edge: Edge
   onConfigure: (id: string, mode: string, rounds: number, untilDone: boolean, briefing: string) => void
   onAssignRoles: (sourceNodeID: string, targetNodeID: string, sourceRole: string, targetRole: string) => void
   onUnlink: (id: string) => void
+  onClose: () => void
 }) {
   const mode = (edge.data?.mode as string) ?? 'relay'
   const rounds = (edge.data?.maxRounds as number) ?? 3
@@ -45,7 +47,12 @@ export function LinkPanel({
   if (toNote) {
     return (
       <div className="linkpanel">
-        <span className="linkpanel__title">Sonuç bağlantısı</span>
+        <span className="linkpanel__title">
+          Sonuç bağlantısı
+          <button className="linkpanel__close" onClick={onClose} title="Kapat" aria-label="Kapat">
+            ×
+          </button>
+        </span>
         <p className="linkpanel__hint">
           Bu çizgi, sonuç kartının hangi kartlardan çıktığını gösterir. Üzerinden
           mesaj geçmez.
@@ -59,7 +66,12 @@ export function LinkPanel({
 
   return (
     <div className="linkpanel">
-      <span className="linkpanel__title">Bağlantı</span>
+      <span className="linkpanel__title">
+        Bağlantı
+        <button className="linkpanel__close" onClick={onClose} title="Kapat" aria-label="Kapat">
+          ×
+        </button>
+      </span>
       <div className="linkpanel__row">
         {Object.entries(LINK_MODES).map(([value, label]) => (
           <button

@@ -319,12 +319,90 @@ function Turn({
 }) {
   return (
     <article className="turn">
-      <p className="turn__prompt">{turn.prompt}</p>
+      <Prompt prompt={turn.prompt} kind={turn.kind ?? 'user'} />
       {(turn.responses ?? []).map((response) => (
         <Response key={response.id} response={response} showName={group} onBranch={onBranch} />
       ))}
     </article>
   )
+}
+
+/** How long a prompt may be before it is folded away. Relayed prompts carry a
+ *  whole answer from another card, and a transcript where every incoming
+ *  message is full length is unreadable. */
+const PROMPT_FOLD_AFTER = 320
+
+/** One incoming message. Who sent it decides how it is drawn: a person, another
+ *  card, or the system pushing a stalled exchange on. Without that separation a
+ *  transcript reads as though the user typed everything in it. */
+function Prompt({ prompt, kind }: { prompt: string; kind: string }) {
+  const [open, setOpen] = useState(false)
+  // A briefing is prepended to the first relayed message and separated with a
+  // rule. It is context, not the message, so it folds on its own.
+  const [context, message] = splitBriefing(prompt)
+  const speaker = kind === 'relay' ? leadingSpeaker(message) : null
+  const text = speaker ? message.slice(speaker.length + 2) : message
+  const foldable = text.length > PROMPT_FOLD_AFTER
+  const shown = foldable && !open ? text.slice(0, PROMPT_FOLD_AFTER).trimEnd() + '…' : text
+
+  return (
+    <div className={`prompt prompt--${kind}`}>
+      <span className="prompt__from">{label(kind, speaker)}</span>
+      {context !== '' && <Folded label="bağlam" body={context} />}
+      {kind === 'user' ? (
+        <p className="prompt__text prompt__text--plain">{shown}</p>
+      ) : (
+        <div className="prompt__text">
+          <Markdown>{shown}</Markdown>
+        </div>
+      )}
+      {foldable && (
+        <button className="prompt__more nodrag" onClick={() => setOpen(!open)}>
+          {open ? 'katla' : 'devamı'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** A block that stays out of the way until asked for. */
+function Folded({ label, body }: { label: string; body: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="prompt__context">
+      <button className="prompt__more nodrag" onClick={() => setOpen(!open)}>
+        {open ? `${label} ✕` : label}
+      </button>
+      {open && (
+        <div className="prompt__text prompt__text--context">
+          <Markdown>{body}</Markdown>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function label(kind: string, speaker: string | null): string {
+  if (kind === 'nudge') return 'konuşmayı sürdür'
+  if (kind === 'relay') return speaker ? `← ${speaker}` : '← bağlı kart'
+  return 'sen'
+}
+
+/** Splits the one-off briefing from the message it rides along with. The rule
+ *  is written by framePayload; anything else is a message on its own. */
+function splitBriefing(prompt: string): [string, string] {
+  const at = prompt.indexOf('\n\n---\n\n')
+  if (at === -1) return ['', prompt]
+  return [prompt.slice(0, at), prompt.slice(at + 7)]
+}
+
+/** Relayed messages start with the speaking card's name. Pulling it out lets it
+ *  be shown as a label instead of as the first words of the text. */
+function leadingSpeaker(message: string): string | null {
+  const end = message.indexOf(': ')
+  if (end === -1 || end > 40) return null
+  const name = message.slice(0, end)
+  return name.includes('\n') ? null : name
 }
 
 /** How many characters of an answer are shown before it is folded. Long answers
