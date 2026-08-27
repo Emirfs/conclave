@@ -14,7 +14,10 @@ nodes the daemon persists, so a layout survives a restart.
 | `internal/provider/` | Provider CLI discovery and invocation. |
 | `internal/statedir/` | State directory and daemon token shared by every local client. |
 | `internal/store/` | SQLite persistence, migrations and restart recovery. |
+| `internal/update/` | Cached release check against GitHub. Looks only. |
 | `internal/vcs/` | Read-only git status and diff for a card's project. |
+| `internal/version/` | The running build's version, stamped in at link time. |
+| `install.ps1` | Installs and updates a released build on Windows. |
 
 ## Invariants
 
@@ -26,10 +29,28 @@ nodes the daemon persists, so a layout survives a restart.
 - Commands are argument arrays and bypass the command shell.
 - Chat context is scoped by conversation *and* provider. Two conversations with the same provider must
   never see each other's history.
+- A provider that resumes its own session already holds that history, so the transcript is not replayed
+  into the prompt. The transcript stands in for a session, it does not accompany one.
+- Linked cards are briefed once, before their first relayed message, rather than being told the
+  arrangement on every hop. A briefing rides along with a real message; it never costs a turn.
+- A card asking for a user decision does not end an exchange by itself: the other card is nudged to
+  decide and go on. Two such requests in a row park the dialogue for the user.
+- A role is only text in the briefing. It never changes a card's access or what it may decide, so any
+  provider can take any position in a workflow.
+- Context size is read from each provider's own usage report. A large window restates the card's role;
+  a full one drops the provider session and lets the transcript carry the conversation into a new one.
+- A finished exchange leaves its result on the board as its own card. The conclusion of a dialogue is
+  not something the user should have to scroll a card to find.
+- Branching forks an answer into one card per provider, never a single group card: the paths are
+  supposed to diverge, and a group card would merge them again.
 - A provider runs at most one chat job at a time.
 - Each card carries its own project directory and access level; providers run there, as they would in
   a terminal. `edit` access auto-approves file changes and commands, because `--print` runs cannot ask.
 - Client-supplied paths are untrusted: reject absolute paths and parent traversal before touching disk.
+- Nothing installs itself. The daemon only ever *looks* for a newer release, on a timer, and caches
+  the answer; the bytes are fetched and the binaries replaced by `install.ps1`, and only after a
+  person clicks Güncelle or runs the script. A build that cannot say which release it is reports
+  `dev` and does not check at all.
 - SQLite is operational state; Mnemo is shared semantic memory. Neither stores credentials.
 - Schema changes are append-only migrations tracked with `PRAGMA user_version`. Never edit an applied
   migration.

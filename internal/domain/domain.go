@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Status string
 
@@ -88,8 +91,12 @@ type ChatResponse struct {
 }
 
 type ChatTurn struct {
-	ID        int64          `json:"id"`
-	Prompt    string         `json:"prompt"`
+	ID     int64  `json:"id"`
+	Prompt string `json:"prompt"`
+	// Kind says where the prompt came from: a person, another card's answer, or
+	// the nudge that pushes a stalled exchange on. A transcript that does not
+	// separate these reads as though the user wrote everything.
+	Kind      string         `json:"kind,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
 	Responses []ChatResponse `json:"responses"`
 }
@@ -137,7 +144,32 @@ type Conversation struct {
 	LoopRunning bool `json:"loop_running"`
 	// Runs are the most recent cycle results, newest first.
 	Runs []CardRun `json:"runs,omitempty"`
+	// Role is what this card is supposed to do in an exchange with another
+	// card. It goes into the briefing, so the two do not both wait to be led.
+	Role string `json:"role,omitempty"`
+	// DialogueState reports how the last exchange ended: empty while it runs,
+	// DialogueDone when the work was finished, DialogueWaiting when a card
+	// stopped for a decision only a person can make.
+	DialogueState string `json:"dialogue_state,omitempty"`
 }
+
+// How a dialogue ended. A finished exchange and a stalled one look the same on
+// the wire — both stop relaying — but only one of them wants the user back.
+const (
+	// DialogueDone means a card reported the work finished and verified.
+	DialogueDone = "done"
+	// DialogueWaiting means a card asked for a decision and got no answer, so
+	// the exchange is parked rather than complete.
+	DialogueWaiting = "waiting"
+)
+
+// Turn kinds. A turn is either something a person sent, an answer relayed from
+// a linked card, or the nudge that pushes a stalled exchange one step further.
+const (
+	TurnUser  = "user"
+	TurnRelay = "relay"
+	TurnNudge = "nudge"
+)
 
 // CanvasNode is presentation state the daemon owns so a layout survives a
 // restart and is identical for every client.
@@ -177,6 +209,30 @@ type NewConversation struct {
 	Y           float64  `json:"y"`
 }
 
+// BranchRequest forks an answer into new cards, one per provider, each starting
+// from that answer.
+type BranchRequest struct {
+	Answer    string   `json:"answer"`
+	Providers []string `json:"providers"`
+}
+
+// RoleRequest sets what a card is expected to do when it works with another.
+type RoleRequest struct {
+	Role string `json:"role"`
+}
+
+// Normalised trims the role and keeps it short enough to stay a role rather
+// than becoming a second prompt.
+func (r RoleRequest) Normalised() RoleRequest {
+	r.Role = strings.TrimSpace(r.Role)
+	if len(r.Role) > maxRoleBytes {
+		r.Role = r.Role[:maxRoleBytes]
+	}
+	return r
+}
+
+const maxRoleBytes = 500
+
 // ProjectRequest repoints a card at a directory and access level.
 type ProjectRequest struct {
 	ProjectPath string `json:"project_path"`
@@ -199,6 +255,7 @@ type CanvasLink struct {
 	Mode      string `json:"mode"`
 	MaxRounds int    `json:"max_rounds"`
 	UntilDone bool   `json:"until_done"`
+	Briefing  string `json:"briefing,omitempty"`
 }
 
 // Link modes decide how a relayed answer is presented to the receiving card.
@@ -220,6 +277,9 @@ type LinkOptions struct {
 	Mode      string `json:"mode"`
 	MaxRounds int    `json:"max_rounds"`
 	UntilDone bool   `json:"until_done"`
+	// Briefing is the shared goal, given to each card once before its first
+	// relayed message rather than repeated on every hop.
+	Briefing string `json:"briefing,omitempty"`
 }
 
 // Normalised fills in defaults and clamps the round budget.
@@ -238,8 +298,15 @@ func (o LinkOptions) Normalised() LinkOptions {
 	if o.Mode != LinkDialogue {
 		o.UntilDone = false
 	}
+	if len(o.Briefing) > maxBriefingBytes {
+		o.Briefing = o.Briefing[:maxBriefingBytes]
+	}
 	return o
 }
+
+// maxBriefingBytes keeps a briefing to something a card can actually act on.
+// It is prepended to a real message, so it competes with the work for room.
+const maxBriefingBytes = 4000
 
 type NewLink struct {
 	SourceID  int64  `json:"source_id"`
@@ -247,6 +314,7 @@ type NewLink struct {
 	Mode      string `json:"mode,omitempty"`
 	MaxRounds int    `json:"max_rounds,omitempty"`
 	UntilDone bool   `json:"until_done,omitempty"`
+	Briefing  string `json:"briefing,omitempty"`
 	// Pair also creates the reverse link, so the two cards answer each other.
 	Pair bool `json:"pair,omitempty"`
 }

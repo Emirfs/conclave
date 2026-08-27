@@ -17,27 +17,49 @@ import {
 import '@xyflow/react/dist/style.css'
 
 import { domain } from '../../wailsjs/go/models'
+import { BranchPanel } from './BranchPanel'
 import { ConversationNode } from './ConversationNode'
 import { LinkPanel } from './LinkPanel'
 import { NoteNode } from './NoteNode'
+import { ProviderEdge } from './ProviderEdge'
 import type { BoardNode, useCanvas } from './useCanvas'
 
 const nodeTypes = { conversation: ConversationNode, note: NoteNode }
+const edgeTypes = { provider: ProviderEdge }
 
 export type BoardHandle = ReturnType<typeof useCanvas>
 
-export function Board({ canvas }: { canvas: BoardHandle }) {
+export function Board({ canvas, providers }: { canvas: BoardHandle; providers: string[] }) {
   return (
     <ReactFlowProvider>
-      <BoardSurface canvas={canvas} />
+      <BoardSurface canvas={canvas} providers={providers} />
     </ReactFlowProvider>
   )
 }
 
-function BoardSurface({ canvas }: { canvas: BoardHandle }) {
+function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: string[] }) {
   const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink,
-    pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop } = canvas
+    pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
+    saveRole, resumeDialogue, assignRoles, branch, addNote } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
+  // The answer a branch would start from, held while the user picks providers.
+  const [branching, setBranching] = useState<{ conversationID: number; answer: string } | null>(null)
+  // The minimap earns its corner on a large board and wastes it on a small one,
+  // so the choice is the user's and it is remembered.
+  const [map, setMap] = useState(() => {
+    try {
+      return localStorage.getItem('conclave.minimap') !== 'off'
+    } catch {
+      return true
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem('conclave.minimap', map ? 'on' : 'off')
+    } catch {
+      // A browser that refuses storage still gets a working toggle.
+    }
+  }, [map])
 
   // Closing removes the node and, for a conversation, its history with it.
   const close = useCallback((id: string) => void remove(id), [remove])
@@ -51,8 +73,10 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
           const conversation = node.data.kind === 'conversation'
           const minWidth = conversation ? 300 : 240
           const minHeight = conversation ? 240 : 120
-          const width = Math.max(minWidth, Math.min(1200, (node.width ?? (conversation ? 420 : 240)) + direction * 80))
-          const height = Math.max(minHeight, Math.min(900, (node.height ?? (conversation ? 520 : 180)) + direction * 60))
+          // A step small enough to need six clicks is a step that gets used
+          // once and then abandoned for dragging a corner.
+          const width = Math.max(minWidth, Math.min(1200, (node.width ?? (conversation ? 420 : 240)) + direction * 140))
+          const height = Math.max(minHeight, Math.min(900, (node.height ?? (conversation ? 520 : 180)) + direction * 110))
           patch({ id: Number(id), width, height } as domain.CanvasNodePatch)
           return { ...node, width, height }
         }),
@@ -61,13 +85,48 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
     [patch, setNodes],
   )
 
+  // Fitting a note to its own text, which is the size it almost always wants.
+  const setHeight = useCallback(
+    (id: string, height: number) => {
+      setNodes((current) =>
+        current.map((node) => {
+          if (node.id !== id) return node
+          patch({ id: Number(id), height } as domain.CanvasNodePatch)
+          return { ...node, height }
+        }),
+      )
+    },
+    [patch, setNodes],
+  )
+
+  // Pinning puts text on the board beside the card it came from, so a diff or
+  // an answer can be read next to the conversation instead of inside it.
+  const pinNote = useCallback(
+    async (nodeID: string, body: string) => {
+      const source = nodes.find((node) => node.id === nodeID)
+      const x = (source?.position.x ?? 0) + (source?.width ?? 420) + 40
+      const y = source?.position.y ?? 0
+      await addNote({ body, color: '', x, y } as domain.NewNote)
+    },
+    [nodes, addNote],
+  )
+
   // Notes need a callback in their data so the textarea can report edits, but
   // the hook owns the state. Injecting it here keeps NoteNode presentational.
   const decorated = useMemo(
     () =>
       nodes.map((node) =>
         node.data.kind === 'note'
-          ? { ...node, data: { ...node.data, onBodyChange: setNoteBody, onClose: close, onResize: resize } }
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                onBodyChange: setNoteBody,
+                onClose: close,
+                onResize: resize,
+                onSetHeight: setHeight,
+              },
+            }
           : {
               ...node,
               data: {
@@ -78,11 +137,17 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
                 onToggleAccess: setAccess,
                 onSaveLoop: saveLoop,
                 onToggleLoop: toggleLoop,
+                onSaveRole: saveRole,
+                onResumeDialogue: resumeDialogue,
+                onBranch: (conversationID: number, answer: string) =>
+                  setBranching({ conversationID, answer }),
+                onPinNote: (body: string) => void pinNote(node.id, body),
                 onResize: resize,
               },
             },
       ),
-    [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop, resize],
+    [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop,
+     saveRole, resumeDialogue, pinNote, resize, setHeight],
   )
 
   const onNodesChange = useCallback(
@@ -140,6 +205,27 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
     },
     [unlink],
   )
+
+  // Closing the panel has to clear the edge's own selected flag too, or the
+  // edge stays selected and clicking it again produces no change to react to —
+  // leaving no way to reopen it.
+  const closeLinkPanel = useCallback(() => {
+    setSelectedEdge(null)
+    flow.setEdges((current) =>
+      current.map((edge) => (edge.selected ? { ...edge, selected: false } : edge)),
+    )
+  }, [flow])
+
+  // Escape closes whatever is open, which is the first thing anyone tries.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setBranching(null)
+      closeLinkPanel()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [closeLinkPanel])
 
   // Ctrl+A selects every card and note, the way a canvas is expected to behave.
   useEffect(() => {
@@ -202,9 +288,11 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
         nodes={decorated}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onPaneClick={closeLinkPanel}
         proOptions={{ hideAttribution: true }}
         minZoom={0.2}
         maxZoom={2}
@@ -234,7 +322,7 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
                 <>
                   <button
                     className="boardpanel__action"
-                    onClick={() => void pair(selectedCards[0].id, selectedCards[1].id, 'dialogue', 3)}
+                    onClick={() => void pair(selectedCards[0].id, selectedCards[1].id, 'dialogue', 3, '')}
                     title="İki kart birbirine cevap verir"
                   >
                     karşılıklı bağla
@@ -263,22 +351,49 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
             <LinkPanel
               edge={edges.find((edge) => edge.id === selectedEdge) ?? { id: selectedEdge } as never}
               onConfigure={configureLink}
+              onAssignRoles={assignRoles}
               onUnlink={(id) => {
-                setSelectedEdge(null)
+                closeLinkPanel()
                 void unlink(id)
               }}
+              onClose={closeLinkPanel}
+            />
+          )}
+          {branching && (
+            <BranchPanel
+              providers={providers}
+              answer={branching.answer}
+              onBranch={(chosen) => {
+                void branch(branching.conversationID, branching.answer, chosen)
+                setBranching(null)
+              }}
+              onCancel={() => setBranching(null)}
             />
           )}
         </Panel>
         <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="#232838" />
         <Controls showInteractive={false} position="bottom-right" />
-        <MiniMap
-          pannable
-          zoomable
-          position="bottom-left"
-          maskColor="rgba(8, 9, 13, 0.72)"
-          nodeColor={(node) => (node.type === 'note' ? '#f2c55c' : '#7aa8ff')}
-        />
+        {/* MiniMap positions itself; wrapping it in a Panel only fights that.
+            The toggle is its own panel, lifted clear of the map when shown. */}
+        {map && (
+          <MiniMap
+            pannable
+            zoomable
+            className="mappanel__map"
+            position="bottom-left"
+            maskColor="rgba(8, 9, 13, 0.72)"
+            nodeColor={(node) => (node.type === 'note' ? '#f2c55c' : '#7aa8ff')}
+          />
+        )}
+        <Panel position="bottom-left" className={`mappanel${map ? ' mappanel--raised' : ''}`}>
+          <button
+            className="mappanel__toggle"
+            onClick={() => setMap(!map)}
+            title={map ? 'Haritayı gizle' : 'Haritayı göster'}
+          >
+            {map ? 'harita ✕' : 'harita'}
+          </button>
+        </Panel>
       </ReactFlow>
     </div>
   )

@@ -36,6 +36,42 @@
   box-shadow: var(--shadow-panel);
 }
 
+/* The map and its toggle share the corner. Its default size takes a bite out
+   of the board that a glance at the layout does not repay. */
+.mappanel {
+  margin: 0 0 12px 12px;
+}
+
+/* With the map shown the toggle sits above it; without it, in the corner. */
+.mappanel--raised {
+  margin-bottom: 128px;
+}
+
+.mappanel__map {
+  width: 150px !important;
+  height: 105px !important;
+  margin: 12px !important;
+}
+
+.mappanel__toggle {
+  align-self: flex-start;
+  padding: 3px 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: default;
+  box-shadow: var(--shadow-panel);
+  transition: border-color 120ms var(--ease), color 120ms var(--ease);
+}
+
+.mappanel__toggle:hover {
+  border-color: var(--line);
+  color: var(--text-secondary);
+}
+
 .react-flow__node {
   /* The node components draw their own frame and shadow. */
   border: 0;
@@ -57,10 +93,28 @@
   box-shadow: var(--shadow-panel);
   font-family: var(--font-ui);
   text-align: left;
+  transition: border-color var(--duration-medium) var(--ease),
+    box-shadow var(--duration-medium) var(--ease);
+  animation: node-enter 280ms var(--ease-out) both;
 }
 
 .node--selected {
   box-shadow: var(--shadow-float);
+}
+
+.node:hover:not(.node--selected) {
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.62);
+}
+
+@keyframes node-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.975) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .node:fullscreen {
@@ -81,6 +135,14 @@
   border: 1px solid var(--accent);
   background: var(--surface-base);
   border-radius: 2px;
+}
+
+/* Notes are resized far more often than conversation cards — their height is
+   whatever their text needs — so their handles are worth hitting. */
+.node__resize-handle--large {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
 }
 
 /* ---------- conversation node ---------- */
@@ -104,6 +166,11 @@
   padding: 9px 12px;
   background: var(--surface-overlay);
   border-bottom: 1px solid var(--line-subtle);
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.node--selected .node__header {
+  background: color-mix(in srgb, var(--node-accent) 7%, var(--surface-overlay));
 }
 
 .node__badges {
@@ -218,20 +285,107 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  animation: turn-enter var(--duration-medium) var(--ease-out) both;
 }
 
-.turn__prompt {
-  margin: 0;
+@keyframes turn-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* An incoming message. Three kinds arrive here — a person, another card, the
+   system — and a transcript that draws them alike reads as though the user
+   wrote all of it. The label carries the distinction; the frame reinforces it. */
+.prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   padding: 7px 10px;
   border-radius: var(--radius-sm);
-  background: var(--surface-overlay);
   border-left: 2px solid var(--text-muted);
+  background: var(--surface-overlay);
+}
+
+/* The user's own words: the one thing in a card that is not machine output. */
+.prompt--user {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-overlay));
+}
+
+/* An answer relayed in from the card on the other end of a link. */
+.prompt--relay {
+  border-left-color: var(--text-muted);
+}
+
+/* Not a message from anyone: the system pushing a stalled exchange on. */
+.prompt--nudge {
+  border-left-style: dashed;
+  background: transparent;
+}
+
+.prompt__from {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.prompt--user .prompt__from {
+  color: var(--accent);
+}
+
+.prompt__text {
+  align-self: stretch;
   font-size: 12.5px;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--text-primary) 82%, var(--text-secondary));
   overflow-wrap: anywhere;
 }
 
+.prompt__text--plain {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.prompt__text--context {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.prompt__context {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.prompt__more {
+  padding: 1px 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 9.5px;
+  cursor: default;
+}
+
+.prompt__more:hover {
+  border-color: var(--line);
+  color: var(--text-secondary);
+}
+
+/* An answer. Left unframed on purpose: it is the thing being read, and the
+   incoming messages are the punctuation between answers. */
 .reply {
   padding-left: 10px;
   border-left: 2px solid var(--reply-accent);
@@ -250,7 +404,7 @@
 .reply__text {
   margin: 0;
   font-size: 13.5px;
-  line-height: 1.62;
+  line-height: 1.68;
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
@@ -285,6 +439,10 @@
 .markdown h3,
 .markdown h4 {
   margin: 0 0 0.8em;
+}
+
+.markdown p {
+  text-wrap: pretty;
 }
 
 .markdown h1,
@@ -430,6 +588,297 @@
   background: var(--surface-overlay);
 }
 
+/* How a dialogue ended. "Done" is quiet; "waiting" asks for the user and gives
+   them the one button that clears it. */
+.node__dialogue {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-top: 1px solid var(--line-subtle);
+  font-size: 11px;
+}
+
+.node__dialogue--done {
+  background: color-mix(in srgb, var(--positive) 10%, transparent);
+  color: var(--text-secondary);
+}
+
+.node__dialogue--waiting {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+}
+
+.node__dialogue-text {
+  flex: 1;
+}
+
+.node__dialogue-resume {
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: default;
+}
+
+.node__dialogue-resume:hover {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+/* What this card is for when it works with another one. Empty on a card that
+   has never been linked, which is why it stays this quiet. */
+.node__role {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 9px 0;
+}
+
+.node__role-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.node__role-clear {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: default;
+}
+
+.node__role-clear:hover {
+  color: var(--negative);
+}
+
+/* Starting points, not a fixed set: the text stays editable underneath. */
+.node__role-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.node__role-chip {
+  padding: 2px 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: default;
+  transition: border-color 120ms var(--ease), color 120ms var(--ease);
+}
+
+.node__role-chip:hover {
+  border-color: var(--line);
+  color: var(--text-secondary);
+}
+
+.node__role-chip--active {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+/* Fold a long answer, or carry it into new cards. Sits under the reply so it
+   does not compete with the text itself. */
+.reply__actions {
+  display: flex;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.reply__action {
+  padding: 2px 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: default;
+  transition: border-color 120ms var(--ease), color 120ms var(--ease);
+}
+
+.reply__action:hover {
+  border-color: var(--line);
+  color: var(--text-secondary);
+}
+
+/* Choosing where an answer goes next. */
+.branchpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 260px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-panel);
+  animation: panel-enter var(--duration-medium) var(--ease-out) both;
+}
+
+@keyframes panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.branchpanel__title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.branchpanel__excerpt {
+  margin: 0;
+  padding: 6px 7px;
+  border-left: 2px solid var(--line);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.branchpanel__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.branchpanel__choice {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: default;
+}
+
+.branchpanel__choice--active {
+  border-color: var(--branch-accent, var(--line));
+  background: color-mix(in srgb, var(--branch-accent, var(--line)) 16%, transparent);
+  color: var(--text-primary);
+}
+
+.branchpanel__hint {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.branchpanel__go,
+.branchpanel__cancel {
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: default;
+}
+
+.branchpanel__go:disabled {
+  opacity: 0.45;
+}
+
+.branchpanel__go:not(:disabled):hover {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+/* Lifting the working tree, or one file's patch, onto the board. */
+.changes__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 6px;
+}
+
+.changes__summary {
+  flex: 1;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.changes__pin {
+  padding: 2px 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: default;
+}
+
+.changes__pin:hover {
+  border-color: var(--line);
+  color: var(--text-secondary);
+}
+
+/* Which card does what, readable from the board without opening anything. */
+.node__badge {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+
+.node__role-label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.node__role-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.node__role-input:hover {
+  border-color: var(--line-subtle);
+}
+
+.node__role-input:focus {
+  border-color: var(--line);
+  background: var(--surface-input);
+  color: var(--text-primary);
+}
+
 .node__input {
   width: 100%;
   padding: 7px 9px;
@@ -444,10 +893,13 @@
   line-height: 1.5;
   user-select: text;
   cursor: text;
+  transition: border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease);
 }
 
 .node__input:focus {
   border-color: var(--node-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 12%, transparent);
 }
 
 .node__input::placeholder {
@@ -638,13 +1090,83 @@
   stroke-width: 1.6;
 }
 
-.react-flow__edge.selected .react-flow__edge-path {
-  stroke: var(--accent);
+/* Links between cards.
+
+   The stroke is a gradient from the source card's provider colour to the
+   target's, set by ProviderEdge, so a glance at a line says which model is
+   speaking to which. The working mode is in the line's texture instead of a
+   permanent label: a handoff is thin, a dialogue is heavier, a review is
+   dotted. */
+.edge {
+  fill: none;
+  stroke-linecap: round;
+  transition: stroke-width 140ms var(--ease), opacity 140ms var(--ease);
 }
 
-/* An animated link means an answer is on its way along it. */
-.react-flow__edge.animated .react-flow__edge-path {
-  stroke: var(--accent);
+.edge--relay {
+  stroke-width: 1.5;
+  opacity: 0.75;
+}
+
+.edge--dialogue {
+  stroke-width: 2.6;
+  opacity: 0.9;
+}
+
+.edge--review {
+  stroke-width: 1.8;
+  stroke-dasharray: 1 6;
+  opacity: 0.85;
+}
+
+/* A record of where a result came from, not a route anything travels. */
+.edge--note {
+  stroke: var(--line);
+  stroke-width: 1.2;
+  stroke-dasharray: 3 6;
+  opacity: 0.4;
+}
+
+.edge--selected {
+  opacity: 1;
+  stroke-width: 3.2;
+}
+
+.edge--note.edge--selected {
+  stroke: var(--line-strong);
+  opacity: 0.8;
+  stroke-width: 1.6;
+}
+
+/* An answer is being produced at the far end of this link right now. Only the
+   one edge actually carrying work moves; animating all of them keeps the
+   WebView compositing the whole board. */
+.edge--active {
+  stroke-dasharray: 5 7;
+  animation: edge-flow 0.9s linear infinite;
+  opacity: 1;
+}
+
+@keyframes edge-flow {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+/* Mode and round budget, shown while the edge is selected — which is exactly
+   when the panel for changing them is open. */
+.edge__label {
+  position: absolute;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-panel);
 }
 
 .react-flow__connectionline .react-flow__connection-path {
@@ -732,6 +1254,7 @@
 
 .node__tab--active {
   border-color: var(--node-accent);
+  background: color-mix(in srgb, var(--node-accent) 10%, var(--surface-raised));
   color: var(--text-primary);
 }
 
@@ -900,14 +1423,34 @@
   border-radius: var(--radius);
   background: var(--surface-raised);
   box-shadow: var(--shadow-float);
+  animation: panel-enter var(--duration-medium) var(--ease-out) both;
 }
 
 .linkpanel__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 10px;
   font-weight: 650;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-muted);
+}
+
+/* Deselecting an edge is not a discoverable way to dismiss a panel. */
+.linkpanel__close {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: default;
+}
+
+.linkpanel__close:hover {
+  color: var(--text-primary);
 }
 
 .linkpanel__row,
@@ -953,6 +1496,57 @@
   font-size: 10.5px;
   line-height: 1.5;
   color: var(--text-muted);
+}
+
+.linkpanel__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Complementary roles, assigned to both cards in one click. */
+.linkpanel__pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.linkpanel__pair {
+  padding: 4px 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  text-align: left;
+  cursor: default;
+  transition: border-color 120ms var(--ease), color 120ms var(--ease);
+}
+
+.linkpanel__pair:hover {
+  border-color: var(--line);
+  color: var(--text-primary);
+}
+
+/* The shared goal, sent to each card once rather than on every hop. */
+.linkpanel__briefing {
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  outline: none;
+  resize: vertical;
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.linkpanel__briefing:focus {
+  border-color: var(--accent, var(--line));
 }
 
 .linkpanel__remove {
@@ -1229,6 +1823,7 @@
   border-radius: var(--radius);
   background: var(--surface-raised);
   box-shadow: var(--shadow-float);
+  animation: panel-enter var(--duration-medium) var(--ease-out) both;
 }
 
 .selectionbar__count {

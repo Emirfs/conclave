@@ -8,6 +8,7 @@ import { Changes } from './Changes'
 import { LoopPanel } from './LoopPanel'
 import { Markdown } from './Markdown'
 import { domain } from '../../wailsjs/go/models'
+import { ROLES, roleName } from './roles'
 import type { ConversationNodeData } from './useCanvas'
 
 type Props = NodeProps & {
@@ -18,6 +19,11 @@ type Props = NodeProps & {
     onToggleAccess: (conversationID: number, project: string, access: string) => Promise<void>
     onSaveLoop: (conversationID: number, config: domain.LoopConfig) => Promise<void>
     onToggleLoop: (conversationID: number, running: boolean) => Promise<void>
+    onSaveRole: (conversationID: number, role: string) => Promise<void>
+    onResumeDialogue: (conversationID: number) => Promise<void>
+    onBranch: (conversationID: number, answer: string) => void
+    /** Puts text on the board as its own note card, next to this one. */
+    onPinNote: (body: string) => void
     onResize: (id: string, direction: -1 | 1) => void
   }
 }
@@ -25,7 +31,8 @@ type Props = NodeProps & {
 type Tab = 'chat' | 'changes' | 'tests'
 
 export const ConversationNode = memo(function ConversationNode({ id, data, selected }: Props) {
-  const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop, onResize } = data
+  const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop,
+    onSaveRole, onResumeDialogue, onBranch, onPinNote, onResize } = data
   const project = conversation.project_path ?? ''
   const access = conversation.access ?? 'edit'
   const [tab, setTab] = useState<Tab>('chat')
@@ -38,6 +45,12 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const dialogueState = conversation.dialogue_state ?? ''
+  // The role is edited locally and written on blur, so the poll that refreshes
+  // the board cannot overwrite a half-typed line.
+  const savedRole = conversation.role ?? ''
+  const [role, setRole] = useState(savedRole)
+  useEffect(() => setRole(savedRole), [savedRole])
   const transcript = useRef<HTMLDivElement>(null)
   const card = useRef<HTMLDivElement>(null)
 
@@ -102,6 +115,13 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
           })}
         </span>
         <span className="node__title">{conversation.title}</span>
+        {/* The role belongs in the title bar: which card does what is the first
+            thing you need from a board of several. */}
+        {savedRole !== '' && (
+          <span className="node__badge" title={savedRole}>
+            {roleName(savedRole)}
+          </span>
+        )}
         <span className="node__kind">{group ? 'grup' : 'tekil'}</span>
         <CardControls
           target={card}
@@ -171,7 +191,11 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
         </div>
       ) : tab === 'changes' ? (
         <div className="node__body nowheel">
-          <Changes conversationID={conversation.id} refreshKey={turns.length} />
+          <Changes
+            conversationID={conversation.id}
+            refreshKey={turns.length}
+            onPin={(_title, body) => onPinNote(body)}
+          />
         </div>
       ) : (
       <div className="node__body node__transcript nowheel" ref={transcript}>
@@ -182,7 +206,14 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
               : `${lead.label} ile ayrı bir konuşma.`}
           </p>
         ) : (
-          turns.map((turn) => <Turn key={turn.id} turn={turn} group={group} />)
+          turns.map((turn) => (
+            <Turn
+              key={turn.id}
+              turn={turn}
+              group={group}
+              onBranch={(answer) => onBranch(conversation.id, answer)}
+            />
+          ))
         )}
       </div>
       )}
@@ -195,6 +226,70 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
           click on its header, buttons and input. */}
       {linking && (
         <Handle type="target" position={Position.Left} id="anywhere" className="node__dropzone" />
+      )}
+
+      {tab === 'chat' && dialogueState !== '' && (
+        <div className={`node__dialogue node__dialogue--${dialogueState}`}>
+          {dialogueState === 'done' ? (
+            <span className="node__dialogue-text">Konuşma tamamlandı.</span>
+          ) : (
+            <>
+              <span className="node__dialogue-text">Kart senin kararını bekliyor.</span>
+              <button
+                className="node__dialogue-resume nodrag"
+                onClick={() => void onResumeDialogue(conversation.id)}
+                title="Beklemeyi kaldır; yazacağın mesaj konuşmayı yeniden başlatır"
+              >
+                devam ettir
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {tab === 'chat' && (
+        <div className="node__role nodrag">
+          <div className="node__role-line">
+            <span className="node__role-label">rol</span>
+            <input
+              className="node__role-input"
+              value={role}
+              placeholder="Bağlı kartla çalışırken bu kartın işi ne?"
+              onChange={(event) => setRole(event.target.value)}
+              onBlur={() => role !== savedRole && void onSaveRole(conversation.id, role)}
+              spellCheck={false}
+            />
+            {role !== '' && (
+              <button
+                className="node__role-clear"
+                onClick={() => {
+                  setRole('')
+                  void onSaveRole(conversation.id, '')
+                }}
+                title="Rolü kaldır"
+              >
+                ×
+              </button>
+            )}
+          </div>
+          {/* Templates are a starting point, not a constraint: the text stays
+              editable and a card can be given anything at all. */}
+          <div className="node__role-templates">
+            {ROLES.map((item) => (
+              <button
+                key={item.name}
+                className={`node__role-chip${roleName(role) === item.name ? ' node__role-chip--active' : ''}`}
+                onClick={() => {
+                  setRole(item.text)
+                  void onSaveRole(conversation.id, item.text)
+                }}
+                title={item.text}
+              >
+                {item.name}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       <div className="node__composer">
@@ -213,21 +308,124 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
   )
 })
 
-function Turn({ turn, group }: { turn: domain.ChatTurn; group: boolean }) {
+function Turn({
+  turn,
+  group,
+  onBranch,
+}: {
+  turn: domain.ChatTurn
+  group: boolean
+  onBranch: (answer: string) => void
+}) {
   return (
     <article className="turn">
-      <p className="turn__prompt">{turn.prompt}</p>
+      <Prompt prompt={turn.prompt} kind={turn.kind ?? 'user'} />
       {(turn.responses ?? []).map((response) => (
-        <Response key={response.id} response={response} showName={group} />
+        <Response key={response.id} response={response} showName={group} onBranch={onBranch} />
       ))}
     </article>
   )
 }
 
-function Response({ response, showName }: { response: domain.ChatResponse; showName: boolean }) {
+/** How long a prompt may be before it is folded away. Relayed prompts carry a
+ *  whole answer from another card, and a transcript where every incoming
+ *  message is full length is unreadable. */
+const PROMPT_FOLD_AFTER = 320
+
+/** One incoming message. Who sent it decides how it is drawn: a person, another
+ *  card, or the system pushing a stalled exchange on. Without that separation a
+ *  transcript reads as though the user typed everything in it. */
+function Prompt({ prompt, kind }: { prompt: string; kind: string }) {
+  const [open, setOpen] = useState(false)
+  // A briefing is prepended to the first relayed message and separated with a
+  // rule. It is context, not the message, so it folds on its own.
+  const [context, message] = splitBriefing(prompt)
+  const speaker = kind === 'relay' ? leadingSpeaker(message) : null
+  const text = speaker ? message.slice(speaker.length + 2) : message
+  const foldable = text.length > PROMPT_FOLD_AFTER
+  const shown = foldable && !open ? text.slice(0, PROMPT_FOLD_AFTER).trimEnd() + '…' : text
+
+  return (
+    <div className={`prompt prompt--${kind}`}>
+      <span className="prompt__from">{label(kind, speaker)}</span>
+      {context !== '' && <Folded label="bağlam" body={context} />}
+      {kind === 'user' ? (
+        <p className="prompt__text prompt__text--plain">{shown}</p>
+      ) : (
+        <div className="prompt__text">
+          <Markdown>{shown}</Markdown>
+        </div>
+      )}
+      {foldable && (
+        <button className="prompt__more nodrag" onClick={() => setOpen(!open)}>
+          {open ? 'katla' : 'devamı'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** A block that stays out of the way until asked for. */
+function Folded({ label, body }: { label: string; body: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="prompt__context">
+      <button className="prompt__more nodrag" onClick={() => setOpen(!open)}>
+        {open ? `${label} ✕` : label}
+      </button>
+      {open && (
+        <div className="prompt__text prompt__text--context">
+          <Markdown>{body}</Markdown>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function label(kind: string, speaker: string | null): string {
+  if (kind === 'nudge') return 'konuşmayı sürdür'
+  if (kind === 'relay') return speaker ? `← ${speaker}` : '← bağlı kart'
+  return 'sen'
+}
+
+/** Splits the one-off briefing from the message it rides along with. The rule
+ *  is written by framePayload; anything else is a message on its own. */
+function splitBriefing(prompt: string): [string, string] {
+  const at = prompt.indexOf('\n\n---\n\n')
+  if (at === -1) return ['', prompt]
+  return [prompt.slice(0, at), prompt.slice(at + 7)]
+}
+
+/** Relayed messages start with the speaking card's name. Pulling it out lets it
+ *  be shown as a label instead of as the first words of the text. */
+function leadingSpeaker(message: string): string | null {
+  const end = message.indexOf(': ')
+  if (end === -1 || end > 40) return null
+  const name = message.slice(0, end)
+  return name.includes('\n') ? null : name
+}
+
+/** How many characters of an answer are shown before it is folded. Long answers
+ *  turn a card into a scrolling well, and the turn you want is never the one on
+ *  screen. */
+const FOLD_AFTER = 700
+
+function Response({
+  response,
+  showName,
+  onBranch,
+}: {
+  response: domain.ChatResponse
+  showName: boolean
+  onBranch: (answer: string) => void
+}) {
   const style = providerStyle(response.provider)
   const working = response.status === 'queued' || response.status === 'running'
   const partial = response.content ?? ''
+  const [open, setOpen] = useState(false)
+  // Folding a streaming answer would hide the part being written.
+  const foldable = !working && partial.length > FOLD_AFTER
+  const shown = foldable && !open ? partial.slice(0, FOLD_AFTER).trimEnd() + '…' : partial
 
   return (
     <div className="reply" style={{ ['--reply-accent' as string]: style.accent }}>
@@ -242,9 +440,27 @@ function Response({ response, showName }: { response: domain.ChatResponse; showN
               <p className="reply__text reply__text--streaming">{partial}</p>
             ) : (
               <div className="reply__text">
-                <Markdown>{partial}</Markdown>
+                <Markdown>{shown}</Markdown>
               </div>
             )
+          )}
+          {(foldable || (!working && partial !== '')) && (
+            <div className="reply__actions nodrag">
+              {foldable && (
+                <button className="reply__action" onClick={() => setOpen(!open)}>
+                  {open ? 'katla' : `devamı (${Math.round(partial.length / 100) / 10}k)`}
+                </button>
+              )}
+              {!working && partial !== '' && (
+                <button
+                  className="reply__action"
+                  onClick={() => onBranch(partial)}
+                  title="Bu cevaptan yeni bir kart başlat"
+                >
+                  ↗ dallan
+                </button>
+              )}
+            </div>
           )}
         </>
       )}

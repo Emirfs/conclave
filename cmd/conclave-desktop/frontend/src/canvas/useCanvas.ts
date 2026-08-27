@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Edge, Node } from '@xyflow/react'
 
 import {
+  Branch,
   Canvas as LoadCanvas,
   CreateConversation,
   CreateNote,
@@ -10,14 +11,17 @@ import {
   PairNodes,
   PatchCanvasNode,
   PickProjectDirectory,
+  ResumeDialogue,
   SetProject,
   SendTurn,
   SetLoop,
   SetLoopRunning,
+  SetRole,
   UnlinkNodes,
   UpdateLink,
 } from '../../wailsjs/go/main/App'
 import { domain } from '../../wailsjs/go/models'
+import { providerStyle } from '../providers'
 
 export type ConversationNodeData = {
   kind: 'conversation'
@@ -104,25 +108,67 @@ export function useCanvas(connected: boolean) {
         }
       }
       setBusy(working)
-      const mappedEdges = (canvas.links ?? []).map((link) => ({
-          id: String(link.id),
-          source: String(link.source_id),
-          target: String(link.target_id),
-          // Provider activity is already visible in its card. Animating every
-          // edge whenever any card works keeps the WebView GPU busy and makes
-          // large boards stutter.
-          animated: false,
-          type: 'smoothstep',
-          label: linkLabel(link),
-          data: { mode: link.mode, maxRounds: link.max_rounds, untilDone: link.until_done },
-        }))
+      // A link into a note is the line from a pair of cards to the result they
+      // produced. Nothing is relayed along it, so it is drawn as a quiet dashed
+      // line rather than a working connection.
+      const noteNodes = new Set(
+        (canvas.nodes ?? []).filter((node) => node.kind === 'note').map((node) => String(node.id)),
+      )
+      // The colour a card is drawn in is its lead provider's. Carrying those
+      // two colours into the line is what makes the board say who is talking to
+      // whom without a label on every edge.
+      const accents = new Map<string, string>()
+      const producing = new Set<string>()
+      for (const node of canvas.nodes ?? []) {
+        if (node.conversation_id === undefined) continue
+        const conversation = conversations.get(node.conversation_id)
+        if (!conversation) continue
+        accents.set(String(node.id), providerStyle(conversation.providers?.[0] ?? '').accent)
+        for (const turn of conversation.turns ?? []) {
+          for (const response of turn.responses ?? []) {
+            if (response.status === 'queued' || response.status === 'running') {
+              producing.add(String(node.id))
+            }
+          }
+        }
+      }
+      const mappedEdges = (canvas.links ?? []).map((link) => {
+          const toNote = noteNodes.has(String(link.target_id))
+          return {
+            id: String(link.id),
+            source: String(link.source_id),
+            target: String(link.target_id),
+            // React Flow's own animation runs on every edge it is set on.
+            // Only the one edge whose target is actually producing an answer
+            // moves, and it does so in CSS.
+            animated: false,
+            type: 'provider',
+            style: undefined,
+            data: {
+              mode: link.mode,
+              maxRounds: link.max_rounds,
+              untilDone: link.until_done,
+              briefing: link.briefing ?? '',
+              toNote,
+              label: toNote ? undefined : linkLabel(link),
+              sourceAccent: accents.get(String(link.source_id)),
+              targetAccent: accents.get(String(link.target_id)),
+              active: !toNote && producing.has(String(link.target_id)),
+            },
+          }
+        })
       setEdges((current) => {
         if (
           current.length === mappedEdges.length &&
           mappedEdges.every((edge, index) => {
             const existing = current[index]
             return existing.id === edge.id && existing.source === edge.source &&
-              existing.target === edge.target && existing.label === edge.label
+              existing.target === edge.target &&
+              existing.data?.label === edge.data.label &&
+              existing.data?.briefing === edge.data.briefing &&
+              // A link that starts or stops carrying an answer has to be
+              // redrawn, or the board never shows the work moving.
+              existing.data?.active === edge.data.active
           })
         ) {
           return current
@@ -269,9 +315,9 @@ export function useCanvas(connected: boolean) {
   )
 
   const pair = useCallback(
-    async (firstID: string, secondID: string, mode: string, rounds: number) => {
+    async (firstID: string, secondID: string, mode: string, rounds: number, briefing: string) => {
       try {
-        await PairNodes(Number(firstID), Number(secondID), mode, rounds)
+        await PairNodes(Number(firstID), Number(secondID), mode, rounds, briefing)
         await load()
       } catch (cause) {
         setError(String(cause))
@@ -281,9 +327,72 @@ export function useCanvas(connected: boolean) {
   )
 
   const configureLink = useCallback(
-    async (id: string, mode: string, rounds: number, untilDone: boolean) => {
+    async (id: string, mode: string, rounds: number, untilDone: boolean, briefing: string) => {
       try {
-        await UpdateLink(Number(id), mode, rounds, untilDone)
+        await UpdateLink(Number(id), mode, rounds, untilDone, briefing)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  const saveRole = useCallback(
+    async (conversationID: number, role: string) => {
+      try {
+        await SetRole(conversationID, role)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  // Forking an answer into new cards. The daemon places them and draws the link
+  // back, so the board shows where a line of work split.
+  const branch = useCallback(
+    async (conversationID: number, answer: string, providers: string[]) => {
+      try {
+        await Branch(conversationID, answer, providers)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  // Roles come in complementary pairs, so both cards of a link are assigned
+  // together. Node ids are what a link carries; the conversation behind each
+  // one is what carries the role.
+  const assignRoles = useCallback(
+    async (sourceNodeID: string, targetNodeID: string, sourceRole: string, targetRole: string) => {
+      const conversationOf = (nodeID: string) => {
+        const node = nodes.find((item) => item.id === nodeID)
+        return node?.data.kind === 'conversation' ? node.data.conversation.id : null
+      }
+      const source = conversationOf(sourceNodeID)
+      const target = conversationOf(targetNodeID)
+      if (source === null || target === null) return
+      try {
+        await SetRole(source, sourceRole)
+        await SetRole(target, targetRole)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [nodes, load],
+  )
+
+  // Clearing the parked state is what lets a stalled pair be pushed on: the
+  // next message starts the exchange again instead of being swallowed.
+  const resumeDialogue = useCallback(
+    async (conversationID: number) => {
+      try {
+        await ResumeDialogue(conversationID)
         await load()
       } catch (cause) {
         setError(String(cause))
@@ -372,9 +481,10 @@ export function useCanvas(connected: boolean) {
       nodes, setNodes, edges, error, loaded, load, patch,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
+      saveRole, resumeDialogue, assignRoles, branch,
     }),
     [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
-     saveLoop, toggleLoop],
+     saveLoop, toggleLoop, saveRole, resumeDialogue, assignRoles, branch],
   )
 }

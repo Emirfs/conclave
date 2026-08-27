@@ -232,7 +232,7 @@ func (s *Store) CreateLoopFailureTurn(ctx context.Context, conversationID int64,
 	if len(providers) == 0 {
 		return nil
 	}
-	if _, err := insertTurn(ctx, tx, conversationID, prompt, providers); err != nil {
+	if _, err := insertTurn(ctx, tx, conversationID, prompt, providers, domain.TurnUser); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -120,7 +120,12 @@ func ChatInvocation(request Request) (Invocation, error) {
 	case "gemini":
 		command := []string{path, "--print", request.Prompt, "--output-format", "stream-json"}
 		if edit {
-			command = append(command, "--mode", "accept-edits")
+			// accept-edits only covers file edits. Every other confirmation —
+			// a command, an MCP tool — is soft-denied in print mode, which
+			// leaves the agent stopped mid-task and the result empty. Edit
+			// access already means the provider works without asking, so the
+			// confirmations have to be auto-approved along with the edits.
+			command = append(command, "--mode", "accept-edits", "--dangerously-skip-permissions")
 		} else {
 			command = append(command, "--mode", "plan")
 		}

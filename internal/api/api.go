@@ -21,18 +21,21 @@ import (
 	"github.com/Emirfs/conclave/internal/domain"
 	"github.com/Emirfs/conclave/internal/provider"
 	"github.com/Emirfs/conclave/internal/store"
+	"github.com/Emirfs/conclave/internal/update"
 	"github.com/Emirfs/conclave/internal/vcs"
+	"github.com/Emirfs/conclave/internal/version"
 )
-
-const Version = "0.1.0"
 
 type Server struct {
 	store *store.Store
 	token string
+	// updates may be nil: a daemon built without a release check still serves
+	// everything else, it just has nothing to say about newer versions.
+	updates *update.Checker
 }
 
-func NewServer(store *store.Store, token string) *Server {
-	return &Server{store: store, token: token}
+func NewServer(store *store.Store, token string, updates *update.Checker) *Server {
+	return &Server{store: store, token: token, updates: updates}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -53,6 +56,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/canvas/links/{id}", s.deleteLink)
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/loop", s.setLoop)
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/loop/running", s.setLoopRunning)
+	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/role", s.setRole)
+	mux.HandleFunc("POST /v1/canvas/conversations/{id}/resume", s.resumeDialogue)
+	mux.HandleFunc("POST /v1/canvas/conversations/{id}/branch", s.branch)
+	mux.HandleFunc("GET /v1/update", s.updateStatus)
+	mux.HandleFunc("POST /v1/update/check", s.checkUpdate)
 	return s.authenticate(mux)
 }
 
@@ -94,8 +102,30 @@ func (s *Server) snapshot(response http.ResponseWriter, request *http.Request) {
 		}
 	}
 	writeJSON(response, http.StatusOK, domain.Snapshot{
-		Healthy: true, Version: Version, Providers: providers, Runs: runs,
+		Healthy: true, Version: version.Version, Providers: providers, Runs: runs,
 	})
+}
+
+// updateStatus answers from the cached check. Reading it never reaches the
+// network, so a canvas poll cannot be slowed down by GitHub.
+func (s *Server) updateStatus(response http.ResponseWriter, request *http.Request) {
+	if s.updates == nil {
+		writeJSON(response, http.StatusOK, update.Status{Current: version.Version})
+		return
+	}
+	writeJSON(response, http.StatusOK, s.updates.Status())
+}
+
+// checkUpdate refreshes the answer now, for a user who asks instead of waiting
+// for the next daily check.
+func (s *Server) checkUpdate(response http.ResponseWriter, request *http.Request) {
+	if s.updates == nil {
+		writeJSON(response, http.StatusOK, update.Status{Current: version.Version})
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), 15*time.Second)
+	defer cancel()
+	writeJSON(response, http.StatusOK, s.updates.CheckNow(ctx))
 }
 
 func (s *Server) createTurn(response http.ResponseWriter, request *http.Request) {
@@ -354,6 +384,63 @@ func (s *Server) setProject(response http.ResponseWriter, request *http.Request)
 	response.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) setRole(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	var input domain.RoleRequest
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	err = s.store.SetConversationRole(request.Context(), id, input.Normalised().Role)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusNotFound, errors.New("conversation does not exist"))
+		return
+	}
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// resumeDialogue clears the parked state so a stalled exchange can be pushed on
+// without the user having to remember what it was waiting for.
+func (s *Server) resumeDialogue(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	if err := s.store.ResumeDialogue(request.Context(), id); err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// branch forks an existing answer into one or more new cards.
+func (s *Server) branch(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	var input domain.BranchRequest
+	// The answer being branched from is a whole provider response.
+	if !decodeJSON(response, request, 256<<10, &input) {
+		return
+	}
+	branches, err := s.store.BranchFrom(request.Context(), id, input.Answer, input.Providers)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, branches)
+}
+
 func (s *Server) conversationProject(ctx context.Context, id int64) (string, error) {
 	canvas, err := s.store.Canvas(ctx)
 	if err != nil {
@@ -412,14 +499,19 @@ func (s *Server) projectDiff(response http.ResponseWriter, request *http.Request
 
 func (s *Server) createLink(response http.ResponseWriter, request *http.Request) {
 	var input domain.NewLink
-	if !decodeJSON(response, request, 4<<10, &input) {
+	// A briefing is free text the user writes, so the body has to have room for
+	// it on top of the link itself.
+	if !decodeJSON(response, request, 16<<10, &input) {
 		return
 	}
 	if input.SourceID <= 0 || input.TargetID <= 0 {
 		writeError(response, http.StatusBadRequest, errors.New("source and target node ids are required"))
 		return
 	}
-	options := domain.LinkOptions{Mode: input.Mode, MaxRounds: input.MaxRounds, UntilDone: input.UntilDone}
+	options := domain.LinkOptions{
+		Mode: input.Mode, MaxRounds: input.MaxRounds,
+		UntilDone: input.UntilDone, Briefing: input.Briefing,
+	}
 	if input.Pair {
 		// Pairing links both ways, so the two cards answer each other.
 		links, err := s.store.PairNodes(request.Context(), input.SourceID, input.TargetID, options)
@@ -445,7 +537,7 @@ func (s *Server) updateLink(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	var input domain.LinkOptions
-	if !decodeJSON(response, request, 4<<10, &input) {
+	if !decodeJSON(response, request, 16<<10, &input) {
 		return
 	}
 	err = s.store.UpdateLink(request.Context(), id, input)
@@ -660,6 +752,23 @@ func (c *Client) SetProject(ctx context.Context, conversationID int64, input dom
 	return c.do(ctx, http.MethodPut, path, input, nil, http.StatusNoContent)
 }
 
+func (c *Client) SetRole(ctx context.Context, conversationID int64, input domain.RoleRequest) error {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/role"
+	return c.do(ctx, http.MethodPut, path, input, nil, http.StatusNoContent)
+}
+
+func (c *Client) ResumeDialogue(ctx context.Context, conversationID int64) error {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/resume"
+	return c.do(ctx, http.MethodPost, path, nil, nil, http.StatusNoContent)
+}
+
+func (c *Client) Branch(ctx context.Context, conversationID int64, input domain.BranchRequest) ([]domain.Conversation, error) {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/branch"
+	var branches []domain.Conversation
+	err := c.do(ctx, http.MethodPost, path, input, &branches, http.StatusCreated)
+	return branches, err
+}
+
 func (c *Client) ProjectChanges(ctx context.Context, conversationID int64) (vcs.Status, error) {
 	var status vcs.Status
 	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/changes"
@@ -712,4 +821,16 @@ func (c *Client) DeleteLink(ctx context.Context, id int64) error {
 func (c *Client) DeleteCanvasNode(ctx context.Context, id int64) error {
 	path := "/v1/canvas/nodes/" + strconv.FormatInt(id, 10)
 	return c.do(ctx, http.MethodDelete, path, nil, nil, http.StatusNoContent)
+}
+
+func (c *Client) UpdateStatus(ctx context.Context) (update.Status, error) {
+	var status update.Status
+	err := c.do(ctx, http.MethodGet, "/v1/update", nil, &status, http.StatusOK)
+	return status, err
+}
+
+func (c *Client) CheckUpdate(ctx context.Context) (update.Status, error) {
+	var status update.Status
+	err := c.do(ctx, http.MethodPost, "/v1/update/check", nil, &status, http.StatusOK)
+	return status, err
 }

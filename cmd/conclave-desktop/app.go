@@ -7,6 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -14,6 +17,7 @@ import (
 	"github.com/Emirfs/conclave/internal/api"
 	"github.com/Emirfs/conclave/internal/domain"
 	"github.com/Emirfs/conclave/internal/statedir"
+	"github.com/Emirfs/conclave/internal/update"
 	"github.com/Emirfs/conclave/internal/vcs"
 )
 
@@ -161,8 +165,9 @@ func (a *App) LinkNodes(sourceID, targetID int64) (domain.CanvasLink, error) {
 	return client.CreateLink(ctx, domain.NewLink{SourceID: sourceID, TargetID: targetID})
 }
 
-// PairNodes links two cards both ways so they answer each other.
-func (a *App) PairNodes(firstID, secondID int64, mode string, rounds int) ([]domain.CanvasLink, error) {
+// PairNodes links two cards both ways so they answer each other. The briefing
+// is what each card is told once, before its first message from the other.
+func (a *App) PairNodes(firstID, secondID int64, mode string, rounds int, briefing string) ([]domain.CanvasLink, error) {
 	client, err := a.client()
 	if err != nil {
 		return nil, err
@@ -170,19 +175,57 @@ func (a *App) PairNodes(firstID, secondID int64, mode string, rounds int) ([]dom
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
 	return client.PairLink(ctx, domain.NewLink{
-		SourceID: firstID, TargetID: secondID, Mode: mode, MaxRounds: rounds,
+		SourceID: firstID, TargetID: secondID, Mode: mode, MaxRounds: rounds, Briefing: briefing,
 	})
 }
 
-// UpdateLink changes how an existing link works.
-func (a *App) UpdateLink(id int64, mode string, rounds int, untilDone bool) error {
+// UpdateLink changes how an existing link works. Changing the briefing re-briefs
+// both cards before their next relayed message.
+func (a *App) UpdateLink(id int64, mode string, rounds int, untilDone bool, briefing string) error {
 	client, err := a.client()
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
-	return client.UpdateLink(ctx, id, domain.LinkOptions{Mode: mode, MaxRounds: rounds, UntilDone: untilDone})
+	return client.UpdateLink(ctx, id, domain.LinkOptions{
+		Mode: mode, MaxRounds: rounds, UntilDone: untilDone, Briefing: briefing,
+	})
+}
+
+// SetRole says what a card is meant to do when it works with another card.
+// Without it two paired cards both wait to be led.
+func (a *App) SetRole(conversationID int64, role string) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.SetRole(ctx, conversationID, domain.RoleRequest{Role: role})
+}
+
+// Branch forks an answer into a new card per provider, each starting from that
+// answer, so one line of work can be carried in several directions at once.
+func (a *App) Branch(conversationID int64, answer string, providers []string) ([]domain.Conversation, error) {
+	client, err := a.client()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+	return client.Branch(ctx, conversationID, domain.BranchRequest{Answer: answer, Providers: providers})
+}
+
+// ResumeDialogue clears a parked exchange so the next message starts it again.
+func (a *App) ResumeDialogue(conversationID int64) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.ResumeDialogue(ctx, conversationID)
 }
 
 // SetLoop replaces a card's step list and how its cycle repeats.
@@ -225,6 +268,88 @@ func (a *App) DeleteCanvasNode(id int64) error {
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
 	return client.DeleteCanvasNode(ctx, id)
+}
+
+// UpdateStatus reports what the daemon last learned about newer releases. It
+// reads a cached answer, so the canvas can ask for it as often as it likes.
+func (a *App) UpdateStatus() (update.Status, error) {
+	client, err := a.client()
+	if err != nil {
+		return update.Status{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 3*time.Second)
+	defer cancel()
+	return client.UpdateStatus(ctx)
+}
+
+// CheckUpdate looks now instead of waiting for the daily check.
+func (a *App) CheckUpdate() (update.Status, error) {
+	client, err := a.client()
+	if err != nil {
+		return update.Status{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 20*time.Second)
+	defer cancel()
+	return client.CheckUpdate(ctx)
+}
+
+// OpenReleasePage shows the release notes in the user's browser, for someone
+// who wants to read what changed before installing it.
+func (a *App) OpenReleasePage(url string) error {
+	if !strings.HasPrefix(url, "https://github.com/") {
+		return errors.New("only a github release page can be opened")
+	}
+	runtime.BrowserOpenURL(a.ctx, url)
+	return nil
+}
+
+// ApplyUpdate hands the installation over to the installer script and quits.
+//
+// A running program cannot replace its own files on Windows, so the script is
+// detached deliberately: it outlives this process, waits for it to exit,
+// swaps the binaries and starts the new build. Nothing is installed without
+// the user asking for it here.
+func (a *App) ApplyUpdate() error {
+	if goruntime.GOOS != "windows" {
+		return errors.New("one-click update is only available on windows")
+	}
+	script, err := installerScript()
+	if err != nil {
+		return err
+	}
+	command := exec.Command(
+		"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+		"-WaitForPid", strconv.Itoa(os.Getpid()), "-Restart",
+	)
+	detachProcess(command)
+	if err := command.Start(); err != nil {
+		return fmt.Errorf("start installer: %w", err)
+	}
+	// Release the process handle: the installer has to survive this app.
+	if err := command.Process.Release(); err != nil {
+		return err
+	}
+	// Give the script a moment to reach its wait before the window disappears.
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		runtime.Quit(a.ctx)
+	}()
+	return nil
+}
+
+// installerScript finds the install.ps1 that the installer left next to the
+// application. Without it there is nothing to run: downloading and executing a
+// script from the network on the user's behalf is not something this app does.
+func installerScript() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(filepath.Dir(executable), "install.ps1")
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		return "", errors.New("install.ps1 is not next to the application; install the release by hand")
+	}
+	return path, nil
 }
 
 // EnsureDaemon starts the daemon when it is not answering. The daemon's own

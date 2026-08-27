@@ -22,6 +22,8 @@ import (
 	"github.com/Emirfs/conclave/internal/domain"
 	"github.com/Emirfs/conclave/internal/statedir"
 	"github.com/Emirfs/conclave/internal/store"
+	"github.com/Emirfs/conclave/internal/update"
+	"github.com/Emirfs/conclave/internal/version"
 )
 
 const defaultAddress = "127.0.0.1:7331"
@@ -47,6 +49,11 @@ func run(arguments []string) error {
 		return submitRun(arguments)
 	case "chat":
 		return submitChat(arguments)
+	case "version", "-v", "--version":
+		fmt.Println(version.Version)
+		return nil
+	case "update":
+		return checkUpdate(arguments)
 	case "help", "-h", "--help":
 		usage()
 		return nil
@@ -62,6 +69,7 @@ func runDaemon(arguments []string) error {
 	chatWorkers := flags.Int("chat-workers", 4, "maximum concurrent provider chats")
 	timeout := flags.Duration("stage-timeout", 20*time.Minute, "per-stage timeout")
 	stateDirectory := flags.String("state-dir", statedir.Default(), "state directory")
+	checkUpdates := flags.Bool("check-updates", true, "look for newer releases once a day")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -96,6 +104,14 @@ func runDaemon(arguments []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	engine := daemon.New(database, *workers, *chatWorkers, *timeout)
+
+	// A development build has no release number to compare against, so it does
+	// not ask GitHub anything at all.
+	var updates *update.Checker
+	if version.IsRelease() && *checkUpdates {
+		updates = update.NewChecker(version.Version, 24*time.Hour)
+		go updates.Run(ctx)
+	}
 	engineDone := make(chan struct{})
 	go func() {
 		defer close(engineDone)
@@ -103,7 +119,7 @@ func runDaemon(arguments []string) error {
 	}()
 
 	server := &http.Server{
-		Addr: *address, Handler: api.NewServer(database, token).Handler(),
+		Addr: *address, Handler: api.NewServer(database, token, updates).Handler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
 		WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second,
 	}
@@ -148,6 +164,34 @@ func runStatus(arguments []string) error {
 		return encoder.Encode(snapshot)
 	}
 	fmt.Printf("daemon: healthy, version %s\nproviders: %d, pipelines: %d\n", snapshot.Version, len(snapshot.Providers), len(snapshot.Runs))
+	return nil
+}
+
+// checkUpdate asks the daemon what it knows about newer releases, forcing a
+// fresh look rather than reporting a day-old answer.
+func checkUpdate(arguments []string) error {
+	flags := flag.NewFlagSet("update", flag.ContinueOnError)
+	address := flags.String("address", defaultAddress, "daemon address")
+	tokenFile := flags.String("token-file", statedir.TokenPath(), "daemon token file")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	token, err := statedir.ReadToken(*tokenFile)
+	if err != nil {
+		return err
+	}
+	status, err := api.NewClient("http://"+*address, token).CheckUpdate(context.Background())
+	if err != nil {
+		return err
+	}
+	switch {
+	case status.Available:
+		fmt.Printf("%s cikti (calisan surum %s)\n%s\n", status.Latest, status.Current, status.URL)
+	case status.Error != "":
+		fmt.Printf("%s calisiyor; kontrol basarisiz: %s\n", status.Current, status.Error)
+	default:
+		fmt.Printf("%s calisiyor, en guncel surum bu\n", status.Current)
+	}
 	return nil
 }
 
@@ -276,5 +320,5 @@ func isLoopbackAddress(address string) bool {
 }
 
 func usage() {
-	fmt.Println("conclave [status|daemon|run|chat] [options]")
+	fmt.Println("conclave [status|daemon|run|chat|update|version] [options]")
 }

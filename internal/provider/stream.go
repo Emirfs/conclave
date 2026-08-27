@@ -44,6 +44,10 @@ type StreamUpdate struct {
 	// right now: "requesting", "thinking", "writing", or "tool:<name>". It is
 	// deliberately not human text, so the client owns the wording.
 	Activity string
+	// ContextTokens is how much context the provider carried into this turn:
+	// everything on the input side, cached or not. It grows with the session,
+	// which is what makes it a usable measure of how full the window is.
+	ContextTokens int
 }
 
 // DecodeStreamLine interprets a single line of provider output. Unrecognised
@@ -94,6 +98,10 @@ func decodeClaude(payload map[string]any) StreamUpdate {
 		return StreamUpdate{}
 	case "result":
 		update := StreamUpdate{Final: text(payload, "result"), SessionID: text(payload, "session_id")}
+		usage, _ := payload["usage"].(map[string]any)
+		update.ContextTokens = int(number(usage, "input_tokens") +
+			number(usage, "cache_read_input_tokens") +
+			number(usage, "cache_creation_input_tokens"))
 		if failed, _ := payload["is_error"].(bool); failed {
 			update.Failure = update.Final
 			update.Final = ""
@@ -145,6 +153,11 @@ func decodeCodex(payload map[string]any) StreamUpdate {
 		}
 		// Codex emits the whole message at once rather than in deltas.
 		return StreamUpdate{Final: text(item, "text"), Activity: "writing"}
+	case "turn.completed":
+		// Codex counts cached input inside input_tokens, so this is already the
+		// whole input side of the turn.
+		usage, _ := payload["usage"].(map[string]any)
+		return StreamUpdate{ContextTokens: int(number(usage, "input_tokens"))}
 	case "error":
 		return StreamUpdate{Failure: text(payload, "message")}
 	}
@@ -172,6 +185,10 @@ func decodeAntigravity(payload map[string]any) StreamUpdate {
 			Final:     text(result, "response"),
 			SessionID: text(result, "conversation_id"),
 		}
+		// Antigravity reports cache reads outside input_tokens, so the window
+		// only adds up with both.
+		usage, _ := result["usage"].(map[string]any)
+		update.ContextTokens = int(number(usage, "input_tokens") + number(usage, "cache_read_tokens"))
 		if status := text(result, "status"); status != "" && status != "SUCCESS" {
 			update.Failure = "provider reported status " + status
 			update.Final = ""

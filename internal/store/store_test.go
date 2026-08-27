@@ -913,6 +913,444 @@ func TestRelayLinkStaysOneWay(t *testing.T) {
 }
 
 // The receiving card must be told which card is speaking to it.
+// The conclusion of an exchange is buried at the bottom of a card nobody
+// scrolled to, so it goes on the board as its own card.
+func TestFinishedDialogueLeavesAnOutcomeCard(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+	if _, err := store.PairNodes(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 5, UntilDone: true}); err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "baslat"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	before, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	notesBefore := countNotes(before)
+
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed,
+		"is bitti, karar X "+dialogueDoneMarker, ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if _, err := store.RelayTurn(ctx, job.TurnID); err != nil {
+		t.Fatalf("relay: %v", err)
+	}
+
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas 2: %v", err)
+	}
+	if countNotes(after) != notesBefore+1 {
+		t.Fatalf("outcome card was not created: %d notes, want %d", countNotes(after), notesBefore+1)
+	}
+	var outcome domain.CanvasNode
+	for _, node := range after.Nodes {
+		if node.Kind == domain.NodeNote {
+			outcome = node
+		}
+	}
+	if !strings.Contains(outcome.Body, "karar X") {
+		t.Fatalf("outcome card lost the answer: %q", outcome.Body)
+	}
+	// Both cards must be named on it, or it says nothing about where it is from.
+	if !strings.Contains(outcome.Body, first.Title) || !strings.Contains(outcome.Body, second.Title) {
+		t.Fatalf("outcome card does not name both cards: %q", outcome.Body)
+	}
+	// And a line is drawn from each card, so the origin is visible on the board
+	// and not only in the text.
+	incoming := 0
+	for _, link := range after.Links {
+		if link.TargetID == outcome.ID {
+			incoming++
+		}
+	}
+	if incoming != 2 {
+		t.Fatalf("outcome card has %d incoming links, want 2", incoming)
+	}
+}
+
+// Nothing may be relayed into a result card: the lines to it are there to show
+// where it came from, not to carry a conversation.
+func TestOutcomeLinksNeverRelay(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+	if _, err := store.PairNodes(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 5, UntilDone: true}); err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "baslat"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed,
+		"bitti "+dialogueDoneMarker, ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if _, err := store.RelayTurn(ctx, job.TurnID); err != nil {
+		t.Fatalf("relay: %v", err)
+	}
+
+	// A later answer from the other card must not produce a turn anywhere, and
+	// certainly not one addressed to a note.
+	if _, err := store.CreateConversationTurn(ctx, second.ID, "yeni tur"); err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	next, err := store.ClaimChatResponse(ctx)
+	if err != nil || next == nil {
+		t.Fatalf("claim 2: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, next.ResponseID, domain.StatusPassed, "cevap", ""); err != nil {
+		t.Fatalf("finish 2: %v", err)
+	}
+	delivered, err := store.RelayTurn(ctx, next.TurnID)
+	if err != nil {
+		t.Fatalf("relay 2: %v", err)
+	}
+	// One delivery, to the other conversation — never to the result card.
+	if delivered != 1 {
+		t.Fatalf("relay delivered %d turns, want 1", delivered)
+	}
+}
+
+func countNotes(canvas domain.Canvas) int {
+	count := 0
+	for _, node := range canvas.Nodes {
+		if node.Kind == domain.NodeNote {
+			count++
+		}
+	}
+	return count
+}
+
+// Branching carries one answer into several independent cards. One provider per
+// card: a group card would merge the paths that are supposed to diverge.
+func TestBranchOpensOneCardPerProvider(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	source, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "A", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	branches, err := store.BranchFrom(ctx, source.ID, "devam edilecek cevap", []string{"openai", "gemini"})
+	if err != nil {
+		t.Fatalf("branch: %v", err)
+	}
+	if len(branches) != 2 {
+		t.Fatalf("branch opened %d cards, want 2", len(branches))
+	}
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	for _, item := range after.Conversations {
+		if item.ID == source.ID {
+			continue
+		}
+		if len(item.Providers) != 1 {
+			t.Fatalf("branch card has %d providers, want 1", len(item.Providers))
+		}
+		if len(item.Turns) != 1 || item.Turns[0].Prompt != "devam edilecek cevap" {
+			t.Fatalf("branch card did not start from the answer: %+v", item.Turns)
+		}
+	}
+	// The link is what shows where the work forked.
+	if len(after.Links) != 2 {
+		t.Fatalf("branch drew %d links, want 2", len(after.Links))
+	}
+}
+
+func TestBranchRejectsAnEmptyAnswerOrNoProvider(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	source, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "A", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.BranchFrom(ctx, source.ID, "   ", []string{"openai"}); err == nil {
+		t.Fatal("an empty answer was accepted")
+	}
+	if _, err := store.BranchFrom(ctx, source.ID, "cevap", nil); err == nil {
+		t.Fatal("a branch with no provider was accepted")
+	}
+}
+
+// A long session drifts from the role it was given, so the role is restated
+// once the window is actually large — and not before, because the reminder is
+// only worth its tokens against a full window.
+func TestRoleIsRestatedOnlyWhenTheWindowIsFull(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	conversation, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "A", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.SetConversationRole(ctx, conversation.ID, "gözden geçiren"); err != nil {
+		t.Fatalf("role: %v", err)
+	}
+	if err := store.RecordProviderSession(ctx, conversation.ID, "claude", "sid", ""); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+
+	// A small window carries no reminder.
+	if err := store.RecordSessionContext(ctx, conversation.ID, "claude", 1_000); err != nil {
+		t.Fatalf("context: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, conversation.ID, "soru"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if strings.Contains(job.Prompt, "Hatırlatma") {
+		t.Fatalf("role restated on a small window: %q", job.Prompt)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, "cevap", ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	// A large one does.
+	if err := store.RecordSessionContext(ctx, conversation.ID, "claude", contextRemindAt+1); err != nil {
+		t.Fatalf("context 2: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, conversation.ID, "ikinci"); err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	next, err := store.ClaimChatResponse(ctx)
+	if err != nil || next == nil {
+		t.Fatalf("claim 2: %v", err)
+	}
+	if !strings.Contains(next.Prompt, "gözden geçiren") {
+		t.Fatalf("role was not restated on a full window: %q", next.Prompt)
+	}
+}
+
+// A session too large to keep resuming is started over. The transcript takes
+// over as context, so the conversation continues instead of restarting.
+func TestFullContextRecyclesTheSessionAndKeepsTheHistory(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	conversation, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "A", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, conversation.ID, "ilk soru"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, "ilk cevap", ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if err := store.RecordProviderSession(ctx, conversation.ID, "claude", "sid", ""); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if err := store.RecordSessionContext(ctx, conversation.ID, "claude", contextResetAt+1); err != nil {
+		t.Fatalf("context: %v", err)
+	}
+
+	if _, err := store.CreateConversationTurn(ctx, conversation.ID, "ikinci soru"); err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	next, err := store.ClaimChatResponse(ctx)
+	if err != nil || next == nil {
+		t.Fatalf("claim 2: %v", err)
+	}
+	if next.SessionID != "" {
+		t.Fatalf("a full session was still resumed: %q", next.SessionID)
+	}
+	// Dropping the session must not drop the conversation with it.
+	if !strings.Contains(next.Prompt, "ilk cevap") {
+		t.Fatalf("history was lost when the session was recycled: %q", next.Prompt)
+	}
+	var sessions int
+	if err := store.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM provider_sessions WHERE conversation_id = ?", conversation.ID).
+		Scan(&sessions); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if sessions != 0 {
+		t.Fatalf("recycled session row still present: %d", sessions)
+	}
+}
+
+// A card that opens by asking a question must not end the exchange on its own:
+// two cards would otherwise stall before either has done any work. The first
+// request is nudged along; only a second one in a row parks the dialogue.
+func TestUserInputRequestIsNudgedBeforeItParksTheDialogue(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+	if _, err := store.PairNodes(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 1, UntilDone: true}); err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "baslat"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+
+	// First card asks for a decision: the other card is nudged rather than the
+	// exchange stopping.
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed,
+		"ne yapayim? "+dialogueUserInputMarker, ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	delivered, err := store.RelayTurn(ctx, job.TurnID)
+	if err != nil {
+		t.Fatalf("relay: %v", err)
+	}
+	if delivered != 1 {
+		t.Fatalf("first request for input delivered %d turns, want 1", delivered)
+	}
+
+	nudged, err := store.ClaimChatResponse(ctx)
+	if err != nil || nudged == nil {
+		t.Fatalf("claim nudge: %v", err)
+	}
+	var kind string
+	if err := store.db.QueryRowContext(ctx,
+		"SELECT kind FROM chat_turns WHERE id = ?", nudged.TurnID).Scan(&kind); err != nil {
+		t.Fatalf("kind: %v", err)
+	}
+	if kind != domain.TurnNudge {
+		t.Fatalf("relayed turn kind = %q, want %q", kind, domain.TurnNudge)
+	}
+
+	// The nudged card asks again anyway. That is a real request for the user.
+	if err := store.FinishChatResponse(ctx, nudged.ResponseID, domain.StatusPassed,
+		"karar senin "+dialogueUserInputMarker, ""); err != nil {
+		t.Fatalf("finish nudge: %v", err)
+	}
+	delivered, err = store.RelayTurn(ctx, nudged.TurnID)
+	if err != nil {
+		t.Fatalf("relay nudge: %v", err)
+	}
+	if delivered != 0 {
+		t.Fatalf("second request for input delivered %d turns, want 0", delivered)
+	}
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	for _, item := range after.Conversations {
+		if item.DialogueState != domain.DialogueWaiting {
+			t.Fatalf("card %d state = %q, want %q", item.ID, item.DialogueState, domain.DialogueWaiting)
+		}
+	}
+}
+
+// The arrangement is explained once. Repeating it on every hop wastes tokens
+// and reads like the two cards keep being introduced to each other.
+func TestBriefingIsSentOnlyOnce(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+	if _, err := store.PairNodes(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 5, Briefing: "ortak hedef"}); err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "baslat"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	for index := range 3 {
+		job, err := store.ClaimChatResponse(ctx)
+		if err != nil || job == nil {
+			t.Fatalf("claim %d: %v", index, err)
+		}
+		if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, "cevap", ""); err != nil {
+			t.Fatalf("finish %d: %v", index, err)
+		}
+		if _, err := store.RelayTurn(ctx, job.TurnID); err != nil {
+			t.Fatalf("relay %d: %v", index, err)
+		}
+	}
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	for _, item := range after.Conversations {
+		briefed := 0
+		for _, turn := range item.Turns {
+			if strings.Contains(turn.Prompt, "ortak hedef") {
+				briefed++
+			}
+		}
+		if briefed > 1 {
+			t.Fatalf("card %d was briefed %d times", item.ID, briefed)
+		}
+	}
+}
+
+// A provider that resumes its own session already holds the history. Sending a
+// transcript as well would deliver the same conversation twice.
+func TestResumedSessionDropsTheReplayedTranscript(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	conversation, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "A", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, conversation.ID, "ilk soru"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	// Without a session the transcript stands in for one.
+	if !strings.Contains(job.Prompt, "ilk soru") {
+		t.Fatalf("first prompt lost the question: %q", job.Prompt)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed, "ilk cevap", ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if err := store.RecordProviderSession(ctx, conversation.ID, "claude", "sid", ""); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+
+	if _, err := store.CreateConversationTurn(ctx, conversation.ID, "ikinci soru"); err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	next, err := store.ClaimChatResponse(ctx)
+	if err != nil || next == nil {
+		t.Fatalf("claim 2: %v", err)
+	}
+	if next.Prompt != "ikinci soru" {
+		t.Fatalf("resumed prompt = %q, want only the new message", next.Prompt)
+	}
+	if strings.Contains(next.Prompt, "ilk cevap") {
+		t.Fatalf("history was replayed into a resumed session: %q", next.Prompt)
+	}
+}
+
 func TestRelayedPromptNamesTheSpeakingCard(t *testing.T) {
 	store := openTemp(t)
 	ctx := context.Background()

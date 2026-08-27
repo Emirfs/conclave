@@ -6,6 +6,7 @@ import { domain } from '../wailsjs/go/models'
 import { providerStyle } from './providers'
 import { Board } from './canvas/Board'
 import { useCanvas } from './canvas/useCanvas'
+import { UpdateBanner } from './UpdateBanner'
 import './canvas/canvas.css'
 
 type Connection = 'connecting' | 'online' | 'offline'
@@ -92,6 +93,7 @@ export function App() {
   return (
     <div className="shell">
       <TitleBar connection={connection} version={snapshot?.version} />
+      <UpdateBanner online={connection === 'online'} />
       <div className="body">
         <aside className="rail">
           <ProviderGroup heading="Sağlayıcılar" providers={providers} onPick={addSolo} />
@@ -113,7 +115,7 @@ export function App() {
         </aside>
         <main className={connection === 'online' ? 'stage stage--board' : 'stage'}>
           {connection === 'online' ? (
-            <Board canvas={canvas} />
+            <Board canvas={canvas} providers={ready} />
           ) : (
             <Stage
               connection={connection}
@@ -212,12 +214,14 @@ function ProviderRow({
   const style = providerStyle(provider.name)
   const actionable = Boolean(onPick) && provider.available
   return (
-    <div
+    <button
+      type="button"
       className={`provider provider--${provider.available ? 'online' : 'offline'}${
         actionable ? ' provider--actionable' : ''
       }`}
       title={actionable ? `${style.label} ile konuşma aç` : (provider.command ?? 'bulunamadı')}
       onClick={actionable ? () => onPick?.(provider.name) : undefined}
+      disabled={!actionable}
     >
       <span
         className="provider__badge"
@@ -245,7 +249,7 @@ function ProviderRow({
           />
         </div>
       )}
-    </div>
+    </button>
   )
 }
 

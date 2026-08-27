@@ -7,6 +7,7 @@ export namespace domain {
 	    mode: string;
 	    max_rounds: number;
 	    until_done: boolean;
+	    briefing?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new CanvasLink(source);
@@ -20,6 +21,7 @@ export namespace domain {
 	        this.mode = source["mode"];
 	        this.max_rounds = source["max_rounds"];
 	        this.until_done = source["until_done"];
+	        this.briefing = source["briefing"];
 	    }
 	}
 	export class CanvasNode {
@@ -155,6 +157,7 @@ export namespace domain {
 	export class ChatTurn {
 	    id: number;
 	    prompt: string;
+	    kind?: string;
 	    // Go type: time
 	    created_at: any;
 	    responses: ChatResponse[];
@@ -167,6 +170,7 @@ export namespace domain {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.prompt = source["prompt"];
+	        this.kind = source["kind"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.responses = this.convertValues(source["responses"], ChatResponse);
 	    }
@@ -202,6 +206,8 @@ export namespace domain {
 	    loop: LoopConfig;
 	    loop_running: boolean;
 	    runs?: CardRun[];
+	    role?: string;
+	    dialogue_state?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Conversation(source);
@@ -220,6 +226,8 @@ export namespace domain {
 	        this.loop = this.convertValues(source["loop"], LoopConfig);
 	        this.loop_running = source["loop_running"];
 	        this.runs = this.convertValues(source["runs"], CardRun);
+	        this.role = source["role"];
+	        this.dialogue_state = source["dialogue_state"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -495,6 +503,52 @@ export namespace domain {
 	        this.version = source["version"];
 	        this.providers = this.convertValues(source["providers"], Provider);
 	        this.runs = this.convertValues(source["runs"], Run);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace update {
+	
+	export class Status {
+	    current: string;
+	    latest?: string;
+	    available: boolean;
+	    url?: string;
+	    // Go type: time
+	    checked_at: any;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.current = source["current"];
+	        this.latest = source["latest"];
+	        this.available = source["available"];
+	        this.url = source["url"];
+	        this.checked_at = this.convertValues(source["checked_at"], null);
+	        this.error = source["error"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

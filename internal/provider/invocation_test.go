@@ -112,6 +112,23 @@ func TestClaudeResumesBySessionID(t *testing.T) {
 	}
 }
 
+// Antigravity soft-denies confirmations it cannot ask about in print mode, so
+// accept-edits alone leaves an agent stopped mid-task with an empty answer.
+// Edit access has to auto-approve them; read access never may.
+func TestAntigravityEditAccessApprovesConfirmations(t *testing.T) {
+	if _, err := executable("gemini"); err != nil {
+		t.Skip("antigravity CLI is not available")
+	}
+	edit := invoke(t, Request{Provider: "gemini", Prompt: "merhaba", Access: AccessEdit})
+	if !has(edit, "--dangerously-skip-permissions") {
+		t.Fatalf("edit access must auto-approve confirmations: %v", edit)
+	}
+	read := invoke(t, Request{Provider: "gemini", Prompt: "merhaba", Access: AccessRead})
+	if has(read, "--dangerously-skip-permissions") {
+		t.Fatalf("read access must not auto-approve anything: %v", read)
+	}
+}
+
 // Read access must keep every provider out of write mode.
 func TestReadAccessNeverGrantsWriting(t *testing.T) {
 	cases := map[string][]string{
