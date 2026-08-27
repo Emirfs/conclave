@@ -205,6 +205,13 @@ type NewConversation struct {
 	Y           float64  `json:"y"`
 }
 
+// BranchRequest forks an answer into new cards, one per provider, each starting
+// from that answer.
+type BranchRequest struct {
+	Answer    string   `json:"answer"`
+	Providers []string `json:"providers"`
+}
+
 // RoleRequest sets what a card is expected to do when it works with another.
 type RoleRequest struct {
 	Role string `json:"role"`

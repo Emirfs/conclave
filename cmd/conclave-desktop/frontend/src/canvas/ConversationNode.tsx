@@ -21,6 +21,9 @@ type Props = NodeProps & {
     onToggleLoop: (conversationID: number, running: boolean) => Promise<void>
     onSaveRole: (conversationID: number, role: string) => Promise<void>
     onResumeDialogue: (conversationID: number) => Promise<void>
+    onBranch: (conversationID: number, answer: string) => void
+    /** Puts text on the board as its own note card, next to this one. */
+    onPinNote: (body: string) => void
     onResize: (id: string, direction: -1 | 1) => void
   }
 }
@@ -29,7 +32,7 @@ type Tab = 'chat' | 'changes' | 'tests'
 
 export const ConversationNode = memo(function ConversationNode({ id, data, selected }: Props) {
   const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop,
-    onSaveRole, onResumeDialogue, onResize } = data
+    onSaveRole, onResumeDialogue, onBranch, onPinNote, onResize } = data
   const project = conversation.project_path ?? ''
   const access = conversation.access ?? 'edit'
   const [tab, setTab] = useState<Tab>('chat')
@@ -188,7 +191,11 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
         </div>
       ) : tab === 'changes' ? (
         <div className="node__body nowheel">
-          <Changes conversationID={conversation.id} refreshKey={turns.length} />
+          <Changes
+            conversationID={conversation.id}
+            refreshKey={turns.length}
+            onPin={(_title, body) => onPinNote(body)}
+          />
         </div>
       ) : (
       <div className="node__body node__transcript nowheel" ref={transcript}>
@@ -199,7 +206,14 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
               : `${lead.label} ile ayrı bir konuşma.`}
           </p>
         ) : (
-          turns.map((turn) => <Turn key={turn.id} turn={turn} group={group} />)
+          turns.map((turn) => (
+            <Turn
+              key={turn.id}
+              turn={turn}
+              group={group}
+              onBranch={(answer) => onBranch(conversation.id, answer)}
+            />
+          ))
         )}
       </div>
       )}
@@ -294,21 +308,46 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
   )
 })
 
-function Turn({ turn, group }: { turn: domain.ChatTurn; group: boolean }) {
+function Turn({
+  turn,
+  group,
+  onBranch,
+}: {
+  turn: domain.ChatTurn
+  group: boolean
+  onBranch: (answer: string) => void
+}) {
   return (
     <article className="turn">
       <p className="turn__prompt">{turn.prompt}</p>
       {(turn.responses ?? []).map((response) => (
-        <Response key={response.id} response={response} showName={group} />
+        <Response key={response.id} response={response} showName={group} onBranch={onBranch} />
       ))}
     </article>
   )
 }
 
-function Response({ response, showName }: { response: domain.ChatResponse; showName: boolean }) {
+/** How many characters of an answer are shown before it is folded. Long answers
+ *  turn a card into a scrolling well, and the turn you want is never the one on
+ *  screen. */
+const FOLD_AFTER = 700
+
+function Response({
+  response,
+  showName,
+  onBranch,
+}: {
+  response: domain.ChatResponse
+  showName: boolean
+  onBranch: (answer: string) => void
+}) {
   const style = providerStyle(response.provider)
   const working = response.status === 'queued' || response.status === 'running'
   const partial = response.content ?? ''
+  const [open, setOpen] = useState(false)
+  // Folding a streaming answer would hide the part being written.
+  const foldable = !working && partial.length > FOLD_AFTER
+  const shown = foldable && !open ? partial.slice(0, FOLD_AFTER).trimEnd() + '…' : partial
 
   return (
     <div className="reply" style={{ ['--reply-accent' as string]: style.accent }}>
@@ -323,9 +362,27 @@ function Response({ response, showName }: { response: domain.ChatResponse; showN
               <p className="reply__text reply__text--streaming">{partial}</p>
             ) : (
               <div className="reply__text">
-                <Markdown>{partial}</Markdown>
+                <Markdown>{shown}</Markdown>
               </div>
             )
+          )}
+          {(foldable || (!working && partial !== '')) && (
+            <div className="reply__actions nodrag">
+              {foldable && (
+                <button className="reply__action" onClick={() => setOpen(!open)}>
+                  {open ? 'katla' : `devamı (${Math.round(partial.length / 100) / 10}k)`}
+                </button>
+              )}
+              {!working && partial !== '' && (
+                <button
+                  className="reply__action"
+                  onClick={() => onBranch(partial)}
+                  title="Bu cevaptan yeni bir kart başlat"
+                >
+                  ↗ dallan
+                </button>
+              )}
+            </div>
           )}
         </>
       )}

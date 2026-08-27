@@ -113,7 +113,7 @@ export function App() {
         </aside>
         <main className={connection === 'online' ? 'stage stage--board' : 'stage'}>
           {connection === 'online' ? (
-            <Board canvas={canvas} />
+            <Board canvas={canvas} providers={ready} />
           ) : (
             <Stage
               connection={connection}

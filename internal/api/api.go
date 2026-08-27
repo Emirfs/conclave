@@ -55,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/loop/running", s.setLoopRunning)
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/role", s.setRole)
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/resume", s.resumeDialogue)
+	mux.HandleFunc("POST /v1/canvas/conversations/{id}/branch", s.branch)
 	return s.authenticate(mux)
 }
 
@@ -393,6 +394,26 @@ func (s *Server) resumeDialogue(response http.ResponseWriter, request *http.Requ
 	response.WriteHeader(http.StatusNoContent)
 }
 
+// branch forks an existing answer into one or more new cards.
+func (s *Server) branch(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	var input domain.BranchRequest
+	// The answer being branched from is a whole provider response.
+	if !decodeJSON(response, request, 256<<10, &input) {
+		return
+	}
+	branches, err := s.store.BranchFrom(request.Context(), id, input.Answer, input.Providers)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, branches)
+}
+
 func (s *Server) conversationProject(ctx context.Context, id int64) (string, error) {
 	canvas, err := s.store.Canvas(ctx)
 	if err != nil {
@@ -712,6 +733,13 @@ func (c *Client) SetRole(ctx context.Context, conversationID int64, input domain
 func (c *Client) ResumeDialogue(ctx context.Context, conversationID int64) error {
 	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/resume"
 	return c.do(ctx, http.MethodPost, path, nil, nil, http.StatusNoContent)
+}
+
+func (c *Client) Branch(ctx context.Context, conversationID int64, input domain.BranchRequest) ([]domain.Conversation, error) {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/branch"
+	var branches []domain.Conversation
+	err := c.do(ctx, http.MethodPost, path, input, &branches, http.StatusCreated)
+	return branches, err
 }
 
 func (c *Client) ProjectChanges(ctx context.Context, conversationID int64) (vcs.Status, error) {

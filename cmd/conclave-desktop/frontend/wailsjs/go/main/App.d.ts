@@ -3,6 +3,8 @@
 import {domain} from '../models';
 import {vcs} from '../models';
 
+export function Branch(arg1:number,arg2:string,arg3:Array<string>):Promise<Array<domain.Conversation>>;
+
 export function Canvas():Promise<domain.Canvas>;
 
 export function CreateConversation(arg1:domain.NewConversation):Promise<domain.Conversation>;

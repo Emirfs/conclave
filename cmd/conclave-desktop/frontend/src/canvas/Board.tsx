@@ -17,6 +17,7 @@ import {
 import '@xyflow/react/dist/style.css'
 
 import { domain } from '../../wailsjs/go/models'
+import { BranchPanel } from './BranchPanel'
 import { ConversationNode } from './ConversationNode'
 import { LinkPanel } from './LinkPanel'
 import { NoteNode } from './NoteNode'
@@ -26,19 +27,21 @@ const nodeTypes = { conversation: ConversationNode, note: NoteNode }
 
 export type BoardHandle = ReturnType<typeof useCanvas>
 
-export function Board({ canvas }: { canvas: BoardHandle }) {
+export function Board({ canvas, providers }: { canvas: BoardHandle; providers: string[] }) {
   return (
     <ReactFlowProvider>
-      <BoardSurface canvas={canvas} />
+      <BoardSurface canvas={canvas} providers={providers} />
     </ReactFlowProvider>
   )
 }
 
-function BoardSurface({ canvas }: { canvas: BoardHandle }) {
+function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: string[] }) {
   const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink,
     pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
-    saveRole, resumeDialogue, assignRoles } = canvas
+    saveRole, resumeDialogue, assignRoles, branch, addNote } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
+  // The answer a branch would start from, held while the user picks providers.
+  const [branching, setBranching] = useState<{ conversationID: number; answer: string } | null>(null)
 
   // Closing removes the node and, for a conversation, its history with it.
   const close = useCallback((id: string) => void remove(id), [remove])
@@ -62,6 +65,18 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
     [patch, setNodes],
   )
 
+  // Pinning puts text on the board beside the card it came from, so a diff or
+  // an answer can be read next to the conversation instead of inside it.
+  const pinNote = useCallback(
+    async (nodeID: string, body: string) => {
+      const source = nodes.find((node) => node.id === nodeID)
+      const x = (source?.position.x ?? 0) + (source?.width ?? 420) + 40
+      const y = source?.position.y ?? 0
+      await addNote({ body, color: '', x, y } as domain.NewNote)
+    },
+    [nodes, addNote],
+  )
+
   // Notes need a callback in their data so the textarea can report edits, but
   // the hook owns the state. Injecting it here keeps NoteNode presentational.
   const decorated = useMemo(
@@ -81,12 +96,15 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
                 onToggleLoop: toggleLoop,
                 onSaveRole: saveRole,
                 onResumeDialogue: resumeDialogue,
+                onBranch: (conversationID: number, answer: string) =>
+                  setBranching({ conversationID, answer }),
+                onPinNote: (body: string) => void pinNote(node.id, body),
                 onResize: resize,
               },
             },
       ),
     [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop,
-     saveRole, resumeDialogue, resize],
+     saveRole, resumeDialogue, pinNote, resize],
   )
 
   const onNodesChange = useCallback(
@@ -272,6 +290,17 @@ function BoardSurface({ canvas }: { canvas: BoardHandle }) {
                 setSelectedEdge(null)
                 void unlink(id)
               }}
+            />
+          )}
+          {branching && (
+            <BranchPanel
+              providers={providers}
+              answer={branching.answer}
+              onBranch={(chosen) => {
+                void branch(branching.conversationID, branching.answer, chosen)
+                setBranching(null)
+              }}
+              onCancel={() => setBranching(null)}
             />
           )}
         </Panel>

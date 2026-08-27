@@ -201,6 +201,18 @@ func (a *App) SetRole(conversationID int64, role string) error {
 	return client.SetRole(ctx, conversationID, domain.RoleRequest{Role: role})
 }
 
+// Branch forks an answer into a new card per provider, each starting from that
+// answer, so one line of work can be carried in several directions at once.
+func (a *App) Branch(conversationID int64, answer string, providers []string) ([]domain.Conversation, error) {
+	client, err := a.client()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+	return client.Branch(ctx, conversationID, domain.BranchRequest{Answer: answer, Providers: providers})
+}
+
 // ResumeDialogue clears a parked exchange so the next message starts it again.
 func (a *App) ResumeDialogue(conversationID int64) error {
 	client, err := a.client()

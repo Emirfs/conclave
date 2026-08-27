@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -777,11 +778,15 @@ VALUES(?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), ?)`
 
 // CreateNote adds a standalone sticky note to the canvas.
 func (s *Store) CreateNote(ctx context.Context, request domain.NewNote) (domain.CanvasNode, error) {
+	return s.createNote(ctx, request, noteWidth, noteHeight)
+}
+
+func (s *Store) createNote(ctx context.Context, request domain.NewNote, width, height float64) (domain.CanvasNode, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := s.db.ExecContext(ctx, `
 INSERT INTO canvas_nodes(kind, x, y, width, height, z, color, body, updated_at)
 VALUES(?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), ?, ?, ?)`,
-		domain.NodeNote, request.X, request.Y, noteWidth, noteHeight,
+		domain.NodeNote, request.X, request.Y, width, height,
 		request.Color, request.Body, now)
 	if err != nil {
 		return domain.CanvasNode{}, err
@@ -792,8 +797,88 @@ VALUES(?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), ?, ?, 
 	}
 	return domain.CanvasNode{
 		ID: id, Kind: domain.NodeNote, X: request.X, Y: request.Y,
-		Width: noteWidth, Height: noteHeight, Color: request.Color, Body: request.Body,
+		Width: width, Height: height, Color: request.Color, Body: request.Body,
 	}, nil
+}
+
+// BranchFrom starts new conversations from an answer that already exists. The
+// answer becomes each new card's first message and a link is drawn back to the
+// card it came from, so a board shows where a line of work forked.
+//
+// One provider per card, not one card with several providers: the point of a
+// branch is that the paths diverge, and a group card would merge them again.
+func (s *Store) BranchFrom(ctx context.Context, sourceConversationID int64, answer string, providers []string) ([]domain.Conversation, error) {
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return nil, errors.New("a branch needs an answer to start from")
+	}
+	if len(providers) == 0 {
+		return nil, errors.New("a branch needs at least one provider")
+	}
+	x, y, err := s.branchPosition(ctx, sourceConversationID)
+	if err != nil {
+		return nil, err
+	}
+	sourceNode, err := s.nodeOfConversation(ctx, sourceConversationID)
+	if err != nil {
+		return nil, err
+	}
+	branches := make([]domain.Conversation, 0, len(providers))
+	for index, name := range providers {
+		conversation, err := s.CreateConversation(ctx, domain.NewConversation{
+			Title:     name,
+			Kind:      domain.KindSolo,
+			Providers: []string{name},
+			X:         x + float64(index)*(conversationWidth+30),
+			Y:         y,
+		})
+		if err != nil {
+			return branches, err
+		}
+		if _, err := s.CreateConversationTurn(ctx, conversation.ID, answer); err != nil {
+			return branches, err
+		}
+		// The link records where the branch came from. It stays a plain relay:
+		// a branch is a fork, not a conversation back to the parent.
+		if sourceNode != 0 {
+			node, err := s.nodeOfConversation(ctx, conversation.ID)
+			if err != nil {
+				return branches, err
+			}
+			if _, err := s.CreateLink(ctx, sourceNode, node,
+				domain.LinkOptions{Mode: domain.LinkRelay, MaxRounds: 1}.Normalised()); err != nil {
+				return branches, err
+			}
+		}
+		branches = append(branches, conversation)
+	}
+	return branches, nil
+}
+
+func (s *Store) nodeOfConversation(ctx context.Context, conversationID int64) (int64, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx,
+		"SELECT id FROM canvas_nodes WHERE conversation_id = ? AND kind = ?",
+		conversationID, domain.NodeConversation).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return id, err
+}
+
+// branchPosition puts the new cards below the one they came from.
+func (s *Store) branchPosition(ctx context.Context, conversationID int64) (float64, float64, error) {
+	var x, y, height float64
+	err := s.db.QueryRowContext(ctx,
+		"SELECT x, y, height FROM canvas_nodes WHERE conversation_id = ? AND kind = ?",
+		conversationID, domain.NodeConversation).Scan(&x, &y, &height)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	return x, y + height + 60, nil
 }
 
 // Canvas returns every conversation and node needed to draw the board.
@@ -1322,6 +1407,12 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 				if err := s.setDialogueState(ctx, conversationID, target.conversation, state); err != nil {
 					return delivered, err
 				}
+				// The result of an exchange is buried at the bottom of a card
+				// nobody scrolled to. It goes on the board instead, next to the
+				// two cards that produced it.
+				if err := s.createOutcomeNote(ctx, conversationID, target.conversation, sourceTitle, payload, state); err != nil {
+					return delivered, err
+				}
 				continue
 			case dialogueOutcomeNudge:
 				// One card asked for a decision. Rather than stopping the whole
@@ -1436,6 +1527,118 @@ WHERE id IN (?, ?) AND loop_mode = ?`, sourceID, targetID, domain.LoopUntilPass)
 		return dialogueOutcomeDone, nil
 	}
 	return dialogueOutcomeContinue, nil
+}
+
+// outcomeWidth and outcomeHeight give a result card more room than an ordinary
+// note: it holds a whole answer, and being able to read it without opening
+// anything is the entire point of putting it on the board.
+const (
+	outcomeWidth  = 380
+	outcomeHeight = 260
+)
+
+// createOutcomeNote puts the result of a finished exchange on the board, below
+// and between the two cards that produced it. It carries the last answer, who
+// was talking and how long it took, so the conclusion is readable without
+// scrolling either card.
+func (s *Store) createOutcomeNote(ctx context.Context, sourceID, targetID int64, speaker, payload, state string) error {
+	var targetTitle string
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT title FROM conversations WHERE id = ?", targetID).Scan(&targetTitle); err != nil {
+		return err
+	}
+	rounds, err := s.exchangeRounds(ctx, sourceID, targetID)
+	if err != nil {
+		return err
+	}
+	x, y, err := s.outcomePosition(ctx, sourceID, targetID)
+	if err != nil {
+		return err
+	}
+	_, err = s.createNote(ctx, domain.NewNote{
+		Body:  outcomeBody(speaker, targetTitle, payload, state, rounds),
+		Color: outcomeColor(state),
+		X:     x,
+		Y:     y,
+	}, outcomeWidth, outcomeHeight)
+	return err
+}
+
+// outcomeBody writes the result card. The answer is kept whole: trimming it
+// here would send the reader back into the card this is meant to replace.
+func outcomeBody(speaker, other, payload, state string, rounds int) string {
+	var builder strings.Builder
+	if state == domain.DialogueDone {
+		builder.WriteString("## Sonuç\n\n")
+	} else {
+		builder.WriteString("## Karar bekleniyor\n\n")
+	}
+	builder.WriteString("*")
+	builder.WriteString(speaker)
+	builder.WriteString(" ↔ ")
+	builder.WriteString(other)
+	if rounds > 0 {
+		builder.WriteString(" · ")
+		builder.WriteString(strconv.Itoa(rounds))
+		builder.WriteString(" tur")
+	}
+	builder.WriteString("*\n\n")
+	builder.WriteString(strings.TrimSpace(payload))
+	return builder.String()
+}
+
+// outcomeColor is the note's accent, used directly as a CSS colour by the
+// client. A parked exchange gets the same warning colour the card itself shows.
+func outcomeColor(state string) string {
+	if state == domain.DialogueWaiting {
+		return "var(--warning)"
+	}
+	return "var(--positive)"
+}
+
+// exchangeRounds counts the relayed turns the two cards traded, which is what
+// "how long did this take" means for a dialogue.
+func (s *Store) exchangeRounds(ctx context.Context, sourceID, targetID int64) (int, error) {
+	var rounds int
+	err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM chat_turns
+WHERE conversation_id IN (?, ?) AND kind IN (?, ?)`,
+		sourceID, targetID, domain.TurnRelay, domain.TurnNudge).Scan(&rounds)
+	return rounds, err
+}
+
+// outcomePosition places the result below the two cards and centred between
+// them, so the link it belongs to is obvious without drawing one.
+func (s *Store) outcomePosition(ctx context.Context, sourceID, targetID int64) (float64, float64, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT x, y, height FROM canvas_nodes
+WHERE conversation_id IN (?, ?) AND kind = ?`, sourceID, targetID, domain.NodeConversation)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer rows.Close()
+	var left, bottom float64
+	var count int
+	for rows.Next() {
+		var x, y, height float64
+		if err := rows.Scan(&x, &y, &height); err != nil {
+			return 0, 0, err
+		}
+		if count == 0 || x < left {
+			left = x
+		}
+		if y+height > bottom {
+			bottom = y + height
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return 0, 0, err
+	}
+	if count == 0 {
+		return 0, 0, nil
+	}
+	return left, bottom + 40, nil
 }
 
 // takeBriefing returns the briefing a card should be given before its first

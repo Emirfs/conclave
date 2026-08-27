@@ -913,6 +913,125 @@ func TestRelayLinkStaysOneWay(t *testing.T) {
 }
 
 // The receiving card must be told which card is speaking to it.
+// The conclusion of an exchange is buried at the bottom of a card nobody
+// scrolled to, so it goes on the board as its own card.
+func TestFinishedDialogueLeavesAnOutcomeCard(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+	if _, err := store.PairNodes(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 5, UntilDone: true}); err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "baslat"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	before, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	notesBefore := countNotes(before)
+
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed,
+		"is bitti, karar X "+dialogueDoneMarker, ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if _, err := store.RelayTurn(ctx, job.TurnID); err != nil {
+		t.Fatalf("relay: %v", err)
+	}
+
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas 2: %v", err)
+	}
+	if countNotes(after) != notesBefore+1 {
+		t.Fatalf("outcome card was not created: %d notes, want %d", countNotes(after), notesBefore+1)
+	}
+	var outcome domain.CanvasNode
+	for _, node := range after.Nodes {
+		if node.Kind == domain.NodeNote {
+			outcome = node
+		}
+	}
+	if !strings.Contains(outcome.Body, "karar X") {
+		t.Fatalf("outcome card lost the answer: %q", outcome.Body)
+	}
+	// Both cards must be named on it, or it says nothing about where it is from.
+	if !strings.Contains(outcome.Body, first.Title) || !strings.Contains(outcome.Body, second.Title) {
+		t.Fatalf("outcome card does not name both cards: %q", outcome.Body)
+	}
+}
+
+func countNotes(canvas domain.Canvas) int {
+	count := 0
+	for _, node := range canvas.Nodes {
+		if node.Kind == domain.NodeNote {
+			count++
+		}
+	}
+	return count
+}
+
+// Branching carries one answer into several independent cards. One provider per
+// card: a group card would merge the paths that are supposed to diverge.
+func TestBranchOpensOneCardPerProvider(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	source, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "A", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	branches, err := store.BranchFrom(ctx, source.ID, "devam edilecek cevap", []string{"openai", "gemini"})
+	if err != nil {
+		t.Fatalf("branch: %v", err)
+	}
+	if len(branches) != 2 {
+		t.Fatalf("branch opened %d cards, want 2", len(branches))
+	}
+	after, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+	for _, item := range after.Conversations {
+		if item.ID == source.ID {
+			continue
+		}
+		if len(item.Providers) != 1 {
+			t.Fatalf("branch card has %d providers, want 1", len(item.Providers))
+		}
+		if len(item.Turns) != 1 || item.Turns[0].Prompt != "devam edilecek cevap" {
+			t.Fatalf("branch card did not start from the answer: %+v", item.Turns)
+		}
+	}
+	// The link is what shows where the work forked.
+	if len(after.Links) != 2 {
+		t.Fatalf("branch drew %d links, want 2", len(after.Links))
+	}
+}
+
+func TestBranchRejectsAnEmptyAnswerOrNoProvider(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	source, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "A", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.BranchFrom(ctx, source.ID, "   ", []string{"openai"}); err == nil {
+		t.Fatal("an empty answer was accepted")
+	}
+	if _, err := store.BranchFrom(ctx, source.ID, "cevap", nil); err == nil {
+		t.Fatal("a branch with no provider was accepted")
+	}
+}
+
 // A long session drifts from the role it was given, so the role is restated
 // once the window is actually large — and not before, because the reminder is
 // only worth its tokens against a full window.

@@ -36,6 +36,10 @@ nodes the daemon persists, so a layout survives a restart.
   provider can take any position in a workflow.
 - Context size is read from each provider's own usage report. A large window restates the card's role;
   a full one drops the provider session and lets the transcript carry the conversation into a new one.
+- A finished exchange leaves its result on the board as its own card. The conclusion of a dialogue is
+  not something the user should have to scroll a card to find.
+- Branching forks an answer into one card per provider, never a single group card: the paths are
+  supposed to diverge, and a group card would merge them again.
 - A provider runs at most one chat job at a time.
 - Each card carries its own project directory and access level; providers run there, as they would in
   a terminal. `edit` access auto-approves file changes and commands, because `--print` runs cannot ask.

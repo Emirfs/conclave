@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Edge, Node } from '@xyflow/react'
 
 import {
+  Branch,
   Canvas as LoadCanvas,
   CreateConversation,
   CreateNote,
@@ -312,6 +313,20 @@ export function useCanvas(connected: boolean) {
     [load],
   )
 
+  // Forking an answer into new cards. The daemon places them and draws the link
+  // back, so the board shows where a line of work split.
+  const branch = useCallback(
+    async (conversationID: number, answer: string, providers: string[]) => {
+      try {
+        await Branch(conversationID, answer, providers)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
   // Roles come in complementary pairs, so both cards of a link are assigned
   // together. Node ids are what a link carries; the conversation behind each
   // one is what carries the role.
@@ -429,10 +444,10 @@ export function useCanvas(connected: boolean) {
       nodes, setNodes, edges, error, loaded, load, patch,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
-      saveRole, resumeDialogue, assignRoles,
+      saveRole, resumeDialogue, assignRoles, branch,
     }),
     [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
-     saveLoop, toggleLoop, saveRole, resumeDialogue, assignRoles],
+     saveLoop, toggleLoop, saveRole, resumeDialogue, assignRoles, branch],
   )
 }

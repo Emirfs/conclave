@@ -4,7 +4,15 @@ import { FileDiff, ProjectChanges } from '../../wailsjs/go/main/App'
 import { vcs } from '../../wailsjs/go/models'
 
 /** Shows what changed in the card's project and the diff of a chosen file. */
-export function Changes({ conversationID, refreshKey }: { conversationID: number; refreshKey: number }) {
+export function Changes({
+  conversationID,
+  refreshKey,
+  onPin,
+}: {
+  conversationID: number
+  refreshKey: number
+  onPin: (title: string, body: string) => void
+}) {
   const [status, setStatus] = useState<vcs.Status | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [diff, setDiff] = useState<vcs.Diff | null>(null)
@@ -55,6 +63,25 @@ export function Changes({ conversationID, refreshKey }: { conversationID: number
 
   return (
     <div className="changes">
+      <div className="changes__bar">
+        <span className="changes__summary">
+          {changes.length} değişiklik{status.branch ? ` · ${status.branch}` : ''}
+        </span>
+        {/* A diff read next to the conversation that produced it beats a diff
+            read inside a tab you have to keep switching back to. */}
+        <button
+          className="changes__pin"
+          onClick={() =>
+            onPin(
+              selected ? `Değişiklik · ${selected}` : 'Değişiklikler',
+              selected && diff ? diffBody(selected, diff) : statusBody(status),
+            )
+          }
+          title="Panoya kart olarak çıkar"
+        >
+          ↗ karta çıkar
+        </button>
+      </div>
       <ul className="changes__list">
         {changes.map((change) => (
           <li key={change.path}>
@@ -74,6 +101,22 @@ export function Changes({ conversationID, refreshKey }: { conversationID: number
       {diff && <Patch patch={diff.patch} truncated={diff.truncated} />}
     </div>
   )
+}
+
+/** One file's patch, as markdown a note card can render. */
+function diffBody(path: string, diff: vcs.Diff): string {
+  const patch = diff.truncated ? `${diff.patch}\n[kısaltıldı]` : diff.patch
+  return `## ${path}\n\n\`\`\`diff\n${patch}\n\`\`\``
+}
+
+/** The whole working tree as a checklist, when no single file is selected. */
+function statusBody(status: vcs.Status): string {
+  const lines = (status.changes ?? []).map((change) => {
+    const code = change.status.trim() || '??'
+    return `- \`${code}\` ${change.path}`
+  })
+  const heading = status.branch ? `## Değişiklikler · ${status.branch}` : '## Değişiklikler'
+  return `${heading}\n\n${lines.join('\n')}`
 }
 
 function codeClass(change: vcs.Change): string {
