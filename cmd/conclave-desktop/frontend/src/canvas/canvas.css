@@ -93,10 +93,28 @@
   box-shadow: var(--shadow-panel);
   font-family: var(--font-ui);
   text-align: left;
+  transition: border-color var(--duration-medium) var(--ease),
+    box-shadow var(--duration-medium) var(--ease);
+  animation: node-enter 280ms var(--ease-out) both;
 }
 
 .node--selected {
   box-shadow: var(--shadow-float);
+}
+
+.node:hover:not(.node--selected) {
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.62);
+}
+
+@keyframes node-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.975) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .node:fullscreen {
@@ -148,6 +166,11 @@
   padding: 9px 12px;
   background: var(--surface-overlay);
   border-bottom: 1px solid var(--line-subtle);
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.node--selected .node__header {
+  background: color-mix(in srgb, var(--node-accent) 7%, var(--surface-overlay));
 }
 
 .node__badges {
@@ -262,6 +285,18 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  animation: turn-enter var(--duration-medium) var(--ease-out) both;
+}
+
+@keyframes turn-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* An incoming message. Three kinds arrive here — a person, another card, the
@@ -311,7 +346,7 @@
   align-self: stretch;
   font-size: 12.5px;
   line-height: 1.6;
-  color: var(--text-secondary);
+  color: color-mix(in srgb, var(--text-primary) 82%, var(--text-secondary));
   overflow-wrap: anywhere;
 }
 
@@ -369,7 +404,7 @@
 .reply__text {
   margin: 0;
   font-size: 13.5px;
-  line-height: 1.62;
+  line-height: 1.68;
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
@@ -404,6 +439,10 @@
 .markdown h3,
 .markdown h4 {
   margin: 0 0 0.8em;
+}
+
+.markdown p {
+  text-wrap: pretty;
 }
 
 .markdown h1,
@@ -685,6 +724,18 @@
   border-radius: var(--radius-md);
   background: var(--surface-overlay);
   box-shadow: var(--shadow-panel);
+  animation: panel-enter var(--duration-medium) var(--ease-out) both;
+}
+
+@keyframes panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .branchpanel__title {
@@ -842,10 +893,13 @@
   line-height: 1.5;
   user-select: text;
   cursor: text;
+  transition: border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease);
 }
 
 .node__input:focus {
   border-color: var(--node-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 12%, transparent);
 }
 
 .node__input::placeholder {
@@ -1200,6 +1254,7 @@
 
 .node__tab--active {
   border-color: var(--node-accent);
+  background: color-mix(in srgb, var(--node-accent) 10%, var(--surface-raised));
   color: var(--text-primary);
 }
 
@@ -1368,6 +1423,7 @@
   border-radius: var(--radius);
   background: var(--surface-raised);
   box-shadow: var(--shadow-float);
+  animation: panel-enter var(--duration-medium) var(--ease-out) both;
 }
 
 .linkpanel__title {
@@ -1767,6 +1823,7 @@
   border-radius: var(--radius);
   background: var(--surface-raised);
   box-shadow: var(--shadow-float);
+  animation: panel-enter var(--duration-medium) var(--ease-out) both;
 }
 
 .selectionbar__count {

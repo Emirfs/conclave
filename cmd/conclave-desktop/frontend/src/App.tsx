@@ -212,12 +212,14 @@ function ProviderRow({
   const style = providerStyle(provider.name)
   const actionable = Boolean(onPick) && provider.available
   return (
-    <div
+    <button
+      type="button"
       className={`provider provider--${provider.available ? 'online' : 'offline'}${
         actionable ? ' provider--actionable' : ''
       }`}
       title={actionable ? `${style.label} ile konuşma aç` : (provider.command ?? 'bulunamadı')}
       onClick={actionable ? () => onPick?.(provider.name) : undefined}
+      disabled={!actionable}
     >
       <span
         className="provider__badge"
@@ -245,7 +247,7 @@ function ProviderRow({
           />
         </div>
       )}
-    </div>
+    </button>
   )
 }
 

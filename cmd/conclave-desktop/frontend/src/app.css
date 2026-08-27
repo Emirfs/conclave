@@ -73,6 +73,8 @@
   font-size: 11.5px;
   color: var(--text-secondary);
   --wails-draggable: no-drag;
+  transition: border-color var(--duration-medium) var(--ease),
+    background var(--duration-medium) var(--ease);
 }
 
 .pill__dot {
@@ -157,7 +159,15 @@
   padding: 8px 8px;
   border: 1px solid transparent;
   border-radius: var(--radius);
-  transition: background 120ms var(--ease), border-color 120ms var(--ease);
+  width: 100%;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+  transition: background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease),
+    transform var(--duration-fast) var(--ease);
 }
 
 .provider:hover {
@@ -167,6 +177,11 @@
 
 .provider--offline {
   opacity: 0.45;
+}
+
+.provider:focus-visible {
+  border-color: var(--accent);
+  outline-offset: 1px;
 }
 
 .provider__badge {
@@ -271,9 +286,9 @@
 }
 
 .provider--actionable:hover {
-  cursor: default;
   background: var(--surface-overlay);
   border-color: var(--line);
+  transform: translateX(2px);
 }
 
 .button--block {
