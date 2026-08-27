@@ -114,7 +114,12 @@ try {
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archive -UseBasicParsing
 
     if ($checksums) {
-        $manifest = (Invoke-WebRequest -Uri $checksums.browser_download_url -UseBasicParsing).Content
+        # GitHub serves release assets as application/octet-stream, so
+        # Invoke-WebRequest hands back a byte array and splitting it into lines
+        # silently produces nonsense. Going through a file keeps it text.
+        $manifestFile = Join-Path $workDir 'checksums.txt'
+        Invoke-WebRequest -Uri $checksums.browser_download_url -OutFile $manifestFile -UseBasicParsing
+        $manifest = Get-Content -Path $manifestFile -Raw
         $expected = $null
         foreach ($line in ($manifest -split "`n")) {
             $parts = ($line.Trim() -split '\s+')
