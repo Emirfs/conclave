@@ -1555,13 +1555,42 @@ func (s *Store) createOutcomeNote(ctx context.Context, sourceID, targetID int64,
 	if err != nil {
 		return err
 	}
-	_, err = s.createNote(ctx, domain.NewNote{
+	note, err := s.createNote(ctx, domain.NewNote{
 		Body:  outcomeBody(speaker, targetTitle, payload, state, rounds),
 		Color: outcomeColor(state),
 		X:     x,
 		Y:     y,
 	}, outcomeWidth, outcomeHeight)
-	return err
+	if err != nil {
+		return err
+	}
+	// Naming the two cards in the text says where the result came from; drawing
+	// the lines is what makes it visible on a board with several of them.
+	return s.linkOutcome(ctx, note.ID, sourceID, targetID)
+}
+
+// linkOutcome draws a line from each card to the result they produced. These
+// links are decoration: RelayTurn only follows links whose target is a
+// conversation, so nothing is ever relayed into a note.
+func (s *Store) linkOutcome(ctx context.Context, noteID, sourceID, targetID int64) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, conversationID := range []int64{sourceID, targetID} {
+		node, err := s.nodeOfConversation(ctx, conversationID)
+		if err != nil {
+			return err
+		}
+		if node == 0 {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, `
+INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done, briefing)
+VALUES(?, ?, ?, ?, 1, 0, '')
+ON CONFLICT(source_id, target_id) DO NOTHING`,
+			node, noteID, now, domain.LinkRelay); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // outcomeBody writes the result card. The answer is kept whole: trimming it

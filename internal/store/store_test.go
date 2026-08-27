@@ -964,6 +964,64 @@ func TestFinishedDialogueLeavesAnOutcomeCard(t *testing.T) {
 	if !strings.Contains(outcome.Body, first.Title) || !strings.Contains(outcome.Body, second.Title) {
 		t.Fatalf("outcome card does not name both cards: %q", outcome.Body)
 	}
+	// And a line is drawn from each card, so the origin is visible on the board
+	// and not only in the text.
+	incoming := 0
+	for _, link := range after.Links {
+		if link.TargetID == outcome.ID {
+			incoming++
+		}
+	}
+	if incoming != 2 {
+		t.Fatalf("outcome card has %d incoming links, want 2", incoming)
+	}
+}
+
+// Nothing may be relayed into a result card: the lines to it are there to show
+// where it came from, not to carry a conversation.
+func TestOutcomeLinksNeverRelay(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+	first, second, canvas := linkedPair(t, store)
+	if _, err := store.PairNodes(ctx, nodeOf(t, canvas, first.ID), nodeOf(t, canvas, second.ID),
+		domain.LinkOptions{Mode: domain.LinkDialogue, MaxRounds: 5, UntilDone: true}); err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if _, err := store.CreateConversationTurn(ctx, first.ID, "baslat"); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job, err := store.ClaimChatResponse(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, job.ResponseID, domain.StatusPassed,
+		"bitti "+dialogueDoneMarker, ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if _, err := store.RelayTurn(ctx, job.TurnID); err != nil {
+		t.Fatalf("relay: %v", err)
+	}
+
+	// A later answer from the other card must not produce a turn anywhere, and
+	// certainly not one addressed to a note.
+	if _, err := store.CreateConversationTurn(ctx, second.ID, "yeni tur"); err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	next, err := store.ClaimChatResponse(ctx)
+	if err != nil || next == nil {
+		t.Fatalf("claim 2: %v", err)
+	}
+	if err := store.FinishChatResponse(ctx, next.ResponseID, domain.StatusPassed, "cevap", ""); err != nil {
+		t.Fatalf("finish 2: %v", err)
+	}
+	delivered, err := store.RelayTurn(ctx, next.TurnID)
+	if err != nil {
+		t.Fatalf("relay 2: %v", err)
+	}
+	// One delivery, to the other conversation — never to the result card.
+	if delivered != 1 {
+		t.Fatalf("relay delivered %d turns, want 1", delivered)
+	}
 }
 
 func countNotes(canvas domain.Canvas) int {

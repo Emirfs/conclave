@@ -24,6 +24,9 @@ export function LinkPanel({
   const rounds = (edge.data?.maxRounds as number) ?? 3
   const untilDone = (edge.data?.untilDone as boolean) ?? false
   const briefing = (edge.data?.briefing as string) ?? ''
+  // A line to a result card records where the result came from. There is no
+  // exchange along it to configure — only the option to take it off the board.
+  const toNote = (edge.data?.toNote as boolean) ?? false
 
   // The textarea is edited locally and committed on blur, so a refetch
   // mid-sentence cannot overwrite what is being typed.
@@ -38,6 +41,21 @@ export function LinkPanel({
       next.untilDone ?? untilDone,
       next.briefing ?? draft,
     )
+
+  if (toNote) {
+    return (
+      <div className="linkpanel">
+        <span className="linkpanel__title">Sonuç bağlantısı</span>
+        <p className="linkpanel__hint">
+          Bu çizgi, sonuç kartının hangi kartlardan çıktığını gösterir. Üzerinden
+          mesaj geçmez.
+        </p>
+        <button className="linkpanel__remove" onClick={() => onUnlink(edge.id)}>
+          Bağlantıyı kaldır
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="linkpanel">

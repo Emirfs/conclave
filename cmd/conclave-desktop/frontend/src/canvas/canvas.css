@@ -83,6 +83,14 @@
   border-radius: 2px;
 }
 
+/* Notes are resized far more often than conversation cards — their height is
+   whatever their text needs — so their handles are worth hitting. */
+.node__resize-handle--large {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
 /* ---------- conversation node ---------- */
 
 .node--conversation {

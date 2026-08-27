@@ -107,23 +107,34 @@ export function useCanvas(connected: boolean) {
         }
       }
       setBusy(working)
-      const mappedEdges = (canvas.links ?? []).map((link) => ({
-          id: String(link.id),
-          source: String(link.source_id),
-          target: String(link.target_id),
-          // Provider activity is already visible in its card. Animating every
-          // edge whenever any card works keeps the WebView GPU busy and makes
-          // large boards stutter.
-          animated: false,
-          type: 'smoothstep',
-          label: linkLabel(link),
-          data: {
-            mode: link.mode,
-            maxRounds: link.max_rounds,
-            untilDone: link.until_done,
-            briefing: link.briefing ?? '',
-          },
-        }))
+      // A link into a note is the line from a pair of cards to the result they
+      // produced. Nothing is relayed along it, so it is drawn as a quiet dashed
+      // line rather than a working connection.
+      const noteNodes = new Set(
+        (canvas.nodes ?? []).filter((node) => node.kind === 'note').map((node) => String(node.id)),
+      )
+      const mappedEdges = (canvas.links ?? []).map((link) => {
+          const toNote = noteNodes.has(String(link.target_id))
+          return {
+            id: String(link.id),
+            source: String(link.source_id),
+            target: String(link.target_id),
+            // Provider activity is already visible in its card. Animating every
+            // edge whenever any card works keeps the WebView GPU busy and makes
+            // large boards stutter.
+            animated: false,
+            type: 'smoothstep',
+            label: toNote ? undefined : linkLabel(link),
+            style: toNote ? { strokeDasharray: '4 4', opacity: 0.55 } : undefined,
+            data: {
+              mode: link.mode,
+              maxRounds: link.max_rounds,
+              untilDone: link.until_done,
+              briefing: link.briefing ?? '',
+              toNote,
+            },
+          }
+        })
       setEdges((current) => {
         if (
           current.length === mappedEdges.length &&

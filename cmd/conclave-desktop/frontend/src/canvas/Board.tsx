@@ -55,10 +55,26 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
           const conversation = node.data.kind === 'conversation'
           const minWidth = conversation ? 300 : 240
           const minHeight = conversation ? 240 : 120
-          const width = Math.max(minWidth, Math.min(1200, (node.width ?? (conversation ? 420 : 240)) + direction * 80))
-          const height = Math.max(minHeight, Math.min(900, (node.height ?? (conversation ? 520 : 180)) + direction * 60))
+          // A step small enough to need six clicks is a step that gets used
+          // once and then abandoned for dragging a corner.
+          const width = Math.max(minWidth, Math.min(1200, (node.width ?? (conversation ? 420 : 240)) + direction * 140))
+          const height = Math.max(minHeight, Math.min(900, (node.height ?? (conversation ? 520 : 180)) + direction * 110))
           patch({ id: Number(id), width, height } as domain.CanvasNodePatch)
           return { ...node, width, height }
+        }),
+      )
+    },
+    [patch, setNodes],
+  )
+
+  // Fitting a note to its own text, which is the size it almost always wants.
+  const setHeight = useCallback(
+    (id: string, height: number) => {
+      setNodes((current) =>
+        current.map((node) => {
+          if (node.id !== id) return node
+          patch({ id: Number(id), height } as domain.CanvasNodePatch)
+          return { ...node, height }
         }),
       )
     },
@@ -83,7 +99,16 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
     () =>
       nodes.map((node) =>
         node.data.kind === 'note'
-          ? { ...node, data: { ...node.data, onBodyChange: setNoteBody, onClose: close, onResize: resize } }
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                onBodyChange: setNoteBody,
+                onClose: close,
+                onResize: resize,
+                onSetHeight: setHeight,
+              },
+            }
           : {
               ...node,
               data: {
@@ -104,7 +129,7 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
             },
       ),
     [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop,
-     saveRole, resumeDialogue, pinNote, resize],
+     saveRole, resumeDialogue, pinNote, resize, setHeight],
   )
 
   const onNodesChange = useCallback(
