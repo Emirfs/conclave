@@ -695,49 +695,120 @@
   color: var(--text-primary);
 }
 
-/* Which model each provider of this card runs on. One row per provider: a group
-   card is only worth having if its providers can differ. */
+/* Which model each provider of this card runs on. A chip in the toolbar rather
+   than a row of its own: it is read far more often than it is changed. */
 .node__models {
-  flex: none;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  padding: 5px 9px 0;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
 .node__model {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  position: relative;
   min-width: 0;
 }
 
-.node__model-select,
-.node__model-input {
-  min-width: 0;
-  max-width: 190px;
-  padding: 2px 5px;
+.node__model-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 150px;
+  padding: 3px 7px;
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius-sm);
-  outline: none;
-  background: transparent;
+  background: var(--surface-raised);
   color: var(--text-secondary);
   font-family: inherit;
   font-size: var(--text-xs);
   cursor: default;
+  transition: background 120ms var(--ease), color 120ms var(--ease),
+    border-color 120ms var(--ease);
 }
 
-.node__model-select:hover,
-.node__model-input:hover {
-  border-color: var(--line);
+.node__model-chip:hover,
+.node__model-chip--open {
+  background: var(--surface-overlay);
   color: var(--text-primary);
 }
 
-.node__model-input:focus {
-  border-color: var(--line);
+/* The provider is what the colour is for; the model name carries the meaning. */
+.node__model-glyph {
+  flex: none;
+  color: var(--badge-accent);
+  font-weight: 700;
+}
+
+.node__model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+/* Above the card body, so a menu opened at the bottom of the toolbar is not
+   clipped by the transcript underneath it. */
+.node__model-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-panel);
+}
+
+.node__model-option {
+  padding: 4px 7px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: left;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.node__model-option:hover {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.node__model-option--active {
+  color: var(--text-primary);
+}
+
+.node__model-option--custom {
+  font-family: inherit;
+  color: var(--text-muted);
+}
+
+.node__model-empty {
+  padding: 4px 7px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.node__model-input {
+  min-width: 0;
+  margin: 2px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  outline: none;
   background: var(--surface-input);
   color: var(--text-primary);
-  cursor: text;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 /* Fold a long answer, or carry it into new cards. Sits under the reply so it

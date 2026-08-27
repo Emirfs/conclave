@@ -154,6 +154,13 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
         >
           {access === 'edit' ? 'düzenleyebilir' : 'salt okunur'}
         </button>
+        {/* Which model each provider runs on. Changing it drops that provider's
+            session, so the next answer really comes from the model named here. */}
+        <ModelPicker
+          providers={providers}
+          chosen={conversation.models ?? {}}
+          onSave={(name, model) => onSaveModel(conversation.id, name, model)}
+        />
         <span className="node__tabs">
           <button
             className={`node__tab${tab === 'chat' ? ' node__tab--active' : ''}`}
@@ -247,16 +254,6 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
             </>
           )}
         </div>
-      )}
-
-      {/* Which model each provider runs on. Changing it drops that provider's
-          session, so the next answer really comes from the model named here. */}
-      {tab === 'chat' && (
-        <ModelPicker
-          providers={providers}
-          chosen={conversation.models ?? {}}
-          onSave={(name, model) => onSaveModel(conversation.id, name, model)}
-        />
       )}
 
       {tab === 'chat' && (
