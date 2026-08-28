@@ -85,6 +85,11 @@ type ExportedNode struct {
 	IntervalSeconds int    `json:"interval_seconds,omitempty"`
 	AtTime          string `json:"at_time,omitempty"`
 	Enabled         bool   `json:"enabled,omitempty"`
+
+	// A gate's condition.
+	GateMode      string `json:"gate_mode,omitempty"`
+	Pattern       string `json:"pattern,omitempty"`
+	CaseSensitive bool   `json:"case_sensitive,omitempty"`
 }
 
 type ExportedTurn struct {
@@ -102,8 +107,10 @@ type ExportedResponse struct {
 }
 
 type ExportedLink struct {
-	SourceNodeID int64  `json:"source_node_id"`
-	TargetNodeID int64  `json:"target_node_id"`
+	SourceNodeID int64 `json:"source_node_id"`
+	TargetNodeID int64 `json:"target_node_id"`
+	// SourceHandle is the port the link left by; only a gate has more than one.
+	SourceHandle string `json:"source_handle,omitempty"`
 	Mode         string `json:"mode"`
 	MaxRounds    int    `json:"max_rounds"`
 	UntilDone    bool   `json:"until_done"`
@@ -294,6 +301,31 @@ const (
 	// when a person presses it. Everything reachable from it is what it runs,
 	// which is what turns a board of cards into recurring work.
 	NodeTrigger = "trigger"
+	// NodeGate decides where a message goes next. It reads what arrived and
+	// sends it out of one of two ports, which is what lets a board branch on
+	// what actually happened rather than on how it was wired.
+	NodeGate = "gate"
+)
+
+// How a gate decides. All four read the text that arrived; none of them ask a
+// provider, so a gate costs nothing and always answers the same way twice.
+const (
+	// GateContains passes when the pattern appears in the message.
+	GateContains = "contains"
+	// GateMissing passes when it does not.
+	GateMissing = "missing"
+	// GateMatches passes when a regular expression matches.
+	GateMatches = "matches"
+	// GateNotEmpty passes on any message with text in it, which is how a gate
+	// is used as a plain stop before the rest of a flow.
+	GateNotEmpty = "not_empty"
+)
+
+// The two ways out of a gate. A link carries the port it left by, so one gate
+// can send the passing case one way and everything else another.
+const (
+	GatePass = "pass"
+	GateElse = "else"
 )
 
 // How a trigger decides it is due.
@@ -453,6 +485,38 @@ type Trigger struct {
 	Working bool `json:"working"`
 }
 
+// Gate is a decision point on the board. It reads the message that reached it
+// and sends it out of its pass port or its else port.
+type Gate struct {
+	ID     int64  `json:"id"`
+	NodeID int64  `json:"node_id"`
+	Title  string `json:"title"`
+	Mode   string `json:"mode"`
+	// Pattern is the text or expression the mode reads. Unused by not_empty.
+	Pattern string `json:"pattern"`
+	// CaseSensitive is off by default: a card writing "TAMAM" means the same
+	// thing as one writing "tamam".
+	CaseSensitive bool `json:"case_sensitive"`
+	// LastResult is what the gate decided the last time something reached it,
+	// so a board can be read after the fact: "pass", "else", or empty.
+	LastResult string `json:"last_result,omitempty"`
+	LastSeenAt string `json:"last_seen_at,omitempty"`
+}
+
+type NewGate struct {
+	Title string  `json:"title"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+}
+
+// GateConfig replaces everything about a gate in one write.
+type GateConfig struct {
+	Title         string `json:"title"`
+	Mode          string `json:"mode"`
+	Pattern       string `json:"pattern"`
+	CaseSensitive bool   `json:"case_sensitive"`
+}
+
 type NewTrigger struct {
 	Title string  `json:"title"`
 	X     float64 `json:"x"`
@@ -477,6 +541,7 @@ type CanvasNode struct {
 	ConversationID *int64  `json:"conversation_id,omitempty"`
 	PipelineID     *int64  `json:"pipeline_id,omitempty"`
 	TriggerID      *int64  `json:"trigger_id,omitempty"`
+	GateID         *int64  `json:"gate_id,omitempty"`
 	X              float64 `json:"x"`
 	Y              float64 `json:"y"`
 	Width          float64 `json:"width"`
@@ -582,9 +647,12 @@ type NewNote struct {
 // CanvasLink relays a card's finished answer into another card as its next
 // message, which is how two providers hold a conversation with each other.
 type CanvasLink struct {
-	ID        int64  `json:"id"`
-	SourceID  int64  `json:"source_id"`
-	TargetID  int64  `json:"target_id"`
+	ID       int64 `json:"id"`
+	SourceID int64 `json:"source_id"`
+	TargetID int64 `json:"target_id"`
+	// SourceHandle is the port the link leaves by. Empty for every ordinary
+	// card, which has only one way out; a gate uses it to tell its two apart.
+	SourceHandle string `json:"source_handle,omitempty"`
 	Mode      string `json:"mode"`
 	MaxRounds int    `json:"max_rounds"`
 	UntilDone bool   `json:"until_done"`
@@ -613,6 +681,9 @@ type LinkOptions struct {
 	// Briefing is the shared goal, given to each card once before its first
 	// relayed message rather than repeated on every hop.
 	Briefing string `json:"briefing,omitempty"`
+	// SourceHandle is the port the link leaves by. Only a gate has more than
+	// one; anything else leaves this empty.
+	SourceHandle string `json:"source_handle,omitempty"`
 }
 
 // Normalised fills in defaults and clamps the round budget.
@@ -634,6 +705,13 @@ func (o LinkOptions) Normalised() LinkOptions {
 	if len(o.Briefing) > maxBriefingBytes {
 		o.Briefing = o.Briefing[:maxBriefingBytes]
 	}
+	switch o.SourceHandle {
+	case GatePass, GateElse:
+	default:
+		// Anything unrecognised means "the one way out", which is what every
+		// node but a gate has.
+		o.SourceHandle = ""
+	}
 	return o
 }
 
@@ -642,8 +720,9 @@ func (o LinkOptions) Normalised() LinkOptions {
 const maxBriefingBytes = 4000
 
 type NewLink struct {
-	SourceID  int64  `json:"source_id"`
-	TargetID  int64  `json:"target_id"`
+	SourceID     int64  `json:"source_id"`
+	TargetID     int64  `json:"target_id"`
+	SourceHandle string `json:"source_handle,omitempty"`
 	Mode      string `json:"mode,omitempty"`
 	MaxRounds int    `json:"max_rounds,omitempty"`
 	UntilDone bool   `json:"until_done,omitempty"`
@@ -662,6 +741,8 @@ type Canvas struct {
 	Joins []JoinNode `json:"joins"`
 	// Triggers are the starting points that fire on their own.
 	Triggers []Trigger `json:"triggers"`
+	// Gates are the decision points: what each one reads and what it saw last.
+	Gates []Gate `json:"gates"`
 	// Runs are the journeys still in flight: what the board is busy with, as
 	// one thing per message someone sent rather than one per card.
 	Runs []FlowRun `json:"runs"`

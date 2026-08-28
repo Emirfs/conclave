@@ -320,19 +320,24 @@ type relayTarget struct {
 	maxRounds    int
 	untilDone    bool
 	briefing     string
+	// sourceHandle is the port this link left by. Only a gate has more than
+	// one, and only a gate reads this.
+	sourceHandle string
 }
 
 // relayTargets lists what a node hands its answer to. Links are read from the
 // node rather than from the conversation, because a join has no conversation
-// and would otherwise be invisible to the relay.
-func (s *Store) relayTargets(ctx context.Context, nodeID int64) ([]relayTarget, error) {
+// and would otherwise be invisible to the relay. A handle narrows the list to
+// one way out, which is how a gate sends its two cases different ways.
+func (s *Store) relayTargets(ctx context.Context, nodeID int64, handle string) ([]relayTarget, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT target.id, target.kind, COALESCE(target.body, ''), COALESCE(target.conversation_id, 0),
-       link.mode, link.max_rounds, link.until_done, link.briefing
+       link.mode, link.max_rounds, link.until_done, link.briefing,
+       COALESCE(link.source_handle, '')
 FROM canvas_links link
 JOIN canvas_nodes target ON target.id = link.target_id
-WHERE link.source_id = ?
-ORDER BY target.id`, nodeID)
+WHERE link.source_id = ? AND (? = '' OR COALESCE(link.source_handle, '') = ?)
+ORDER BY target.id`, nodeID, handle, handle)
 	if err != nil {
 		return nil, err
 	}
@@ -341,10 +346,11 @@ ORDER BY target.id`, nodeID)
 	for rows.Next() {
 		var item relayTarget
 		if err := rows.Scan(&item.nodeID, &item.kind, &item.title, &item.conversation,
-			&item.mode, &item.maxRounds, &item.untilDone, &item.briefing); err != nil {
+			&item.mode, &item.maxRounds, &item.untilDone, &item.briefing,
+			&item.sourceHandle); err != nil {
 			return nil, err
 		}
-		if item.kind != domain.NodeJoin && item.conversation == 0 {
+		if item.kind != domain.NodeJoin && item.kind != domain.NodeGate && item.conversation == 0 {
 			// A note or a pipeline is not something an answer can be said to.
 			continue
 		}
@@ -384,11 +390,11 @@ WHERE t.flow_run_id = ? AND r.status IN (?, ?)`,
 
 // linkMustBeOneWay reports whether a link can only ever run one way. A return
 // link, and an exchange that runs until it is done, need two cards that can
-// answer; a join waits and a trigger only ever starts things.
+// answer; a join waits, a gate decides, and a trigger only ever starts things.
 func (s *Store) linkMustBeOneWay(ctx context.Context, sourceID, targetID int64) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM canvas_nodes WHERE id IN (?, ?) AND kind IN (?, ?)",
-		sourceID, targetID, domain.NodeJoin, domain.NodeTrigger).Scan(&count)
+		"SELECT COUNT(*) FROM canvas_nodes WHERE id IN (?, ?) AND kind IN (?, ?, ?)",
+		sourceID, targetID, domain.NodeJoin, domain.NodeTrigger, domain.NodeGate).Scan(&count)
 	return count > 0, err
 }

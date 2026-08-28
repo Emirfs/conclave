@@ -53,6 +53,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/canvas/conversations", s.createConversation)
 	mux.HandleFunc("POST /v1/canvas/notes", s.createNote)
 	mux.HandleFunc("POST /v1/canvas/joins", s.createJoin)
+	mux.HandleFunc("POST /v1/canvas/gates", s.createGate)
+	mux.HandleFunc("PUT /v1/canvas/gates/{id}", s.setGate)
 	mux.HandleFunc("POST /v1/canvas/triggers", s.createTrigger)
 	mux.HandleFunc("PUT /v1/canvas/triggers/{id}", s.setTrigger)
 	mux.HandleFunc("POST /v1/canvas/triggers/{id}/fire", s.fireTrigger)
@@ -315,6 +317,49 @@ func (s *Server) createJoin(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	writeJSON(response, http.StatusCreated, join)
+}
+
+// createGate puts a decision point on the board. It starts as a plain "is
+// there anything here" check, the one condition useful before a pattern exists.
+func (s *Server) createGate(response http.ResponseWriter, request *http.Request) {
+	var input domain.NewGate
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	gate, err := s.store.CreateGate(request.Context(), input)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, gate)
+}
+
+// setGate replaces a gate's condition. A pattern that will not compile is
+// refused here, not when a run reaches the gate and stops for no visible reason.
+func (s *Server) setGate(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("gate id must be a positive integer"))
+		return
+	}
+	var input domain.GateConfig
+	if !decodeJSON(response, request, 16<<10, &input) {
+		return
+	}
+	if utf8.RuneCountInString(input.Pattern) > 2000 {
+		writeError(response, http.StatusBadRequest,
+			errors.New("a gate condition is limited to 2000 characters"))
+		return
+	}
+	if err := s.store.SetGate(request.Context(), id, input); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("gate not found"))
+			return
+		}
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }
 
 // createTrigger puts a starting point on the board. It arrives switched off
@@ -871,6 +916,7 @@ func (s *Server) createLink(response http.ResponseWriter, request *http.Request)
 	options := domain.LinkOptions{
 		Mode: input.Mode, MaxRounds: input.MaxRounds,
 		UntilDone: input.UntilDone, Briefing: input.Briefing,
+		SourceHandle: input.SourceHandle,
 	}
 	if input.Pair {
 		// Pairing links both ways, so the two cards answer each other.
@@ -1135,6 +1181,17 @@ func (c *Client) CreateJoin(ctx context.Context, input domain.NewNote) (domain.C
 	var node domain.CanvasNode
 	err := c.do(ctx, http.MethodPost, "/v1/canvas/joins", input, &node, http.StatusCreated)
 	return node, err
+}
+
+func (c *Client) CreateGate(ctx context.Context, input domain.NewGate) (domain.Gate, error) {
+	var gate domain.Gate
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/gates", input, &gate, http.StatusCreated)
+	return gate, err
+}
+
+func (c *Client) SetGate(ctx context.Context, id int64, config domain.GateConfig) error {
+	path := "/v1/canvas/gates/" + strconv.FormatInt(id, 10)
+	return c.do(ctx, http.MethodPut, path, config, nil, http.StatusNoContent)
 }
 
 func (c *Client) CreateTrigger(ctx context.Context, input domain.NewTrigger) (domain.Trigger, error) {

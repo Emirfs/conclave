@@ -16,6 +16,8 @@ export function CheckUpdate():Promise<update.Status>;
 
 export function CreateConversation(arg1:domain.NewConversation):Promise<domain.Conversation>;
 
+export function CreateGate(arg1:domain.NewGate):Promise<domain.Gate>;
+
 export function CreateJoin(arg1:domain.NewNote):Promise<domain.CanvasNode>;
 
 export function CreateNote(arg1:domain.NewNote):Promise<domain.CanvasNode>;
@@ -38,7 +40,7 @@ export function FireTrigger(arg1:number):Promise<number>;
 
 export function ImportBoard():Promise<domain.ImportResult>;
 
-export function LinkNodes(arg1:number,arg2:number):Promise<domain.CanvasLink>;
+export function LinkNodes(arg1:number,arg2:number,arg3:string):Promise<domain.CanvasLink>;
 
 export function OpenReleasePage(arg1:string):Promise<void>;
 
@@ -57,6 +59,8 @@ export function ResumeDialogue(arg1:number):Promise<void>;
 export function Search(arg1:string,arg2:number):Promise<Array<domain.SearchHit>>;
 
 export function SendTurn(arg1:number,arg2:string):Promise<void>;
+
+export function SetGate(arg1:number,arg2:domain.GateConfig):Promise<void>;
 
 export function SetLoop(arg1:number,arg2:domain.LoopConfig):Promise<void>;
 

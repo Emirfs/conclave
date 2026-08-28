@@ -2975,3 +2975,109 @@
   color: var(--text-muted);
   font-size: var(--text-xs);
 }
+
+/* ---------- gate card ---------- */
+
+.node--gate {
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.node--gate.node--selected {
+  border-color: var(--line-strong);
+}
+
+.node__gate-title {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.node__gate-title:focus {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--surface-input);
+}
+
+.gate__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+/* The condition reads as one sentence down the card: "gelen mesaj · şunu
+   içeriyorsa · HATA". Splitting it into labelled fields would say the same
+   thing in more words. */
+.gate__lead {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.gate__mode,
+.gate__pattern {
+  padding: 4px 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.gate__pattern {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.gate__case {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.gate__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 12px 10px;
+}
+
+/* The two ports are named on the card, beside the handles they belong to, so
+   the board says which line carries which case without being clicked. */
+.gate__port {
+  padding: 1px 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* What the gate decided last time it saw a message. */
+.gate__port--hit.gate__port--pass {
+  border-color: color-mix(in srgb, var(--positive) 50%, var(--line));
+  color: var(--positive);
+}
+
+.gate__port--hit.gate__port--else {
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--line));
+  color: var(--warning);
+}
+
+.node__port--pass {
+  border-color: var(--positive);
+}
+
+.node__port--else {
+  border-color: var(--warning);
+}

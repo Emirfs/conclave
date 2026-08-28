@@ -32,6 +32,32 @@ export namespace domain {
 	        this.started_at = source["started_at"];
 	    }
 	}
+	export class Gate {
+	    id: number;
+	    node_id: number;
+	    title: string;
+	    mode: string;
+	    pattern: string;
+	    case_sensitive: boolean;
+	    last_result?: string;
+	    last_seen_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Gate(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.node_id = source["node_id"];
+	        this.title = source["title"];
+	        this.mode = source["mode"];
+	        this.pattern = source["pattern"];
+	        this.case_sensitive = source["case_sensitive"];
+	        this.last_result = source["last_result"];
+	        this.last_seen_at = source["last_seen_at"];
+	    }
+	}
 	export class Trigger {
 	    id: number;
 	    node_id: number;
@@ -90,6 +116,7 @@ export namespace domain {
 	    id: number;
 	    source_id: number;
 	    target_id: number;
+	    source_handle?: string;
 	    mode: string;
 	    max_rounds: number;
 	    until_done: boolean;
@@ -104,6 +131,7 @@ export namespace domain {
 	        this.id = source["id"];
 	        this.source_id = source["source_id"];
 	        this.target_id = source["target_id"];
+	        this.source_handle = source["source_handle"];
 	        this.mode = source["mode"];
 	        this.max_rounds = source["max_rounds"];
 	        this.until_done = source["until_done"];
@@ -116,6 +144,7 @@ export namespace domain {
 	    conversation_id?: number;
 	    pipeline_id?: number;
 	    trigger_id?: number;
+	    gate_id?: number;
 	    x: number;
 	    y: number;
 	    width: number;
@@ -135,6 +164,7 @@ export namespace domain {
 	        this.conversation_id = source["conversation_id"];
 	        this.pipeline_id = source["pipeline_id"];
 	        this.trigger_id = source["trigger_id"];
+	        this.gate_id = source["gate_id"];
 	        this.x = source["x"];
 	        this.y = source["y"];
 	        this.width = source["width"];
@@ -467,6 +497,7 @@ export namespace domain {
 	    links: CanvasLink[];
 	    joins: JoinNode[];
 	    triggers: Trigger[];
+	    gates: Gate[];
 	    runs: FlowRun[];
 	
 	    static createFrom(source: any = {}) {
@@ -481,6 +512,7 @@ export namespace domain {
 	        this.links = this.convertValues(source["links"], CanvasLink);
 	        this.joins = this.convertValues(source["joins"], JoinNode);
 	        this.triggers = this.convertValues(source["triggers"], Trigger);
+	        this.gates = this.convertValues(source["gates"], Gate);
 	        this.runs = this.convertValues(source["runs"], FlowRun);
 	    }
 	
@@ -536,6 +568,25 @@ export namespace domain {
 	
 	
 	
+	
+	export class GateConfig {
+	    title: string;
+	    mode: string;
+	    pattern: string;
+	    case_sensitive: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new GateConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.mode = source["mode"];
+	        this.pattern = source["pattern"];
+	        this.case_sensitive = source["case_sensitive"];
+	    }
+	}
 	export class ImportResult {
 	    nodes: number;
 	    links: number;
@@ -586,6 +637,22 @@ export namespace domain {
 	        this.providers = source["providers"];
 	        this.project_path = source["project_path"];
 	        this.access = source["access"];
+	        this.x = source["x"];
+	        this.y = source["y"];
+	    }
+	}
+	export class NewGate {
+	    title: string;
+	    x: number;
+	    y: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new NewGate(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
 	        this.x = source["x"];
 	        this.y = source["y"];
 	    }

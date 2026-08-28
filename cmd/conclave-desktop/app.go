@@ -99,6 +99,29 @@ func (a *App) CreateJoin(input domain.NewNote) (domain.CanvasNode, error) {
 	return client.CreateJoin(ctx, input)
 }
 
+// CreateGate puts a decision point on the board: a card that reads what reached
+// it and sends it out of one of two ports.
+func (a *App) CreateGate(input domain.NewGate) (domain.Gate, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.Gate{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CreateGate(ctx, input)
+}
+
+// SetGate replaces a gate's condition.
+func (a *App) SetGate(id int64, config domain.GateConfig) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.SetGate(ctx, id, config)
+}
+
 // CreateTrigger puts a starting point on the board: a card that fires on a
 // timer, at a time of day, or when someone presses it.
 func (a *App) CreateTrigger(input domain.NewTrigger) (domain.Trigger, error) {
@@ -214,14 +237,16 @@ func (a *App) FileDiff(conversationID int64, path string) (vcs.Diff, error) {
 }
 
 // LinkNodes relays the source card's answers into the target card.
-func (a *App) LinkNodes(sourceID, targetID int64) (domain.CanvasLink, error) {
+func (a *App) LinkNodes(sourceID, targetID int64, sourceHandle string) (domain.CanvasLink, error) {
 	client, err := a.client()
 	if err != nil {
 		return domain.CanvasLink{}, err
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
-	return client.CreateLink(ctx, domain.NewLink{SourceID: sourceID, TargetID: targetID})
+	return client.CreateLink(ctx, domain.NewLink{
+		SourceID: sourceID, TargetID: targetID, SourceHandle: sourceHandle,
+	})
 }
 
 // PairNodes links two cards both ways so they answer each other. The briefing

@@ -101,6 +101,11 @@ export function App() {
     void canvas.addTrigger({ title: 'Tetikleyici', ...scatter() } as domain.NewTrigger)
   }, [canvas])
 
+  // A gate reads the message that reaches it and picks which way it goes on.
+  const addGate = useCallback(() => {
+    void canvas.addGate({ title: 'Kapı', ...scatter() } as domain.NewGate)
+  }, [canvas])
+
   const addGroup = useCallback(() => {
     if (ready.length === 0) return
     void canvas.addConversation({
@@ -134,6 +139,9 @@ export function App() {
             </button>
             <button className="button button--block" onClick={addTrigger}>
               Tetikleyici
+            </button>
+            <button className="button button--block" onClick={addGate}>
+              Kapı
             </button>
           </section>
           <section className="rail__group">

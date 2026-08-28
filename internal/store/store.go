@@ -320,6 +320,23 @@ CREATE TABLE triggers (
 ALTER TABLE canvas_nodes ADD COLUMN trigger_id INTEGER REFERENCES triggers(id) ON DELETE CASCADE;
 CREATE INDEX triggers_due_idx ON triggers(enabled, due_at);
 `,
+	// 18: a gate reads the message that reached it and sends it out of one of
+	// two ports. Links therefore have to remember which port they left by:
+	// without that, both ways out of a gate would be the same way.
+	`
+CREATE TABLE gates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT 'contains',
+    pattern TEXT NOT NULL DEFAULT '',
+    case_sensitive INTEGER NOT NULL DEFAULT 0,
+    last_result TEXT NOT NULL DEFAULT '',
+    last_seen_at TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+ALTER TABLE canvas_nodes ADD COLUMN gate_id INTEGER REFERENCES gates(id) ON DELETE CASCADE;
+ALTER TABLE canvas_links ADD COLUMN source_handle TEXT NOT NULL DEFAULT '';
+`,
 }
 
 func (s *Store) init() error {
@@ -924,6 +941,8 @@ func (s *Store) stages(ctx context.Context, runID int64) ([]domain.Stage, error)
 const transcriptLimit = 24
 
 const (
+	gateWidth          = 300
+	gateHeight         = 230
 	triggerWidth       = 320
 	triggerHeight      = 300
 	conversationWidth  = 420
@@ -1098,6 +1117,7 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 		Links:         []domain.CanvasLink{},
 		Joins:         []domain.JoinNode{},
 		Triggers:      []domain.Trigger{},
+		Gates:         []domain.Gate{},
 		Runs:          []domain.FlowRun{},
 	}
 	conversations, err := s.listConversations(ctx)
@@ -1147,6 +1167,11 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 		return canvas, err
 	}
 	canvas.Triggers = triggers
+	gates, err := s.listGates(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Gates = gates
 	runs, err := s.ActiveFlowRuns(ctx)
 	if err != nil {
 		return canvas, err
@@ -1224,7 +1249,8 @@ func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, e
 
 func (s *Store) listCanvasNodes(ctx context.Context) ([]domain.CanvasNode, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, kind, conversation_id, pipeline_id, trigger_id, x, y, width, height, z, color, body
+SELECT id, kind, conversation_id, pipeline_id, trigger_id, gate_id,
+       x, y, width, height, z, color, body
 FROM canvas_nodes ORDER BY z, id`)
 	if err != nil {
 		return nil, err
@@ -1233,8 +1259,8 @@ FROM canvas_nodes ORDER BY z, id`)
 	nodes := []domain.CanvasNode{}
 	for rows.Next() {
 		var node domain.CanvasNode
-		var conversationID, pipelineID, triggerID sql.NullInt64
-		if err := rows.Scan(&node.ID, &node.Kind, &conversationID, &pipelineID, &triggerID,
+		var conversationID, pipelineID, triggerID, gateID sql.NullInt64
+		if err := rows.Scan(&node.ID, &node.Kind, &conversationID, &pipelineID, &triggerID, &gateID,
 			&node.X, &node.Y, &node.Width, &node.Height, &node.Z, &node.Color, &node.Body); err != nil {
 			return nil, err
 		}
@@ -1249,6 +1275,10 @@ FROM canvas_nodes ORDER BY z, id`)
 		if triggerID.Valid {
 			value := triggerID.Int64
 			node.TriggerID = &value
+		}
+		if gateID.Valid {
+			value := gateID.Int64
+			node.GateID = &value
 		}
 		nodes = append(nodes, node)
 	}
@@ -1311,10 +1341,10 @@ func (s *Store) DeleteCanvasNode(ctx context.Context, id int64) error {
 	}
 	defer tx.Rollback()
 	var kind string
-	var conversationID, pipelineID, triggerID sql.NullInt64
+	var conversationID, pipelineID, triggerID, gateID sql.NullInt64
 	err = tx.QueryRowContext(ctx,
-		"SELECT kind, conversation_id, pipeline_id, trigger_id FROM canvas_nodes WHERE id = ?", id).
-		Scan(&kind, &conversationID, &pipelineID, &triggerID)
+		"SELECT kind, conversation_id, pipeline_id, trigger_id, gate_id FROM canvas_nodes WHERE id = ?", id).
+		Scan(&kind, &conversationID, &pipelineID, &triggerID, &gateID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return sql.ErrNoRows
 	}
@@ -1343,6 +1373,12 @@ func (s *Store) DeleteCanvasNode(ctx context.Context, id int64) error {
 	if kind == domain.NodeTrigger && triggerID.Valid {
 		if _, err := tx.ExecContext(ctx,
 			"DELETE FROM triggers WHERE id = ?", triggerID.Int64); err != nil {
+			return err
+		}
+	}
+	if kind == domain.NodeGate && gateID.Valid {
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM gates WHERE id = ?", gateID.Int64); err != nil {
 			return err
 		}
 	}
@@ -1416,18 +1452,21 @@ func (s *Store) CreateLink(ctx context.Context, sourceID, targetID int64, option
 	}
 	options = options.Normalised()
 	// A link carries an answer, so both ends must be something an answer can
-	// travel through: a card that speaks, or a join that waits for several.
+	// travel through: a card that speaks, a join that waits for several, a
+	// trigger that starts them, or a gate that decides where they go.
 	var linkable int
 	err := s.db.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM canvas_nodes
 WHERE id IN (?, ?)
-  AND ((kind = ? AND conversation_id IS NOT NULL) OR kind IN (?, ?))`,
-		sourceID, targetID, domain.NodeConversation, domain.NodeJoin, domain.NodeTrigger).Scan(&linkable)
+  AND ((kind = ? AND conversation_id IS NOT NULL) OR kind IN (?, ?, ?))`,
+		sourceID, targetID, domain.NodeConversation,
+		domain.NodeJoin, domain.NodeTrigger, domain.NodeGate).Scan(&linkable)
 	if err != nil {
 		return domain.CanvasLink{}, err
 	}
 	if linkable != 2 {
-		return domain.CanvasLink{}, errors.New("only conversation cards, joins and triggers can be linked")
+		return domain.CanvasLink{},
+			errors.New("only conversation cards, joins, triggers and gates can be linked")
 	}
 	// A trigger starts a flow; nothing flows back into one. Accepting such a
 	// link would draw a line on the board that never carries anything.
@@ -1442,14 +1481,16 @@ WHERE id IN (?, ?)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := s.db.ExecContext(ctx, `
-INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done, briefing)
-VALUES(?, ?, ?, ?, ?, ?, ?)
+INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done, briefing, source_handle)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(source_id, target_id) DO UPDATE SET
     mode = excluded.mode,
     max_rounds = excluded.max_rounds,
     until_done = excluded.until_done,
-    briefing = excluded.briefing`,
-		sourceID, targetID, now, options.Mode, options.MaxRounds, options.UntilDone, options.Briefing)
+    briefing = excluded.briefing,
+    source_handle = excluded.source_handle`,
+		sourceID, targetID, now, options.Mode, options.MaxRounds, options.UntilDone,
+		options.Briefing, options.SourceHandle)
 	if err != nil {
 		return domain.CanvasLink{}, err
 	}
@@ -1567,7 +1608,9 @@ func (s *Store) DeleteLink(ctx context.Context, id int64) error {
 
 func (s *Store) listLinks(ctx context.Context) ([]domain.CanvasLink, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, source_id, target_id, mode, max_rounds, until_done, COALESCE(briefing, '') FROM canvas_links ORDER BY id")
+		`SELECT id, source_id, target_id, mode, max_rounds, until_done,
+		        COALESCE(briefing, ''), COALESCE(source_handle, '')
+		 FROM canvas_links ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -1575,7 +1618,8 @@ func (s *Store) listLinks(ctx context.Context) ([]domain.CanvasLink, error) {
 	links := []domain.CanvasLink{}
 	for rows.Next() {
 		var link domain.CanvasLink
-		if err := rows.Scan(&link.ID, &link.SourceID, &link.TargetID, &link.Mode, &link.MaxRounds, &link.UntilDone, &link.Briefing); err != nil {
+		if err := rows.Scan(&link.ID, &link.SourceID, &link.TargetID, &link.Mode,
+			&link.MaxRounds, &link.UntilDone, &link.Briefing, &link.SourceHandle); err != nil {
 			return nil, err
 		}
 		links = append(links, link)
@@ -1699,11 +1743,14 @@ type relaySource struct {
 	payload        string
 	depth          int
 	hop            int
+	// handle narrows which way out of the node is being followed. Only a gate
+	// sets it; everything else has one way out and leaves it empty.
+	handle string
 }
 
-// maxJoinHops bounds a chain of waiting points. Joins produce no turns, so the
-// run budget never sees them; a board wired join to join in a circle would
-// otherwise recurse without ever spending a step.
+// maxJoinHops bounds a chain of nodes that produce no turns of their own —
+// joins and gates. The run budget never sees them, so a board wired in a circle
+// through them would otherwise recurse without ever spending a step.
 const maxJoinHops = 8
 
 // relayFrom hands one answer to everything a node links to. A conversation
@@ -1713,13 +1760,45 @@ func (s *Store) relayFrom(ctx context.Context, src relaySource) (int, error) {
 	if src.nodeID == 0 || src.hop > maxJoinHops {
 		return 0, nil
 	}
-	targets, err := s.relayTargets(ctx, src.nodeID)
+	targets, err := s.relayTargets(ctx, src.nodeID, src.handle)
 	if err != nil {
 		return 0, err
 	}
 
 	delivered := 0
 	for _, target := range targets {
+		if target.kind == domain.NodeGate {
+			// A gate reads what arrived and picks the way out. The message
+			// itself is passed on unchanged: a decision point is not a speaker.
+			gate, err := s.gateOfNode(ctx, target.nodeID)
+			if err != nil {
+				return delivered, err
+			}
+			passed := gateAllows(gate, src.payload)
+			if err := s.recordGateDecision(ctx, gate.ID, passed); err != nil {
+				return delivered, err
+			}
+			way := domain.GateElse
+			if passed {
+				way = domain.GatePass
+			}
+			count, err := s.relayFrom(ctx, relaySource{
+				runID:          src.runID,
+				nodeID:         target.nodeID,
+				conversationID: src.conversationID,
+				title:          src.title,
+				turnKind:       src.turnKind,
+				payload:        src.payload,
+				depth:          src.depth,
+				hop:            src.hop + 1,
+				handle:         way,
+			})
+			delivered += count
+			if err != nil {
+				return delivered, err
+			}
+			continue
+		}
 		if target.kind == domain.NodeJoin {
 			combined, ready, err := s.deliverToJoin(
 				ctx, src.runID, target.nodeID, src.nodeID, src.title, src.payload)

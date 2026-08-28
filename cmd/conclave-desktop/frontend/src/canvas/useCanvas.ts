@@ -6,6 +6,7 @@ import {
   CancelConversation,
   Canvas as LoadCanvas,
   CreateConversation,
+  CreateGate,
   CreateJoin,
   CreateNote,
   CreatePipeline,
@@ -27,6 +28,7 @@ import {
   SetLoop,
   SetLoopRunning,
   SetModel,
+  SetGate,
   SetRole,
   SetTrigger,
   StartPipeline,
@@ -53,6 +55,11 @@ export type PipelineNodeData = {
   pipeline: domain.Pipeline
 }
 
+export type GateNodeData = {
+  kind: 'gate'
+  gate: domain.Gate
+}
+
 export type TriggerNodeData = {
   kind: 'trigger'
   trigger: domain.Trigger
@@ -68,7 +75,12 @@ export type JoinNodeData = {
 }
 
 export type BoardNode = Node<
-  ConversationNodeData | NoteNodeData | PipelineNodeData | JoinNodeData | TriggerNodeData
+  | ConversationNodeData
+  | NoteNodeData
+  | PipelineNodeData
+  | JoinNodeData
+  | TriggerNodeData
+  | GateNodeData
 >
 
 /** How long a drag or keystroke settles before it is written to the daemon. */
@@ -86,6 +98,7 @@ function toBoardNode(
   pipelines: Map<number, domain.Pipeline>,
   joins: Map<number, domain.JoinNode>,
   triggers: Map<number, domain.Trigger>,
+  gates: Map<number, domain.Gate>,
 ): BoardNode | null {
   const shared = {
     id: String(node.id),
@@ -103,6 +116,13 @@ function toBoardNode(
       type: 'note',
       data: { kind: 'note', body: node.body ?? '', color: node.color ?? '' },
     }
+  }
+  if (node.kind === 'gate') {
+    const gate = node.gate_id ? gates.get(node.gate_id) : undefined
+    // Same rule as a conversation node: a card with no record behind it is
+    // corrupt state, not something to draw an empty frame for.
+    if (!gate) return null
+    return { ...shared, type: 'gate', data: { kind: 'gate', gate } }
   }
   if (node.kind === 'trigger') {
     const trigger = node.trigger_id ? triggers.get(node.trigger_id) : undefined
@@ -140,6 +160,10 @@ export const LINK_MODES: Record<string, string> = {
 }
 
 function linkLabel(link: domain.CanvasLink): string {
+  // The two lines out of a gate are otherwise identical to look at, and which
+  // one carries the passing case is the whole point of drawing them.
+  if (link.source_handle === 'pass') return 'geçerse'
+  if (link.source_handle === 'else') return 'geçmezse'
   return link.until_done
     ? `${LINK_MODES[link.mode] ?? link.mode} · bitene kadar`
     : `${LINK_MODES[link.mode] ?? link.mode} · ${link.max_rounds}`
@@ -171,6 +195,8 @@ export function useCanvas(connected: boolean) {
           if (run.status === 'queued' || run.status === 'running') working = true
         }
       }
+      const gates = new Map<number, domain.Gate>()
+      for (const item of canvas.gates ?? []) gates.set(item.id, item)
       const triggers = new Map<number, domain.Trigger>()
       for (const item of canvas.triggers ?? []) triggers.set(item.id, item)
       const joins = new Map<number, domain.JoinNode>()
@@ -258,7 +284,7 @@ export function useCanvas(connected: boolean) {
         return mappedEdges.map((edge) => ({ ...edge, selected: local.get(edge.id)?.selected }))
       })
       const mapped = (canvas.nodes ?? [])
-        .map((node) => toBoardNode(node, conversations, pipelines, joins, triggers))
+        .map((node) => toBoardNode(node, conversations, pipelines, joins, triggers, gates))
         .filter((node): node is BoardNode => node !== null)
       setNodes((current) => {
         const local = new Map(current.map((node) => [node.id, node]))
@@ -347,6 +373,34 @@ export function useCanvas(connected: boolean) {
         await CreateNote(input)
       } catch (cause) {
         setError(`Not oluşturulamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  // A gate is created as a plain "is there anything here" check: the one
+  // condition that is useful before anyone has written a pattern.
+  const addGate = useCallback(
+    async (input: domain.NewGate) => {
+      try {
+        await CreateGate(input)
+      } catch (cause) {
+        setError(`Kapı oluşturulamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  const saveGate = useCallback(
+    async (gateID: number, config: domain.GateConfig) => {
+      try {
+        await SetGate(gateID, config)
+      } catch (cause) {
+        setError(`Kapı kaydedilemedi: ${cause}`)
         return
       }
       await load()
@@ -463,9 +517,9 @@ export function useCanvas(connected: boolean) {
   )
 
   const link = useCallback(
-    async (sourceID: string, targetID: string) => {
+    async (sourceID: string, targetID: string, sourceHandle = '') => {
       try {
-        await LinkNodes(Number(sourceID), Number(targetID))
+        await LinkNodes(Number(sourceID), Number(targetID), sourceHandle)
       } catch (cause) {
         setError(`Kartlar bağlanamadı: ${cause}`)
         return
@@ -816,7 +870,7 @@ export function useCanvas(connected: boolean) {
   return useMemo(
     () => ({
       nodes, setNodes, edges, error, clearError, deletingIds, loaded, load, patch,
-      runs, addJoin, stopRun, addTrigger, saveTrigger, fireTrigger,
+      runs, addJoin, stopRun, addTrigger, saveTrigger, fireTrigger, addGate, saveGate,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
       addPipeline, savePipeline, runPipeline, pickPipelineProject,
@@ -824,7 +878,7 @@ export function useCanvas(connected: boolean) {
       saveRole, saveModel, resumeDialogue, cancelConversation, search, assignRoles, branch,
     }),
     [nodes, edges, error, clearError, deletingIds, loaded, load, patch, runs, addJoin, stopRun,
-     addTrigger, saveTrigger, fireTrigger,
+     addTrigger, saveTrigger, fireTrigger, addGate, saveGate,
      addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
      saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, cancelConversation, search,

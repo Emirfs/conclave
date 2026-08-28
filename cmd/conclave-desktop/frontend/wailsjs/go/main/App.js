@@ -26,6 +26,10 @@ export function CreateConversation(arg1) {
   return window['go']['main']['App']['CreateConversation'](arg1);
 }
 
+export function CreateGate(arg1) {
+  return window['go']['main']['App']['CreateGate'](arg1);
+}
+
 export function CreateJoin(arg1) {
   return window['go']['main']['App']['CreateJoin'](arg1);
 }
@@ -70,8 +74,8 @@ export function ImportBoard() {
   return window['go']['main']['App']['ImportBoard']();
 }
 
-export function LinkNodes(arg1, arg2) {
-  return window['go']['main']['App']['LinkNodes'](arg1, arg2);
+export function LinkNodes(arg1, arg2, arg3) {
+  return window['go']['main']['App']['LinkNodes'](arg1, arg2, arg3);
 }
 
 export function OpenReleasePage(arg1) {
@@ -108,6 +112,10 @@ export function Search(arg1, arg2) {
 
 export function SendTurn(arg1, arg2) {
   return window['go']['main']['App']['SendTurn'](arg1, arg2);
+}
+
+export function SetGate(arg1, arg2) {
+  return window['go']['main']['App']['SetGate'](arg1, arg2);
 }
 
 export function SetLoop(arg1, arg2) {

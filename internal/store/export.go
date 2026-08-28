@@ -160,6 +160,10 @@ func (s *Store) ExportBoard(ctx context.Context) (domain.BoardExport, error) {
 	for _, item := range canvas.Triggers {
 		triggers[item.ID] = item
 	}
+	gates := make(map[int64]domain.Gate, len(canvas.Gates))
+	for _, item := range canvas.Gates {
+		gates[item.ID] = item
+	}
 
 	for _, node := range canvas.Nodes {
 		exported := domain.ExportedNode{
@@ -185,6 +189,15 @@ func (s *Store) ExportBoard(ctx context.Context) (domain.BoardExport, error) {
 			exported.Role = conversation.Role
 			exported.Models = conversation.Models
 			exported.Turns = exportTurns(turns)
+		case node.Kind == domain.NodeGate && node.GateID != nil:
+			gate, known := gates[*node.GateID]
+			if !known {
+				continue
+			}
+			exported.Title = gate.Title
+			exported.GateMode = gate.Mode
+			exported.Pattern = gate.Pattern
+			exported.CaseSensitive = gate.CaseSensitive
 		case node.Kind == domain.NodeTrigger && node.TriggerID != nil:
 			trigger, known := triggers[*node.TriggerID]
 			if !known {
@@ -211,7 +224,8 @@ func (s *Store) ExportBoard(ctx context.Context) (domain.BoardExport, error) {
 	for _, link := range canvas.Links {
 		export.Links = append(export.Links, domain.ExportedLink{
 			SourceNodeID: link.SourceID, TargetNodeID: link.TargetID,
-			Mode: link.Mode, MaxRounds: link.MaxRounds,
+			SourceHandle: link.SourceHandle,
+			Mode:         link.Mode, MaxRounds: link.MaxRounds,
 			UntilDone: link.UntilDone, Briefing: link.Briefing,
 		})
 	}
@@ -277,13 +291,14 @@ func (s *Store) ImportBoard(ctx context.Context, export domain.BoardExport, offs
 		options := domain.LinkOptions{
 			Mode: link.Mode, MaxRounds: link.MaxRounds,
 			UntilDone: link.UntilDone, Briefing: link.Briefing,
+			SourceHandle: link.SourceHandle,
 		}.Normalised()
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done, briefing)
-VALUES(?, ?, ?, ?, ?, ?, ?)
+INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done, briefing, source_handle)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(source_id, target_id) DO NOTHING`,
 			source, target, now, options.Mode, options.MaxRounds,
-			options.UntilDone, options.Briefing); err != nil {
+			options.UntilDone, options.Briefing, options.SourceHandle); err != nil {
 			return result, err
 		}
 		result.Links++
@@ -320,6 +335,31 @@ VALUES(?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), ?, ?, 
 INSERT INTO canvas_nodes(kind, x, y, width, height, z, color, body, updated_at)
 VALUES(?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), '', ?, ?)`,
 			domain.NodeJoin, x, y, width, height, node.Body, now)
+		if err != nil {
+			return 0, err
+		}
+		return result.LastInsertId()
+
+	case domain.NodeGate:
+		if width == 0 || height == 0 {
+			width, height = gateWidth, gateHeight
+		}
+		result, err := tx.ExecContext(ctx, `
+INSERT INTO gates(title, mode, pattern, case_sensitive, created_at)
+VALUES(?, ?, ?, ?, ?)`,
+			node.Title, gateMode(node.GateMode), node.Pattern,
+			boolToInt(node.CaseSensitive), now)
+		if err != nil {
+			return 0, err
+		}
+		gateID, err := result.LastInsertId()
+		if err != nil {
+			return 0, err
+		}
+		result, err = tx.ExecContext(ctx, `
+INSERT INTO canvas_nodes(kind, gate_id, x, y, width, height, z, updated_at)
+VALUES(?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), ?)`,
+			domain.NodeGate, gateID, x, y, width, height, now)
 		if err != nil {
 			return 0, err
 		}
@@ -494,4 +534,15 @@ func triggerInterval(seconds int) int {
 		return minInterval
 	}
 	return seconds
+}
+
+// gateMode falls back to the plainest condition for a file written by a newer
+// version, or a hand-edited one. An unrecognised condition must not become a
+// gate that decides on terms nobody can see.
+func gateMode(mode string) string {
+	switch mode {
+	case domain.GateContains, domain.GateMissing, domain.GateMatches, domain.GateNotEmpty:
+		return mode
+	}
+	return domain.GateNotEmpty
 }
