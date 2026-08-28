@@ -36,9 +36,15 @@ jobs:
           # kontrolu /releases/latest okur ve GitHub on surumleri oraya
           # koymaz; boylece beta yalnizca isteyene gider.
           $pre = if ($version -match '-') { 'true' } else { 'false' }
-          "tag=$tag"           | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "version=$version"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "prerelease=$pre"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          # Windows'un surum alanlari yalnizca sayi kabul ediyor: NSIS
+          # VIFileVersion'i X.X.X.X bekliyor ve "0.2.0-beta.1" onu bozuyor.
+          # Installer 0.2.0 der, ikilinin icine gomulu surum tam etiketi
+          # tasimaya devam eder.
+          $fileVersion = ($version -split '-')[0]
+          "tag=$tag"                   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$version"           | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "prerelease=$pre"            | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "fileversion=$fileVersion"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - uses: actions/setup-go@v5
         with:
@@ -80,11 +86,13 @@ jobs:
         shell: pwsh
         env:
           VERSION: ${{ steps.release.outputs.version }}
+          FILE_VERSION: ${{ steps.release.outputs.fileversion }}
         working-directory: cmd/conclave-desktop
         run: |
-          # Installer'in surum alanlari wails.json'dan okunuyor.
+          # Installer'in surum alanlari wails.json'dan okunuyor. Oraya sayisal
+          # surum gider; -ldflags ile gomulen tam etiket ise asagida.
           $config = Get-Content wails.json -Raw | ConvertFrom-Json
-          $config.info.productVersion = $env:VERSION
+          $config.info.productVersion = $env:FILE_VERSION
           $config | ConvertTo-Json -Depth 10 | Set-Content wails.json -Encoding utf8
           # Daemon installer'a da girecegi icin wails'in bin dizininde durmali.
           New-Item -ItemType Directory -Path build/bin -Force | Out-Null
