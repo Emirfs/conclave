@@ -22,7 +22,7 @@ AI coding CLIs are useful in isolation, but coordinating them usually means jugg
 - relays, discusses, or reviews completed answers through configurable canvas links;
 - pairs two cards for a bounded conversation or an explicit work-until-done exchange;
 - runs an optional command after each turn and feeds failures back to the same card;
-- queues ordered build and test pipelines that survive client disconnection;
+- keeps ordered build and test pipelines as cards on the board, still running when the client disconnects;
 - persists conversations, canvas geometry, links, provider quota, sessions, and pipeline state in SQLite.
 
 Conclave does not replace provider CLIs or their subscriptions. It runs the official local executables already installed and authenticated on the machine.

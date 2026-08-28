@@ -73,7 +73,7 @@ func (d *Daemon) runNextLoop(ctx context.Context) error {
 // repeat of the same failure can be recognised.
 func (d *Daemon) runCycle(ctx context.Context, job *store.LoopJob) (domain.CardRun, string) {
 	for _, step := range job.Steps {
-		command := splitCommand(step.Command)
+		command := domain.SplitCommand(step.Command)
 		if len(command) == 0 {
 			continue
 		}

@@ -234,6 +234,29 @@ CREATE TABLE conversation_models (
 	`
 ALTER TABLE chat_responses ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0;
 `,
+	// 14: a pipeline is a card on the board rather than something only a
+	// terminal can queue. The definition lives here; a queued execution still
+	// goes through runs and stages, which the daemon already knows how to run.
+	`
+CREATE TABLE pipelines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL DEFAULT '',
+    project_path TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE pipeline_stages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pipeline_id INTEGER NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    command TEXT NOT NULL,
+    UNIQUE(pipeline_id, position)
+);
+ALTER TABLE canvas_nodes ADD COLUMN pipeline_id INTEGER REFERENCES pipelines(id) ON DELETE CASCADE;
+ALTER TABLE runs ADD COLUMN pipeline_id INTEGER REFERENCES pipelines(id) ON DELETE SET NULL;
+CREATE INDEX canvas_nodes_pipeline_idx ON canvas_nodes(pipeline_id);
+CREATE INDEX runs_pipeline_idx ON runs(pipeline_id, id DESC);
+`,
 }
 
 func (s *Store) init() error {
@@ -821,6 +844,8 @@ const (
 	conversationHeight = 340
 	noteWidth          = 240
 	noteHeight         = 180
+	pipelineWidth      = 360
+	pipelineHeight     = 300
 )
 
 // CreateConversation stores a conversation together with the canvas node that
@@ -980,6 +1005,7 @@ func (s *Store) branchPosition(ctx context.Context, conversationID int64) (float
 func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 	canvas := domain.Canvas{
 		Conversations: []domain.Conversation{},
+		Pipelines:     []domain.Pipeline{},
 		Nodes:         []domain.CanvasNode{},
 		Links:         []domain.CanvasLink{},
 	}
@@ -1005,6 +1031,11 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 		conversations[index].Runs = runs
 	}
 	canvas.Conversations = conversations
+	pipelines, err := s.listPipelines(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Pipelines = pipelines
 	nodes, err := s.listCanvasNodes(ctx)
 	if err != nil {
 		return canvas, err
@@ -1087,7 +1118,7 @@ func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, e
 
 func (s *Store) listCanvasNodes(ctx context.Context) ([]domain.CanvasNode, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, kind, conversation_id, x, y, width, height, z, color, body
+SELECT id, kind, conversation_id, pipeline_id, x, y, width, height, z, color, body
 FROM canvas_nodes ORDER BY z, id`)
 	if err != nil {
 		return nil, err
@@ -1096,14 +1127,18 @@ FROM canvas_nodes ORDER BY z, id`)
 	nodes := []domain.CanvasNode{}
 	for rows.Next() {
 		var node domain.CanvasNode
-		var conversationID sql.NullInt64
-		if err := rows.Scan(&node.ID, &node.Kind, &conversationID, &node.X, &node.Y,
+		var conversationID, pipelineID sql.NullInt64
+		if err := rows.Scan(&node.ID, &node.Kind, &conversationID, &pipelineID, &node.X, &node.Y,
 			&node.Width, &node.Height, &node.Z, &node.Color, &node.Body); err != nil {
 			return nil, err
 		}
 		if conversationID.Valid {
 			value := conversationID.Int64
 			node.ConversationID = &value
+		}
+		if pipelineID.Valid {
+			value := pipelineID.Int64
+			node.PipelineID = &value
 		}
 		nodes = append(nodes, node)
 	}
@@ -1166,9 +1201,10 @@ func (s *Store) DeleteCanvasNode(ctx context.Context, id int64) error {
 	}
 	defer tx.Rollback()
 	var kind string
-	var conversationID sql.NullInt64
+	var conversationID, pipelineID sql.NullInt64
 	err = tx.QueryRowContext(ctx,
-		"SELECT kind, conversation_id FROM canvas_nodes WHERE id = ?", id).Scan(&kind, &conversationID)
+		"SELECT kind, conversation_id, pipeline_id FROM canvas_nodes WHERE id = ?", id).
+		Scan(&kind, &conversationID, &pipelineID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return sql.ErrNoRows
 	}
@@ -1181,6 +1217,14 @@ func (s *Store) DeleteCanvasNode(ctx context.Context, id int64) error {
 	if kind == domain.NodeConversation && conversationID.Valid {
 		if _, err := tx.ExecContext(ctx,
 			"DELETE FROM conversations WHERE id = ?", conversationID.Int64); err != nil {
+			return err
+		}
+	}
+	// The node is how a pipeline is reached, so closing the card takes the
+	// definition with it. A pipeline with no node would be unreachable state.
+	if kind == domain.NodePipeline && pipelineID.Valid {
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM pipelines WHERE id = ?", pipelineID.Int64); err != nil {
 			return err
 		}
 	}

@@ -80,6 +80,13 @@ export function App() {
     void canvas.addNote({ body: '', color: '', ...scatter() } as domain.NewNote)
   }, [canvas])
 
+  // A pipeline card holds deterministic work: an ordered command list run in a
+  // project. It has no provider, so it is created from the rail, not by
+  // clicking one.
+  const addPipeline = useCallback(() => {
+    void canvas.addPipeline({ title: 'Pipeline', ...scatter() } as domain.NewPipeline)
+  }, [canvas])
+
   const addGroup = useCallback(() => {
     if (ready.length === 0) return
     void canvas.addConversation({
@@ -104,6 +111,9 @@ export function App() {
             </button>
             <button className="button button--block" onClick={addNote}>
               Not
+            </button>
+            <button className="button button--block" onClick={addPipeline}>
+              Pipeline
             </button>
             <p className="rail__hint">
               Sağlayıcıya tıkla: tekil konuşma. Boş zemine çift tıkla: not.

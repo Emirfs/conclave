@@ -22,7 +22,7 @@ Yapay zekâ kodlama CLI'ları tek başlarına kullanışlıdır; ancak birkaçı
 - tamamlanan yanıtları yapılandırılabilir canvas bağlantılarıyla aktarır, tartıştırır veya inceletir;
 - iki kartı sınırlı konuşma veya açıkça seçilen iş-bitene-kadar akışı için eşleştirir;
 - her turdan sonra isteğe bağlı komut çalıştırıp hatayı aynı karta geri besler;
-- istemci bağlantısından bağımsız, sıralı build ve test pipeline'ları çalıştırır;
+- sıralı build ve test pipeline'larını canvas üzerinde bir kart olarak tutar; istemci kapansa da çalışmayı sürdürür;
 - konuşmaları, canvas konumlarını, bağlantıları, kotaları, oturumları ve pipeline durumunu SQLite'ta saklar.
 
 Conclave sağlayıcı CLI'larının veya aboneliklerinin yerine geçmez. Makinede kurulu ve kendi yöntemiyle kimlik doğrulaması yapılmış resmî yerel çalıştırılabilir dosyaları kullanır.

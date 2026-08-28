@@ -26,6 +26,12 @@ nodes the daemon persists, so a layout survives a restart.
   bindings; only the Go side reads the token and reaches the local API. This is what keeps the
   browser-origin rejection in `internal/api` meaningful.
 - Pipeline stages are ordered and stop at the first failure.
+- A pipeline card holds the definition; running it queues an ordinary run. Nothing about execution is
+  special-cased for the board, which is what keeps a pipeline queued from a terminal and one queued
+  from a card the same thing. A pipeline needs a project and at least one stage before it can run,
+  and is never queued twice at once: two copies would work the same tree simultaneously.
+- A pipeline card carries no provider and no transcript. Deterministic work is exactly what a
+  conversation card is not, and merging the two would make a card's colour mean nothing.
 - Commands are argument arrays and bypass the command shell.
 - Chat context is scoped by conversation *and* provider. Two conversations with the same provider must
   never see each other's history.

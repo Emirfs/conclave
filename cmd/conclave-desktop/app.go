@@ -243,6 +243,39 @@ func (a *App) Branch(conversationID int64, answer string, providers []string) ([
 }
 
 // ResumeDialogue clears a parked exchange so the next message starts it again.
+// CreatePipeline puts a new pipeline card on the board.
+func (a *App) CreatePipeline(input domain.NewPipeline) (domain.Pipeline, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.Pipeline{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CreatePipeline(ctx, input)
+}
+
+// SetPipeline replaces a pipeline card's title, project and stage list.
+func (a *App) SetPipeline(id int64, config domain.PipelineConfig) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.SetPipeline(ctx, id, config)
+}
+
+// StartPipeline queues a pipeline card's stages.
+func (a *App) StartPipeline(id int64) (int64, error) {
+	client, err := a.client()
+	if err != nil {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.StartPipeline(ctx, id)
+}
+
 // Search looks for text across every card and note on the board.
 func (a *App) Search(query string, limit int) ([]domain.SearchHit, error) {
 	client, err := a.client()

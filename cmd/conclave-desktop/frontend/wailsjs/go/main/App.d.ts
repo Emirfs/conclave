@@ -18,6 +18,8 @@ export function CreateConversation(arg1:domain.NewConversation):Promise<domain.C
 
 export function CreateNote(arg1:domain.NewNote):Promise<domain.CanvasNode>;
 
+export function CreatePipeline(arg1:domain.NewPipeline):Promise<domain.Pipeline>;
+
 export function DeleteCanvasNode(arg1:number):Promise<void>;
 
 export function EnsureDaemon():Promise<void>;
@@ -50,11 +52,15 @@ export function SetLoopRunning(arg1:number,arg2:boolean):Promise<void>;
 
 export function SetModel(arg1:number,arg2:string,arg3:string):Promise<void>;
 
+export function SetPipeline(arg1:number,arg2:domain.PipelineConfig):Promise<void>;
+
 export function SetProject(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function SetRole(arg1:number,arg2:string):Promise<void>;
 
 export function Snapshot():Promise<domain.Snapshot>;
+
+export function StartPipeline(arg1:number):Promise<number>;
 
 export function UnlinkNodes(arg1:number):Promise<void>;
 

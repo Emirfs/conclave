@@ -7,6 +7,7 @@ import {
   Canvas as LoadCanvas,
   CreateConversation,
   CreateNote,
+  CreatePipeline,
   DeleteCanvasNode,
   LinkNodes,
   PairNodes,
@@ -14,12 +15,14 @@ import {
   PickProjectDirectory,
   ResumeDialogue,
   Search,
+  SetPipeline,
   SetProject,
   SendTurn,
   SetLoop,
   SetLoopRunning,
   SetModel,
   SetRole,
+  StartPipeline,
   UnlinkNodes,
   UpdateLink,
 } from '../../wailsjs/go/main/App'
@@ -37,7 +40,12 @@ export type NoteNodeData = {
   color: string
 }
 
-export type BoardNode = Node<ConversationNodeData | NoteNodeData>
+export type PipelineNodeData = {
+  kind: 'pipeline'
+  pipeline: domain.Pipeline
+}
+
+export type BoardNode = Node<ConversationNodeData | NoteNodeData | PipelineNodeData>
 
 /** How long a drag or keystroke settles before it is written to the daemon. */
 const PATCH_DEBOUNCE = 350
@@ -51,6 +59,7 @@ const REFRESH_IDLE = 1500
 function toBoardNode(
   node: domain.CanvasNode,
   conversations: Map<number, domain.Conversation>,
+  pipelines: Map<number, domain.Pipeline>,
 ): BoardNode | null {
   const shared = {
     id: String(node.id),
@@ -68,6 +77,13 @@ function toBoardNode(
       type: 'note',
       data: { kind: 'note', body: node.body ?? '', color: node.color ?? '' },
     }
+  }
+  if (node.kind === 'pipeline') {
+    const pipeline = node.pipeline_id ? pipelines.get(node.pipeline_id) : undefined
+    // Same rule as a conversation node: a card with no record behind it is
+    // corrupt state, not something to draw an empty frame for.
+    if (!pipeline) return null
+    return { ...shared, type: 'pipeline', data: { kind: 'pipeline', pipeline } }
   }
   const conversation = node.conversation_id ? conversations.get(node.conversation_id) : undefined
   // A conversation node without its conversation is corrupt state; skip it
@@ -100,8 +116,17 @@ export function useCanvas(connected: boolean) {
   const load = useCallback(async () => {
     try {
       const canvas = await LoadCanvas()
-      const conversations = new Map<number, domain.Conversation>()
       let working = false
+      const pipelines = new Map<number, domain.Pipeline>()
+      for (const item of canvas.pipelines ?? []) {
+        pipelines.set(item.id, item)
+        // A queued or running pipeline is work in progress too, so the board
+        // polls at the fast cadence while one is going.
+        for (const run of item.runs ?? []) {
+          if (run.status === 'queued' || run.status === 'running') working = true
+        }
+      }
+      const conversations = new Map<number, domain.Conversation>()
       for (const item of canvas.conversations ?? []) {
         conversations.set(item.id, item)
         for (const turn of item.turns ?? []) {
@@ -180,7 +205,7 @@ export function useCanvas(connected: boolean) {
         return mappedEdges.map((edge) => ({ ...edge, selected: local.get(edge.id)?.selected }))
       })
       const mapped = (canvas.nodes ?? [])
-        .map((node) => toBoardNode(node, conversations))
+        .map((node) => toBoardNode(node, conversations, pipelines))
         .filter((node): node is BoardNode => node !== null)
       setNodes((current) => {
         const local = new Map(current.map((node) => [node.id, node]))
@@ -404,6 +429,70 @@ export function useCanvas(connected: boolean) {
     [nodes, load],
   )
 
+  // A pipeline card is created empty; its stages and project are filled in on
+  // the card itself, the way a conversation card picks its project.
+  const addPipeline = useCallback(
+    async (input: domain.NewPipeline) => {
+      try {
+        await CreatePipeline(input)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  const savePipeline = useCallback(
+    async (pipelineID: number, config: domain.PipelineConfig) => {
+      try {
+        await SetPipeline(pipelineID, config)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  // Queueing is all the board does: the daemon claims the run and works
+  // through the stages, exactly as it does for one queued from a terminal.
+  const runPipeline = useCallback(
+    async (pipelineID: number) => {
+      try {
+        await StartPipeline(pipelineID)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
+  const pickPipelineProject = useCallback(
+    async (pipelineID: number, current: string) => {
+      try {
+        const chosen = await PickProjectDirectory(current)
+        if (!chosen) return
+        // The project is one field of a whole-pipeline write, so the rest of
+        // the definition has to be carried over from what is on the board.
+        const node = nodes.find(
+          (item) => item.data.kind === 'pipeline' && item.data.pipeline.id === pipelineID,
+        )
+        const pipeline = node?.data.kind === 'pipeline' ? node.data.pipeline : undefined
+        await SetPipeline(pipelineID, {
+          title: pipeline?.title ?? 'Pipeline',
+          project_path: chosen,
+          stages: pipeline?.stages ?? [],
+        } as domain.PipelineConfig)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load, nodes],
+  )
+
   // Searching is a read the daemon answers; the board only asks and renders.
   // It deliberately does not touch canvas state: a search must not move, select
   // or reload anything until the user picks a result.
@@ -525,11 +614,12 @@ export function useCanvas(connected: boolean) {
       nodes, setNodes, edges, error, loaded, load, patch,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
+      addPipeline, savePipeline, runPipeline, pickPipelineProject,
       saveRole, saveModel, resumeDialogue, cancelConversation, search, assignRoles, branch,
     }),
     [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
      saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, cancelConversation, search,
-     assignRoles, branch],
+     addPipeline, savePipeline, runPipeline, pickPipelineProject, assignRoles, branch],
   )
 }

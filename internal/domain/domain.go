@@ -35,6 +35,39 @@ type SearchHit struct {
 	Snippet string `json:"snippet"`
 }
 
+// SplitCommand turns a typed command line into an argument array. Quoting is
+// honoured so a path with spaces survives, but nothing is evaluated: there is
+// no shell here, and no expansion of any kind. Card cycles and pipelines both
+// take a typed line, and both must read it the same way.
+func SplitCommand(line string) []string {
+	var parts []string
+	var current strings.Builder
+	quote := rune(0)
+	for _, symbol := range line {
+		switch {
+		case quote != 0:
+			if symbol == quote {
+				quote = 0
+			} else {
+				current.WriteRune(symbol)
+			}
+		case symbol == '\'' || symbol == '"':
+			quote = symbol
+		case symbol == ' ' || symbol == '\t':
+			if current.Len() > 0 {
+				parts = append(parts, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteRune(symbol)
+		}
+	}
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+	return parts
+}
+
 // CancelResult reports how many of a card's responses a stop request reached.
 // Zero means the card was already idle, which the UI treats as nothing to say.
 type CancelResult struct {
@@ -150,7 +183,48 @@ const (
 const (
 	NodeConversation = "conversation"
 	NodeNote         = "note"
+	// NodePipeline is a card that runs an ordered list of commands in a project
+	// and keeps its results. It has no provider and no transcript: a pipeline
+	// is deterministic work, which is exactly what a conversation is not.
+	NodePipeline = "pipeline"
 )
+
+// PipelineStage is one step of a pipeline as the user typed it. The command is
+// a line rather than an argument array because that is what a person writes;
+// it is split with SplitCommand and never handed to a shell.
+type PipelineStage struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
+}
+
+// Pipeline is an ordered command list a card owns. Stages run in order and stop
+// at the first failure.
+type Pipeline struct {
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+	// ProjectPath is the directory the stages run in. A pipeline with no
+	// project has nothing to run against and is refused rather than run
+	// somewhere arbitrary.
+	ProjectPath string          `json:"project_path,omitempty"`
+	Stages      []PipelineStage `json:"stages"`
+	// Runs are this pipeline's most recent results, newest first.
+	Runs []Run `json:"runs,omitempty"`
+}
+
+// NewPipeline creates a pipeline together with the canvas node that shows it.
+type NewPipeline struct {
+	Title string  `json:"title"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+}
+
+// PipelineConfig replaces everything about a pipeline in one write, the way a
+// card's step list is saved.
+type PipelineConfig struct {
+	Title       string          `json:"title"`
+	ProjectPath string          `json:"project_path"`
+	Stages      []PipelineStage `json:"stages"`
+}
 
 type Conversation struct {
 	ID        int64      `json:"id"`
@@ -207,6 +281,7 @@ type CanvasNode struct {
 	ID             int64   `json:"id"`
 	Kind           string  `json:"kind"`
 	ConversationID *int64  `json:"conversation_id,omitempty"`
+	PipelineID     *int64  `json:"pipeline_id,omitempty"`
 	X              float64 `json:"x"`
 	Y              float64 `json:"y"`
 	Width          float64 `json:"width"`
@@ -385,6 +460,7 @@ type NewLink struct {
 // Canvas is everything the desktop client needs to draw the board.
 type Canvas struct {
 	Conversations []Conversation `json:"conversations"`
+	Pipelines     []Pipeline     `json:"pipelines"`
 	Nodes         []CanvasNode   `json:"nodes"`
 	Links         []CanvasLink   `json:"links"`
 }

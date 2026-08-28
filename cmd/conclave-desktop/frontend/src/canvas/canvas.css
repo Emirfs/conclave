@@ -2191,3 +2191,236 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+
+/* A pipeline card: deterministic work, so it is drawn in a neutral colour
+   rather than a provider's. Nothing on it belongs to a model. */
+.node--pipeline {
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.node--pipeline.node--selected {
+  border-color: var(--line-strong);
+}
+
+.node__pipeline-title {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.node__pipeline-title:focus {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--surface-input);
+}
+
+.node__chip {
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.node__chip:hover {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
+.node__run {
+  margin-left: auto;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--positive) 55%, transparent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--positive);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.node__run:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--positive) 14%, transparent);
+}
+
+.node__run:disabled {
+  opacity: 0.5;
+  border-color: var(--line-subtle);
+  color: var(--text-muted);
+}
+
+.pipeline__stages {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.pipeline__empty {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.pipeline__stage {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pipeline__index {
+  width: 16px;
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.pipeline__name,
+.pipeline__command {
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.pipeline__name {
+  width: 80px;
+  flex: none;
+}
+
+.pipeline__command {
+  flex: 1;
+}
+
+.pipeline__name:focus,
+.pipeline__command:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.pipeline__drop {
+  flex: none;
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.pipeline__drop:hover {
+  color: var(--negative);
+}
+
+.pipeline__row {
+  display: flex;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.pipeline__add,
+.pipeline__save {
+  padding: 3px 9px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-overlay);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.pipeline__add:hover,
+.pipeline__save:hover {
+  color: var(--text-primary);
+  border-color: var(--line-strong);
+}
+
+/* The last run's stages. A failure is what anyone opens this for, so it opens
+   itself and carries its output. */
+.pipeline__result {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.pipeline__label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.pipeline__stage-result {
+  border-left: 2px solid var(--line-subtle);
+  padding-left: 7px;
+}
+
+.pipeline__stage-result--passed {
+  border-left-color: var(--positive);
+}
+
+.pipeline__stage-result--failed {
+  border-left-color: var(--negative);
+}
+
+.pipeline__stage-result--running {
+  border-left-color: var(--accent);
+}
+
+.pipeline__stage-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.pipeline__stage-name {
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+}
+
+.pipeline__stage-status {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.pipeline__output {
+  max-height: 180px;
+  margin: 3px 0 5px;
+  padding: 6px 7px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface-void);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

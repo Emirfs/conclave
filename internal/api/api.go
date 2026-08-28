@@ -48,6 +48,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/search", s.search)
 	mux.HandleFunc("POST /v1/canvas/conversations", s.createConversation)
 	mux.HandleFunc("POST /v1/canvas/notes", s.createNote)
+	mux.HandleFunc("POST /v1/canvas/pipelines", s.createPipeline)
+	mux.HandleFunc("PUT /v1/canvas/pipelines/{id}", s.setPipeline)
+	mux.HandleFunc("POST /v1/canvas/pipelines/{id}/runs", s.startPipeline)
 	mux.HandleFunc("PATCH /v1/canvas/nodes", s.patchCanvasNode)
 	mux.HandleFunc("DELETE /v1/canvas/nodes/{id}", s.deleteCanvasNode)
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/project", s.setProject)
@@ -484,6 +487,70 @@ func (s *Server) providerModels(response http.ResponseWriter, request *http.Requ
 
 // resumeDialogue clears the parked state so a stalled exchange can be pushed on
 // without the user having to remember what it was waiting for.
+// createPipeline puts a new, empty pipeline card on the board.
+func (s *Server) createPipeline(response http.ResponseWriter, request *http.Request) {
+	var input domain.NewPipeline
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	pipeline, err := s.store.CreatePipeline(request.Context(), input)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, pipeline)
+}
+
+// setPipeline replaces a pipeline's title, project and stages in one write.
+func (s *Server) setPipeline(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("pipeline id must be a positive integer"))
+		return
+	}
+	var input domain.PipelineConfig
+	if !decodeJSON(response, request, 64<<10, &input) {
+		return
+	}
+	// A pipeline runs commands in a directory, so its project is validated the
+	// same way a card's is.
+	project, err := validProject(input.ProjectPath)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	input.ProjectPath = project
+	if err := s.store.SetPipeline(request.Context(), id, input); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("pipeline not found"))
+			return
+		}
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// startPipeline queues the pipeline's stages as an ordinary run, which the
+// daemon's existing pipeline worker picks up.
+func (s *Server) startPipeline(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("pipeline id must be a positive integer"))
+		return
+	}
+	runID, err := s.store.StartPipelineRun(request.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("pipeline not found"))
+			return
+		}
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, map[string]int64{"run_id": runID})
+}
+
 // search looks for text anywhere on the board. It is a read, so it takes its
 // query from the URL and answers with whatever it found, including nothing.
 func (s *Server) search(response http.ResponseWriter, request *http.Request) {
@@ -882,6 +949,26 @@ func (c *Client) ProviderModels(ctx context.Context, name string) (domain.Provid
 		return domain.ProviderModels{}, err
 	}
 	return models, nil
+}
+
+func (c *Client) CreatePipeline(ctx context.Context, input domain.NewPipeline) (domain.Pipeline, error) {
+	var pipeline domain.Pipeline
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/pipelines", input, &pipeline, http.StatusCreated)
+	return pipeline, err
+}
+
+func (c *Client) SetPipeline(ctx context.Context, id int64, config domain.PipelineConfig) error {
+	path := "/v1/canvas/pipelines/" + strconv.FormatInt(id, 10)
+	return c.do(ctx, http.MethodPut, path, config, nil, http.StatusNoContent)
+}
+
+func (c *Client) StartPipeline(ctx context.Context, id int64) (int64, error) {
+	path := "/v1/canvas/pipelines/" + strconv.FormatInt(id, 10) + "/runs"
+	var created struct {
+		RunID int64 `json:"run_id"`
+	}
+	err := c.do(ctx, http.MethodPost, path, nil, &created, http.StatusCreated)
+	return created.RunID, err
 }
 
 func (c *Client) Search(ctx context.Context, query string, limit int) ([]domain.SearchHit, error) {

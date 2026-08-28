@@ -21,11 +21,12 @@ import { BranchPanel } from './BranchPanel'
 import { ConversationNode } from './ConversationNode'
 import { LinkPanel } from './LinkPanel'
 import { NoteNode } from './NoteNode'
+import { PipelineNode } from './PipelineNode'
 import { ProviderEdge } from './ProviderEdge'
 import { SearchPanel } from './SearchPanel'
 import type { BoardNode, useCanvas } from './useCanvas'
 
-const nodeTypes = { conversation: ConversationNode, note: NoteNode }
+const nodeTypes = { conversation: ConversationNode, note: NoteNode, pipeline: PipelineNode }
 const edgeTypes = { provider: ProviderEdge }
 
 export type BoardHandle = ReturnType<typeof useCanvas>
@@ -42,7 +43,7 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
   const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink,
     pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
     saveRole, saveModel, resumeDialogue, cancelConversation, search,
-    assignRoles, branch, addNote } = canvas
+    savePipeline, runPipeline, pickPipelineProject, assignRoles, branch, addNote } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
   const [searching, setSearching] = useState(false)
   // The answer a branch would start from, held while the user picks providers.
@@ -118,8 +119,21 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
   // the hook owns the state. Injecting it here keeps NoteNode presentational.
   const decorated = useMemo(
     () =>
-      nodes.map((node) =>
-        node.data.kind === 'note'
+      nodes.map((node) => {
+        if (node.data.kind === 'pipeline') {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              onSave: savePipeline,
+              onRun: runPipeline,
+              onPickProject: pickPipelineProject,
+              onClose: close,
+              onResize: resize,
+            },
+          }
+        }
+        return node.data.kind === 'note'
           ? {
               ...node,
               data: {
@@ -149,10 +163,11 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
                 onPinNote: (body: string) => void pinNote(node.id, body),
                 onResize: resize,
               },
-            },
-      ),
+            }
+      }),
     [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop,
-     saveRole, saveModel, resumeDialogue, cancelConversation, pinNote, resize, setHeight],
+     saveRole, saveModel, resumeDialogue, cancelConversation, savePipeline, runPipeline,
+     pickPipelineProject, pinNote, resize, setHeight],
   )
 
   const onNodesChange = useCallback(

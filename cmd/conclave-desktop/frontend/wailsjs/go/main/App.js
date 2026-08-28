@@ -30,6 +30,10 @@ export function CreateNote(arg1) {
   return window['go']['main']['App']['CreateNote'](arg1);
 }
 
+export function CreatePipeline(arg1) {
+  return window['go']['main']['App']['CreatePipeline'](arg1);
+}
+
 export function DeleteCanvasNode(arg1) {
   return window['go']['main']['App']['DeleteCanvasNode'](arg1);
 }
@@ -94,6 +98,10 @@ export function SetModel(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetModel'](arg1, arg2, arg3);
 }
 
+export function SetPipeline(arg1, arg2) {
+  return window['go']['main']['App']['SetPipeline'](arg1, arg2);
+}
+
 export function SetProject(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetProject'](arg1, arg2, arg3);
 }
@@ -104,6 +112,10 @@ export function SetRole(arg1, arg2) {
 
 export function Snapshot() {
   return window['go']['main']['App']['Snapshot']();
+}
+
+export function StartPipeline(arg1) {
+  return window['go']['main']['App']['StartPipeline'](arg1);
 }
 
 export function UnlinkNodes(arg1) {
