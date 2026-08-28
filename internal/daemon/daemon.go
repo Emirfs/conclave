@@ -66,6 +66,13 @@ func (d *Daemon) Run(ctx context.Context) {
 		defer workers.Done()
 		d.loopWorker(ctx)
 	}()
+	// Triggers are cheap to check and must not wait behind a card cycle that
+	// is holding a step open, so they get a worker of their own too.
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		d.triggerWorker(ctx)
+	}()
 	<-ctx.Done()
 	workers.Wait()
 }
@@ -105,13 +112,30 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 	if err != nil {
 		return d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", err.Error())
 	}
-	outcome := d.executeChat(ctx, job.ProjectPath, invocation, d.chatProgress(persist, job.ResponseID))
+	// A person can ask for this run to stop while it is under way. The request
+	// is written to the database by whichever client received it, so the worker
+	// that owns the process watches for it and kills the tree.
+	runCtx, stopRun := context.WithCancel(ctx)
+	stopWatcher := d.watchCancel(runCtx, job.ResponseID, stopRun)
+	outcome := d.executeChat(runCtx, job.ProjectPath, invocation, d.chatProgress(persist, job.ResponseID))
+	stopWatcher()
+	stopRun()
 	if ctx.Err() != nil {
 		_ = d.store.RequeueChatResponse(persist, job.ResponseID)
 		return ctx.Err()
 	}
+	// Stopping is a decision, not a failure: the partial answer stays on the
+	// card and nothing is relayed onwards.
+	if canceled, err := d.store.ChatCancelRequested(persist, job.ResponseID); err == nil && canceled {
+		return d.store.CancelChatResponse(persist, job.ResponseID)
+	}
 	if outcome.quota != nil {
 		_ = d.store.RecordProviderQuota(persist, job.Provider, *outcome.quota)
+	}
+	// What this turn cost, as the provider reported it. Recorded even for a
+	// failed run: a turn that burned a window and then errored still burned it.
+	if outcome.inputTokens > 0 || outcome.outputTokens > 0 {
+		_ = d.store.RecordChatUsage(persist, job.ResponseID, outcome.inputTokens, outcome.outputTokens)
 	}
 	if outcome.sessionID != "" {
 		_ = d.store.RecordProviderSession(persist, job.ConversationID, job.Provider, outcome.sessionID, job.Model)
@@ -136,6 +160,38 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 	return nil
 }
 
+
+// cancelPollInterval is how often a running provider is checked against a stop
+// request. A client writes the request to SQLite; this is the only way a worker
+// hears about it.
+const cancelPollInterval = 400 * time.Millisecond
+
+// watchCancel polls for a stop request against one running response and cancels
+// the run when it finds one. The returned function stops the watcher; it is safe
+// to call more than once.
+func (d *Daemon) watchCancel(ctx context.Context, responseID int64, cancel context.CancelFunc) func() {
+	done := make(chan struct{})
+	var once sync.Once
+	go func() {
+		ticker := time.NewTicker(cancelPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+			requested, err := d.store.ChatCancelRequested(ctx, responseID)
+			if err == nil && requested {
+				cancel()
+				return
+			}
+		}
+	}()
+	return func() { once.Do(func() { close(done) }) }
+}
 
 // chatProgress persists partial provider output so the answer appears while it
 // is still being produced. Writes are throttled: a token-by-token provider
@@ -169,43 +225,14 @@ type chatResult struct {
 	quota     *provider.Quota
 	// contextTokens is how full the provider's context window was on this turn.
 	contextTokens int
+	// inputTokens and outputTokens are what this one turn cost.
+	inputTokens  int
+	outputTokens int
 }
 
 // executeChat runs a provider and reads its stdout line by line so a streaming
 // format can report the answer while it is still being written. progress is
 // called with the text so far.
-// splitCommand turns a typed command line into an argument array. Quoting is
-// honoured so a path with spaces survives, but nothing is evaluated: there is
-// no shell here, and no expansion of any kind.
-func splitCommand(line string) []string {
-	var parts []string
-	var current strings.Builder
-	quote := rune(0)
-	for _, symbol := range line {
-		switch {
-		case quote != 0:
-			if symbol == quote {
-				quote = 0
-			} else {
-				current.WriteRune(symbol)
-			}
-		case symbol == '\'' || symbol == '"':
-			quote = symbol
-		case symbol == ' ' || symbol == '\t':
-			if current.Len() > 0 {
-				parts = append(parts, current.String())
-				current.Reset()
-			}
-		default:
-			current.WriteRune(symbol)
-		}
-	}
-	if current.Len() > 0 {
-		parts = append(parts, current.String())
-	}
-	return parts
-}
-
 func (d *Daemon) executeChat(parent context.Context, project string, invocation provider.Invocation, progress func(string, string)) chatResult {
 	workdir := project
 	if workdir == "" {
@@ -256,7 +283,11 @@ func (d *Daemon) executeChat(parent context.Context, project string, invocation 
 		if failure == "" {
 			failure = err.Error()
 		}
-		return chatResult{failure: failure, sessionID: result.sessionID, quota: result.quota}
+		// The answer is gone but what the turn cost is not: a run that burned a
+		// window and then failed still burned it.
+		result.content = ""
+		result.failure = failure
+		return result
 	}
 	if result.failure != "" {
 		return result
@@ -299,6 +330,12 @@ func (d *Daemon) consumeStream(stdout io.Reader, format provider.StreamFormat, p
 		}
 		if update.ContextTokens > 0 {
 			result.contextTokens = update.ContextTokens
+		}
+		if update.InputTokens > 0 {
+			result.inputTokens = update.InputTokens
+		}
+		if update.OutputTokens > 0 {
+			result.outputTokens = update.OutputTokens
 		}
 		if update.Delta != "" && !capped {
 			if accumulated.Len()+len(update.Delta) > maxOutputBytes {

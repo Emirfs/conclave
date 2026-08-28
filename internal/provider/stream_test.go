@@ -123,6 +123,32 @@ func TestEveryStreamFormatReportsItsContextSize(t *testing.T) {
 	}
 }
 
+// What a turn cost is not what the window holds: the first is addable across
+// turns, the second grows with the session. Both come off the same event, so
+// they are easy to confuse and worth pinning down.
+func TestEveryStreamFormatReportsWhatTheTurnCost(t *testing.T) {
+	claude := DecodeStreamLine(StreamClaude,
+		`{"type":"result","result":"tamam","session_id":"s","usage":{"input_tokens":2,`+
+			`"cache_creation_input_tokens":17694,"cache_read_input_tokens":12227,"output_tokens":38}}`)
+	if claude.InputTokens != 2+17694+12227 || claude.OutputTokens != 38 {
+		t.Fatalf("claude usage = %d in, %d out", claude.InputTokens, claude.OutputTokens)
+	}
+
+	codex := DecodeStreamLine(StreamCodex,
+		`{"type":"turn.completed","usage":{"input_tokens":23390,"cached_input_tokens":6912,"output_tokens":12}}`)
+	if codex.InputTokens != 23390 || codex.OutputTokens != 12 {
+		t.Fatalf("codex usage = %d in, %d out", codex.InputTokens, codex.OutputTokens)
+	}
+
+	antigravity := DecodeStreamLine(StreamAntigravity,
+		`{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","response":"tamam",`+
+			`"usage":{"input_tokens":20159,"output_tokens":1059,"cache_read_tokens":16297}}}`)
+	if antigravity.InputTokens != 20159+16297 || antigravity.OutputTokens != 1059 {
+		t.Fatalf("antigravity usage = %d in, %d out",
+			antigravity.InputTokens, antigravity.OutputTokens)
+	}
+}
+
 // A turn that reports no usage must not read as an empty window, which would
 // look like a session that had just been reset.
 func TestMissingUsageReportsNoContextSize(t *testing.T) {

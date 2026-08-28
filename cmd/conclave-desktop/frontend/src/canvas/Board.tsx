@@ -18,13 +18,27 @@ import '@xyflow/react/dist/style.css'
 
 import { domain } from '../../wailsjs/go/models'
 import { BranchPanel } from './BranchPanel'
+import { ConfirmPanel, type PendingConfirm } from './ConfirmPanel'
 import { ConversationNode } from './ConversationNode'
+import { GateNode } from './GateNode'
+import { JoinNode } from './JoinNode'
 import { LinkPanel } from './LinkPanel'
 import { NoteNode } from './NoteNode'
+import { PipelineNode } from './PipelineNode'
 import { ProviderEdge } from './ProviderEdge'
+import { RunPanel } from './RunPanel'
+import { SearchPanel } from './SearchPanel'
+import { TriggerNode } from './TriggerNode'
 import type { BoardNode, useCanvas } from './useCanvas'
 
-const nodeTypes = { conversation: ConversationNode, note: NoteNode }
+const nodeTypes = {
+  conversation: ConversationNode,
+  note: NoteNode,
+  pipeline: PipelineNode,
+  join: JoinNode,
+  trigger: TriggerNode,
+  gate: GateNode,
+}
 const edgeTypes = { provider: ProviderEdge }
 
 export type BoardHandle = ReturnType<typeof useCanvas>
@@ -40,8 +54,27 @@ export function Board({ canvas, providers }: { canvas: BoardHandle; providers: s
 function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: string[] }) {
   const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink,
     pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
-    saveRole, saveModel, resumeDialogue, assignRoles, branch, addNote } = canvas
+    saveRole, saveModel, resumeDialogue, cancelConversation, search,
+    savePipeline, runPipeline, pickPipelineProject, exportConversation,
+    assignRoles, branch, addNote, error, clearError, deletingIds,
+    activeRuns, runs, stopRun, saveTrigger, fireTrigger, saveGate,
+    loadRuns, runDetail, reportRun } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
+  const [searching, setSearching] = useState(false)
+  // The run history is read on demand: it outlives the cards it is about, and
+  // fetching it on every board poll would be a request nobody asked for.
+  const [runsOpen, setRunsOpen] = useState(false)
+  // While the panel is open the history is refreshed, so a run that starts or
+  // ends behind it does not leave a stale list on screen.
+  useEffect(() => {
+    if (!runsOpen) return
+    void loadRuns()
+    const timer = window.setInterval(() => void loadRuns(), 2000)
+    return () => window.clearInterval(timer)
+  }, [runsOpen, loadRuns])
+  // A deletion waiting for an answer. Held here rather than asked with
+  // window.confirm: see ConfirmPanel for why.
+  const [pending, setPending] = useState<PendingConfirm | null>(null)
   // The answer a branch would start from, held while the user picks providers.
   const [branching, setBranching] = useState<{ conversationID: number; answer: string } | null>(null)
   // The minimap earns its corner on a large board and wastes it on a small one,
@@ -61,8 +94,55 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
     }
   }, [map])
 
-  // Closing removes the node and, for a conversation, its history with it.
-  const close = useCallback((id: string) => void remove(id), [remove])
+  // Every way of deleting goes through here, so one gesture asks one question
+  // however many cards it takes with it. Anything that would lose work is
+  // worth asking about: a conversation and its history, a pipeline, or a note
+  // with something written in it. An empty note is not.
+  const confirmRemoval = useCallback(
+    (ids: string[]) => {
+      const doomed = ids
+        .map((id) => nodes.find((item) => item.id === id))
+        .filter((node): node is BoardNode => node !== undefined)
+      if (doomed.length === 0) return
+      const run = () => void Promise.allSettled(doomed.map((node) => remove(node.id)))
+      const losesWork = doomed.some((node) => {
+        if (node.data.kind === 'conversation' || node.data.kind === 'pipeline') return true
+        if (node.data.kind === 'note') return node.data.body.trim() !== ''
+        return false
+      })
+      if (!losesWork) {
+        run()
+        return
+      }
+      if (doomed.length > 1) {
+        setPending({
+          message: `${doomed.length} kart silinecek, geçmişleriyle birlikte.`,
+          action: 'Hepsini sil',
+          run,
+        })
+        return
+      }
+      const only = doomed[0].data.kind
+      setPending({
+        message:
+          only === 'conversation'
+            ? 'Bu konuşma ve tüm geçmişi silinecek.'
+            : only === 'pipeline'
+              ? 'Bu pipeline silinecek.'
+              : 'Bu not silinecek.',
+        action:
+          only === 'conversation'
+            ? 'Konuşmayı sil'
+            : only === 'pipeline'
+              ? "Pipeline'ı sil"
+              : 'Notu sil',
+        run,
+      })
+    },
+    [nodes, remove],
+  )
+
+  const close = useCallback((id: string) => confirmRemoval([id]), [confirmRemoval])
   const flow = useReactFlow()
 
   const resize = useCallback(
@@ -115,8 +195,48 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
   // the hook owns the state. Injecting it here keeps NoteNode presentational.
   const decorated = useMemo(
     () =>
-      nodes.map((node) =>
-        node.data.kind === 'note'
+      nodes.map((node) => {
+        const deleting = deletingIds.has(node.id)
+        if (node.data.kind === 'pipeline') {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              onSave: savePipeline,
+              onRun: runPipeline,
+              onPickProject: pickPipelineProject,
+              onClose: close,
+              onResize: resize,
+              deleting,
+            },
+          }
+        }
+        if (node.data.kind === 'gate') {
+          return {
+            ...node,
+            data: { ...node.data, onSave: saveGate, onClose: close, onResize: resize, deleting },
+          }
+        }
+        if (node.data.kind === 'trigger') {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              onSave: saveTrigger,
+              onFire: fireTrigger,
+              onClose: close,
+              onResize: resize,
+              deleting,
+            },
+          }
+        }
+        if (node.data.kind === 'join') {
+          return {
+            ...node,
+            data: { ...node.data, onBodyChange: setNoteBody, onClose: close, deleting },
+          }
+        }
+        return node.data.kind === 'note'
           ? {
               ...node,
               data: {
@@ -125,6 +245,7 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
                 onClose: close,
                 onResize: resize,
                 onSetHeight: setHeight,
+                deleting,
               },
             }
           : {
@@ -140,21 +261,36 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
                 onSaveRole: saveRole,
                 onSaveModel: saveModel,
                 onResumeDialogue: resumeDialogue,
+                onCancel: cancelConversation,
+                onExport: exportConversation,
                 onBranch: (conversationID: number, answer: string) =>
                   setBranching({ conversationID, answer }),
                 onPinNote: (body: string) => void pinNote(node.id, body),
                 onResize: resize,
+                deleting,
               },
-            },
-      ),
-    [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop,
-     saveRole, saveModel, resumeDialogue, pinNote, resize, setHeight],
+            }
+      }),
+    [nodes, deletingIds, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop,
+     saveTrigger, fireTrigger, saveGate,
+     saveRole, saveModel, resumeDialogue, cancelConversation, savePipeline, runPipeline,
+     pickPipelineProject, exportConversation, pinNote, resize, setHeight],
   )
 
   const onNodesChange = useCallback(
     (changes: NodeChange<BoardNode>[]) => {
-      setNodes((current) => applyNodeChanges(changes, current))
+      // A Delete keypress arrives as a remove change. It is held back rather
+      // than applied, because applying it would take the card off the board
+      // before the question about it has been answered.
+      const removals: string[] = []
+      const rest: NodeChange<BoardNode>[] = []
       for (const change of changes) {
+        if (change.type === 'remove') removals.push(change.id)
+        else rest.push(change)
+      }
+      setNodes((current) => applyNodeChanges(rest, current))
+      if (removals.length > 0) confirmRemoval(removals)
+      for (const change of rest) {
         // Only persist when a gesture finishes: dragging fires continuously and
         // would otherwise flood the daemon with writes.
         if (change.type === 'position' && change.dragging === false && change.position) {
@@ -171,12 +307,9 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
             height: change.dimensions.height,
           } as domain.CanvasNodePatch)
         }
-        if (change.type === 'remove') {
-          void remove(change.id)
-        }
       }
     },
-    [patch, remove, setNodes],
+    [patch, confirmRemoval, setNodes],
   )
 
   const selected = useMemo(() => nodes.filter((node) => node.selected), [nodes])
@@ -190,7 +323,9 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return
-      void link(connection.source, connection.target)
+      // A gate has two ways out, so which port the line left by is part of
+      // what the link means.
+      void link(connection.source, connection.target, connection.sourceHandle ?? '')
     },
     [link],
   )
@@ -217,16 +352,49 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
     )
   }, [flow])
 
+  // Bringing a result into view is the whole point of searching: the card is
+  // centred and selected, so it is obvious which one was found.
+  const jumpTo = useCallback(
+    (nodeID: number) => {
+      const node = nodes.find((item) => item.id === String(nodeID))
+      if (!node) return
+      const width = node.width ?? 420
+      const height = node.height ?? 320
+      void flow.setCenter(node.position.x + width / 2, node.position.y + height / 2, {
+        zoom: 1,
+        duration: 400,
+      })
+      setNodes((current) =>
+        current.map((item) => ({ ...item, selected: item.id === String(nodeID) })),
+      )
+    },
+    [flow, nodes, setNodes],
+  )
+
+  // Ctrl+F opens the search box, the way every board and document does.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'f') return
+      event.preventDefault()
+      setSearching(true)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   // Escape closes whatever is open, which is the first thing anyone tries.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       setBranching(null)
+      setSearching(false)
+      setPending(null)
       closeLinkPanel()
+      clearError()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [closeLinkPanel])
+  }, [closeLinkPanel, clearError])
 
   // Ctrl+A selects every card and note, the way a canvas is expected to behave.
   useEffect(() => {
@@ -266,9 +434,10 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
     )
   }, [patch, selected, setNodes])
 
-  const closeSelected = useCallback(() => {
-    for (const node of selected) void remove(node.id)
-  }, [remove, selected])
+  const closeSelected = useCallback(
+    () => confirmRemoval(selected.map((node) => node.id)),
+    [confirmRemoval, selected],
+  )
 
   const onDoubleClick = useCallback(
     (event: React.MouseEvent) => {
@@ -310,12 +479,66 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
         panOnDrag={[1, 2]}
         multiSelectionKeyCode={['Control', 'Meta']}
         selectionKeyCode="Shift"
-        // Backspace is left out on purpose: it is a typing key, and deleting a
-        // whole selection by mistake is not recoverable.
+        // Backspace is left out on purpose: it is a typing key. Delete stays,
+        // but now arrives as a question rather than as a deletion.
         deleteKeyCode={['Delete']}
         elevateNodesOnSelect
       >
+        {activeRuns.length > 0 && !runsOpen && (
+          <Panel position="bottom-center" className="runpanel">
+            {activeRuns.map((run) => (
+              <div className="runpanel__run" key={run.id}>
+                <span className="runpanel__dot" aria-hidden="true" />
+                <button
+                  className="runpanel__text"
+                  onClick={() => setRunsOpen(true)}
+                  title="Akış geçmişini aç"
+                >
+                  {run.origin_label || `akış #${run.id}`} · {run.steps} adım
+                </button>
+                <button
+                  className="runpanel__stop"
+                  onClick={() => void stopRun(run.id)}
+                  title="Bu akıştaki her kartı durdur"
+                >
+                  durdur
+                </button>
+              </div>
+            ))}
+          </Panel>
+        )}
+        {pending && (
+          <Panel position="top-center" className="confirmpanel">
+            <ConfirmPanel pending={pending} onCancel={() => setPending(null)} />
+          </Panel>
+        )}
+        {error && (
+          <Panel position="top-center" className="board-error" role="alert" aria-live="assertive">
+            <span className="board-error__icon" aria-hidden="true">
+              ⚠
+            </span>
+            <span className="board-error__text">{error}</span>
+            <button
+              className="board-error__close"
+              onClick={clearError}
+              aria-label="Hatayı kapat"
+              title="Hatayı kapat"
+            >
+              ✕
+            </button>
+          </Panel>
+        )}
         <Panel position="top-left" className="boardpanel">
+          {searching && (
+            <SearchPanel
+              onSearch={search}
+              onJump={(nodeID) => {
+                jumpTo(nodeID)
+                setSearching(false)
+              }}
+              onClose={() => setSearching(false)}
+            />
+          )}
           {selected.length > 1 && (
             <div className="selectionbar">
               <span className="selectionbar__count">{selected.length} seçili</span>
@@ -372,6 +595,45 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
             />
           )}
         </Panel>
+        {/* Ctrl+F is the shortcut, but a board is a pointing surface: the
+            search has to be visible to someone who never learns one. */}
+        {!searching && (
+          <Panel position="top-right" className="boardpanel">
+            <button
+              className="boardpanel__action"
+              onClick={() => setSearching(true)}
+              title="Panoda ara (Ctrl+F)"
+            >
+              ara
+            </button>
+            <button
+              className="boardpanel__action"
+              onClick={() => setRunsOpen((open) => !open)}
+              title="Panonun geçtiği akışlar"
+            >
+              {runsOpen ? 'akışlar ✕' : 'akışlar'}
+            </button>
+          </Panel>
+        )}
+        {runsOpen && (
+          <Panel position="bottom-center" className="runspanel">
+            <RunPanel
+              runs={runs}
+              onStop={stopRun}
+              onDetail={runDetail}
+              onReport={reportRun}
+              onJump={(conversationID) => {
+                const node = nodes.find(
+                  (item) =>
+                    item.data.kind === 'conversation' &&
+                    item.data.conversation.id === conversationID,
+                )
+                if (node) jumpTo(Number(node.id))
+              }}
+              onClose={() => setRunsOpen(false)}
+            />
+          </Panel>
+        )}
         <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="#232838" />
         <Controls showInteractive={false} position="bottom-right" />
         {/* MiniMap positions itself; wrapping it in a Panel only fights that.

@@ -102,8 +102,68 @@
   box-shadow: var(--shadow-float);
 }
 
-.node:hover:not(.node--selected) {
+.node--deleting {
+  opacity: 0.45;
+  pointer-events: none;
+  filter: grayscale(0.5);
+}
+
+.node:hover:not(.node--selected):not(.node--deleting) {
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.62);
+}
+
+/* ---------- board error banner ---------- */
+
+.board-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 600px;
+  margin-top: 12px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--negative) 16%, var(--surface-raised));
+  border: 1px solid color-mix(in srgb, var(--negative) 45%, var(--line));
+  box-shadow: var(--shadow-float);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  z-index: 10;
+  animation: node-enter 180ms var(--ease-out) both;
+}
+
+.board-error__icon {
+  flex: none;
+  color: var(--negative);
+  font-weight: 700;
+}
+
+.board-error__text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.board-error__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  cursor: default;
+  transition: background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease), border-color var(--duration-fast) var(--ease);
+}
+
+.board-error__close:hover {
+  background: var(--surface-overlay);
+  border-color: var(--line);
+  color: var(--text-primary);
 }
 
 @keyframes node-enter {
@@ -554,6 +614,15 @@
   overflow-wrap: anywhere;
 }
 
+/* A stopped answer is neither a failure nor a result, so it is drawn as a
+   quiet note rather than in the error colour. */
+.reply__stopped {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .reply__working {
   display: flex;
   align-items: center;
@@ -600,9 +669,34 @@
 
 .node__composer {
   flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding: 8px;
   border-top: 1px solid var(--line-subtle);
   background: var(--surface-overlay);
+}
+
+/* Only rendered while a turn is actually running, so it never competes with
+   the composer for attention on an idle card. */
+.node__stop {
+  align-self: flex-start;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--negative) 55%, transparent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--negative);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.node__stop:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--negative) 14%, transparent);
+}
+
+.node__stop:disabled {
+  opacity: 0.6;
 }
 
 /* How a dialogue ended. "Done" is quiet; "waiting" asks for the user and gives
@@ -1169,21 +1263,29 @@
   cursor: grabbing;
 }
 
-/* A note is one big textarea, so it needs a strip of its own to be grabbed. */
+/* A note is one big textarea, so it needs a strip of its own to be grabbed.
+   A note is only 240px wide and this strip carries three text buttons plus the
+   size and close controls, so it has to be allowed to wrap instead of running
+   off the edge. The height follows the content for the same reason. */
 .node__grip--note {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
   flex: none;
-  height: 22px;
-  padding: 0 6px;
+  min-height: 22px;
+  padding: 2px 6px;
   border-bottom: 1px solid color-mix(in srgb, var(--note-accent) 22%, transparent);
 }
 
 .node__grip-dots {
-  flex: 1;
-  height: 100%;
+  /* The dots are the grab target and give way first: they shrink to nothing
+     before a button is pushed off the strip. */
+  flex: 1 1 24px;
+  min-width: 12px;
+  align-self: stretch;
+  min-height: 18px;
   /* Two rows of faint dots read as "grab here" without adding an icon. */
   background-image: radial-gradient(
     circle,
@@ -1326,6 +1428,11 @@
 .node__toolbar {
   display: flex;
   align-items: center;
+  /* A card is resizable and this row carries a project chip, an access
+     toggle, a model picker, an export button and the tabs. Without wrapping,
+     a narrow card stacks them on top of each other instead of on to a second
+     line. */
+  flex-wrap: wrap;
   gap: 6px;
   flex: none;
   padding: 6px 8px;
@@ -2044,4 +2151,1146 @@
 
 .react-flow__node.connectingfrom .node__port {
   opacity: 1;
+}
+
+/* Board-wide search. It sits in the top-left panel, over the canvas, and is the
+   only place on the board that shows text from cards you are not looking at. */
+.search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 380px;
+  padding: 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-panel);
+}
+
+.search__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.search__input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.search__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.search__close {
+  padding: 4px 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.search__close:hover {
+  color: var(--text-primary);
+}
+
+/* The list is capped rather than allowed to grow: a search panel that covers
+   the board hides the very thing you are searching for. */
+.search__results {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.search__empty {
+  margin: 0;
+  padding: 4px 2px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.search__hit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 7px;
+  border: none;
+  border-left: 2px solid var(--hit-accent, var(--line-subtle));
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.search__hit:hover {
+  background: var(--surface-raised);
+}
+
+.search__hit-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.search__hit-title {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.search__hit-where {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.search__hit-snippet {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* A pipeline card: deterministic work, so it is drawn in a neutral colour
+   rather than a provider's. Nothing on it belongs to a model. */
+.node--pipeline {
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.node--pipeline.node--selected {
+  border-color: var(--line-strong);
+}
+
+.node__pipeline-title {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.node__pipeline-title:focus {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--surface-input);
+}
+
+.node__chip {
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.node__chip:hover {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
+.node__run {
+  margin-left: auto;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--positive) 55%, transparent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--positive);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.node__run:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--positive) 14%, transparent);
+}
+
+.node__run:disabled {
+  opacity: 0.5;
+  border-color: var(--line-subtle);
+  color: var(--text-muted);
+}
+
+.pipeline__stages {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.pipeline__empty {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.pipeline__stage {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pipeline__index {
+  width: 16px;
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.pipeline__name,
+.pipeline__command {
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.pipeline__name {
+  width: 80px;
+  flex: none;
+}
+
+.pipeline__command {
+  flex: 1;
+}
+
+.pipeline__name:focus,
+.pipeline__command:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.pipeline__drop {
+  flex: none;
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.pipeline__drop:hover {
+  color: var(--negative);
+}
+
+.pipeline__row {
+  display: flex;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.pipeline__add,
+.pipeline__save {
+  padding: 3px 9px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-overlay);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.pipeline__add:hover,
+.pipeline__save:hover {
+  color: var(--text-primary);
+  border-color: var(--line-strong);
+}
+
+/* The last run's stages. A failure is what anyone opens this for, so it opens
+   itself and carries its output. */
+.pipeline__result {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.pipeline__label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.pipeline__stage-result {
+  border-left: 2px solid var(--line-subtle);
+  padding-left: 7px;
+}
+
+.pipeline__stage-result--passed {
+  border-left-color: var(--positive);
+}
+
+.pipeline__stage-result--failed {
+  border-left-color: var(--negative);
+}
+
+.pipeline__stage-result--running {
+  border-left-color: var(--accent);
+}
+
+.pipeline__stage-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.pipeline__stage-name {
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+}
+
+.pipeline__stage-status {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.pipeline__output {
+  max-height: 180px;
+  margin: 3px 0 5px;
+  padding: 6px 7px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface-void);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* What the board spent, next to what each provider says is left. It lives in
+   the rail rather than over the canvas: it is a thing you glance at between
+   turns, not something to work on top of. */
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 8px;
+  padding: 9px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-overlay);
+}
+
+.usage__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage__title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.usage__windows {
+  display: flex;
+  gap: 3px;
+}
+
+.usage__window {
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.usage__window--active {
+  border-color: var(--line-strong);
+  color: var(--text-primary);
+}
+
+.usage__close {
+  padding: 2px 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.usage__close:hover {
+  color: var(--text-primary);
+}
+
+.usage__empty,
+.usage__error {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.usage__error {
+  color: var(--negative);
+}
+
+.usage__row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.usage__row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.usage__provider {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.usage__tokens {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.usage__bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface-void);
+  overflow: hidden;
+}
+
+.usage__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--usage-accent, var(--accent));
+}
+
+.usage__detail {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.usage__quota {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.usage__quota-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.usage__quota-label {
+  width: 42px;
+  flex: none;
+}
+
+.usage__quota-bar {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface-void);
+  overflow: hidden;
+}
+
+.usage__quota-fill {
+  display: block;
+  height: 100%;
+  background: var(--warning);
+}
+
+.usage__quota-value {
+  width: 32px;
+  flex: none;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+/* ---------- deletion confirmation ---------- */
+
+/* The panel wrapper only positions; the look lives on .confirm so the panel
+   keeps no padding of its own to fight with. */
+.confirmpanel {
+  margin-top: 12px;
+}
+
+.confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 560px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--negative) 45%, var(--line));
+  background: color-mix(in srgb, var(--negative) 14%, var(--surface-raised));
+  box-shadow: var(--shadow-float);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  animation: node-enter 140ms var(--ease-out) both;
+}
+
+.confirm__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.confirm__accept,
+.confirm__cancel {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+/* The destructive choice is the one named after the act, and it is the one
+   Enter reaches, so it says plainly what it will do. */
+.confirm__accept {
+  border: 1px solid color-mix(in srgb, var(--negative) 60%, transparent);
+  background: color-mix(in srgb, var(--negative) 22%, transparent);
+  color: var(--text-primary);
+}
+
+.confirm__accept:hover,
+.confirm__accept:focus-visible {
+  background: color-mix(in srgb, var(--negative) 34%, transparent);
+  outline: none;
+}
+
+.confirm__cancel {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.confirm__cancel:hover {
+  color: var(--text-primary);
+  border-color: var(--line-strong);
+}
+
+/* ---------- join card and run panel ---------- */
+
+/* A join is not a card that speaks, so it is drawn as a small waiting point
+   rather than as a conversation with an empty transcript. */
+.node--join {
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-raised));
+}
+
+.node--join.node--selected {
+  border-style: solid;
+  border-color: var(--accent);
+}
+
+.node__join-title {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.node__join-title:focus {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--surface-input);
+}
+
+.join__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 12px 12px;
+  text-align: center;
+}
+
+/* The count is the whole point of the card: how many lines have spoken out of
+   how many the board is waiting on. */
+.join__count {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  line-height: 1.1;
+}
+
+.join__label {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.join__sources {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.join__source {
+  padding: 1px 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* One line per journey the board is in the middle of. A run is what a person
+   started, so it is what they get to stop. */
+.runpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.runpanel__run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+}
+
+.runpanel__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: run-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes run-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.runpanel__text {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.runpanel__text:hover {
+  color: var(--text-primary);
+}
+
+.runpanel__stop {
+  padding: 2px 9px;
+  border: 1px solid color-mix(in srgb, var(--negative) 45%, var(--line));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--negative);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.runpanel__stop:hover {
+  background: color-mix(in srgb, var(--negative) 16%, transparent);
+}
+
+/* ---------- trigger card ---------- */
+
+.node--trigger {
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.node--trigger.node--selected {
+  border-color: var(--line-strong);
+}
+
+/* An armed trigger will act without anyone present, so it says so on the
+   board rather than only inside the card. */
+.node--trigger-armed {
+  border-color: color-mix(in srgb, var(--positive) 50%, var(--line));
+}
+
+.node__trigger-title {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.node__trigger-title:focus {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--surface-input);
+}
+
+.trigger__mode,
+.trigger__number,
+.trigger__time {
+  padding: 3px 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+}
+
+.trigger__field {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.trigger__number {
+  width: 58px;
+}
+
+.trigger__unit {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.trigger__prompt {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.trigger__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.trigger__arm,
+.trigger__fire {
+  padding: 3px 9px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.trigger__arm:hover:not(:disabled),
+.trigger__fire:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text-primary);
+}
+
+.trigger__arm:disabled,
+.trigger__fire:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.node--trigger-armed .trigger__arm {
+  border-color: color-mix(in srgb, var(--positive) 50%, var(--line));
+  color: var(--positive);
+}
+
+.trigger__status {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* ---------- gate card ---------- */
+
+.node--gate {
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.node--gate.node--selected {
+  border-color: var(--line-strong);
+}
+
+.node__gate-title {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.node__gate-title:focus {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--surface-input);
+}
+
+.gate__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+/* The condition reads as one sentence down the card: "gelen mesaj · şunu
+   içeriyorsa · HATA". Splitting it into labelled fields would say the same
+   thing in more words. */
+.gate__lead {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.gate__mode,
+.gate__pattern {
+  padding: 4px 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.gate__pattern {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.gate__case {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.gate__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 12px 10px;
+}
+
+/* The two ports are named on the card, beside the handles they belong to, so
+   the board says which line carries which case without being clicked. */
+.gate__port {
+  padding: 1px 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* What the gate decided last time it saw a message. */
+.gate__port--hit.gate__port--pass {
+  border-color: color-mix(in srgb, var(--positive) 50%, var(--line));
+  color: var(--positive);
+}
+
+.gate__port--hit.gate__port--else {
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--line));
+  color: var(--warning);
+}
+
+.node__port--pass {
+  border-color: var(--positive);
+}
+
+.node__port--else {
+  border-color: var(--warning);
+}
+
+/* ---------- run history panel ---------- */
+
+.runspanel {
+  margin: 0 0 8px;
+}
+
+.runs {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 78vw);
+  max-height: 46vh;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+  overflow: hidden;
+}
+
+.runs__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.runs__title {
+  flex: 1;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.runs__close {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.runs__close:hover {
+  color: var(--text-primary);
+}
+
+.runs__empty,
+.runs__loading {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.runs__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.runs__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.runs__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.runs__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+/* Only a run still going pulses. A finished one is a record, not activity. */
+.runs__dot--live {
+  background: var(--accent);
+  animation: run-pulse 1.4s ease-in-out infinite;
+}
+
+.runs__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.runs__badge {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.runs__meta {
+  flex: none;
+  margin-left: auto;
+  padding-left: 10px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.runs__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.runs__action {
+  padding: 2px 9px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.runs__action:hover {
+  border-color: var(--line-strong);
+  color: var(--text-primary);
+}
+
+.runs__action--stop {
+  border-color: color-mix(in srgb, var(--negative) 45%, var(--line));
+  color: var(--negative);
+}
+
+.runs__detail {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+}
+
+.runs__step {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.runs__step-card {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.runs__step-status {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.runs__step-status--failed {
+  color: var(--negative);
+}
+
+.runs__step-status--canceled {
+  color: var(--warning);
+}
+
+/* Three lines of an answer is enough to recognise it; the card holds the rest,
+   and the report note holds a longer excerpt. */
+.runs__step-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
 }

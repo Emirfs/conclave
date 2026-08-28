@@ -3,21 +3,39 @@ import type { Edge, Node } from '@xyflow/react'
 
 import {
   Branch,
+  CancelConversation,
   Canvas as LoadCanvas,
   CreateConversation,
+  CreateGate,
+  CreateJoin,
   CreateNote,
+  CreatePipeline,
+  CreateTrigger,
+  ExportBoard,
+  FireTrigger,
+  FlowRun,
+  FlowRuns,
+  ExportConversation,
+  ImportBoard,
   DeleteCanvasNode,
   LinkNodes,
   PairNodes,
   PatchCanvasNode,
   PickProjectDirectory,
   ResumeDialogue,
+  Search,
+  SetPipeline,
   SetProject,
   SendTurn,
   SetLoop,
   SetLoopRunning,
   SetModel,
+  SetGate,
+  ReportFlowRun,
   SetRole,
+  SetTrigger,
+  StartPipeline,
+  StopFlowRun,
   UnlinkNodes,
   UpdateLink,
 } from '../../wailsjs/go/main/App'
@@ -35,7 +53,38 @@ export type NoteNodeData = {
   color: string
 }
 
-export type BoardNode = Node<ConversationNodeData | NoteNodeData>
+export type PipelineNodeData = {
+  kind: 'pipeline'
+  pipeline: domain.Pipeline
+}
+
+export type GateNodeData = {
+  kind: 'gate'
+  gate: domain.Gate
+}
+
+export type TriggerNodeData = {
+  kind: 'trigger'
+  trigger: domain.Trigger
+}
+
+export type JoinNodeData = {
+  kind: 'join'
+  /** The join's name, which is also the node's body text. */
+  body: string
+  /** How many lines feed it and which of them have spoken. Absent only in the
+   *  moment between a join being created and the next board load. */
+  join?: domain.JoinNode
+}
+
+export type BoardNode = Node<
+  | ConversationNodeData
+  | NoteNodeData
+  | PipelineNodeData
+  | JoinNodeData
+  | TriggerNodeData
+  | GateNodeData
+>
 
 /** How long a drag or keystroke settles before it is written to the daemon. */
 const PATCH_DEBOUNCE = 350
@@ -49,6 +98,10 @@ const REFRESH_IDLE = 1500
 function toBoardNode(
   node: domain.CanvasNode,
   conversations: Map<number, domain.Conversation>,
+  pipelines: Map<number, domain.Pipeline>,
+  joins: Map<number, domain.JoinNode>,
+  triggers: Map<number, domain.Trigger>,
+  gates: Map<number, domain.Gate>,
 ): BoardNode | null {
   const shared = {
     id: String(node.id),
@@ -67,6 +120,34 @@ function toBoardNode(
       data: { kind: 'note', body: node.body ?? '', color: node.color ?? '' },
     }
   }
+  if (node.kind === 'gate') {
+    const gate = node.gate_id ? gates.get(node.gate_id) : undefined
+    // Same rule as a conversation node: a card with no record behind it is
+    // corrupt state, not something to draw an empty frame for.
+    if (!gate) return null
+    return { ...shared, type: 'gate', data: { kind: 'gate', gate } }
+  }
+  if (node.kind === 'trigger') {
+    const trigger = node.trigger_id ? triggers.get(node.trigger_id) : undefined
+    // Same rule as a conversation node: a card with no record behind it is
+    // corrupt state, not something to draw an empty frame for.
+    if (!trigger) return null
+    return { ...shared, type: 'trigger', data: { kind: 'trigger', trigger } }
+  }
+  if (node.kind === 'join') {
+    return {
+      ...shared,
+      type: 'join',
+      data: { kind: 'join', body: node.body ?? '', join: joins.get(node.id) },
+    }
+  }
+  if (node.kind === 'pipeline') {
+    const pipeline = node.pipeline_id ? pipelines.get(node.pipeline_id) : undefined
+    // Same rule as a conversation node: a card with no record behind it is
+    // corrupt state, not something to draw an empty frame for.
+    if (!pipeline) return null
+    return { ...shared, type: 'pipeline', data: { kind: 'pipeline', pipeline } }
+  }
   const conversation = node.conversation_id ? conversations.get(node.conversation_id) : undefined
   // A conversation node without its conversation is corrupt state; skip it
   // rather than rendering an empty frame the user cannot act on.
@@ -82,6 +163,10 @@ export const LINK_MODES: Record<string, string> = {
 }
 
 function linkLabel(link: domain.CanvasLink): string {
+  // The two lines out of a gate are otherwise identical to look at, and which
+  // one carries the passing case is the whole point of drawing them.
+  if (link.source_handle === 'pass') return 'geçerse'
+  if (link.source_handle === 'else') return 'geçmezse'
   return link.until_done
     ? `${LINK_MODES[link.mode] ?? link.mode} · bitene kadar`
     : `${LINK_MODES[link.mode] ?? link.mode} · ${link.max_rounds}`
@@ -91,15 +176,43 @@ export function useCanvas(connected: boolean) {
   const [nodes, setNodes] = useState<BoardNode[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set())
+  const deletingRef = useRef(new Set<string>())
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Two lists, because they answer two questions. The active ones come free
+  // with every board load and drive the live strip; the history is read on
+  // demand and outlives the cards it is about.
+  const [activeRuns, setActiveRuns] = useState<domain.FlowRun[]>([])
+  const [runs, setRuns] = useState<domain.FlowRun[]>([])
   const timers = useRef(new Map<string, number>())
+
+  const clearError = useCallback(() => setError(null), [])
 
   const load = useCallback(async () => {
     try {
       const canvas = await LoadCanvas()
-      const conversations = new Map<number, domain.Conversation>()
       let working = false
+      const pipelines = new Map<number, domain.Pipeline>()
+      for (const item of canvas.pipelines ?? []) {
+        pipelines.set(item.id, item)
+        // A queued or running pipeline is work in progress too, so the board
+        // polls at the fast cadence while one is going.
+        for (const run of item.runs ?? []) {
+          if (run.status === 'queued' || run.status === 'running') working = true
+        }
+      }
+      const gates = new Map<number, domain.Gate>()
+      for (const item of canvas.gates ?? []) gates.set(item.id, item)
+      const triggers = new Map<number, domain.Trigger>()
+      for (const item of canvas.triggers ?? []) triggers.set(item.id, item)
+      const joins = new Map<number, domain.JoinNode>()
+      for (const item of canvas.joins ?? []) joins.set(item.node_id, item)
+      // A run still in flight is work in progress: something on the board is
+      // about to move even if no provider is mid-answer this instant.
+      if ((canvas.runs ?? []).length > 0) working = true
+      setActiveRuns(canvas.runs ?? [])
+      const conversations = new Map<number, domain.Conversation>()
       for (const item of canvas.conversations ?? []) {
         conversations.set(item.id, item)
         for (const turn of item.turns ?? []) {
@@ -178,7 +291,7 @@ export function useCanvas(connected: boolean) {
         return mappedEdges.map((edge) => ({ ...edge, selected: local.get(edge.id)?.selected }))
       })
       const mapped = (canvas.nodes ?? [])
-        .map((node) => toBoardNode(node, conversations))
+        .map((node) => toBoardNode(node, conversations, pipelines, joins, triggers, gates))
         .filter((node): node is BoardNode => node !== null)
       setNodes((current) => {
         const local = new Map(current.map((node) => [node.id, node]))
@@ -213,10 +326,9 @@ export function useCanvas(connected: boolean) {
           ? current
           : next
       })
-      setError(null)
       setLoaded(true)
     } catch (cause) {
-      setError(String(cause))
+      setError(`Pano yüklenemedi: ${cause}`)
     }
   }, [])
 
@@ -244,7 +356,7 @@ export function useCanvas(connected: boolean) {
       key,
       window.setTimeout(() => {
         timers.current.delete(key)
-        PatchCanvasNode(patchInput).catch((cause) => setError(String(cause)))
+        PatchCanvasNode(patchInput).catch((cause) => setError(`Düğüm güncellenemedi: ${cause}`))
       }, PATCH_DEBOUNCE),
     )
   }, [])
@@ -253,10 +365,11 @@ export function useCanvas(connected: boolean) {
     async (input: domain.NewConversation) => {
       try {
         await CreateConversation(input)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Konuşma oluşturulamadı: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -265,18 +378,153 @@ export function useCanvas(connected: boolean) {
     async (input: domain.NewNote) => {
       try {
         await CreateNote(input)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Not oluşturulamadı: ${cause}`)
+        return
       }
+      await load()
+    },
+    [load],
+  )
+
+  // A gate is created as a plain "is there anything here" check: the one
+  // condition that is useful before anyone has written a pattern.
+  const addGate = useCallback(
+    async (input: domain.NewGate) => {
+      try {
+        await CreateGate(input)
+      } catch (cause) {
+        setError(`Kapı oluşturulamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  const saveGate = useCallback(
+    async (gateID: number, config: domain.GateConfig) => {
+      try {
+        await SetGate(gateID, config)
+      } catch (cause) {
+        setError(`Kapı kaydedilemedi: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  // A trigger is created switched off and empty: what it sends and when is
+  // set on the card, and nothing fires until someone says so.
+  const addTrigger = useCallback(
+    async (input: domain.NewTrigger) => {
+      try {
+        await CreateTrigger(input)
+      } catch (cause) {
+        setError(`Tetikleyici oluşturulamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  const saveTrigger = useCallback(
+    async (triggerID: number, config: domain.TriggerConfig) => {
+      try {
+        await SetTrigger(triggerID, config)
+      } catch (cause) {
+        setError(`Tetikleyici kaydedilemedi: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  const fireTrigger = useCallback(
+    async (triggerID: number) => {
+      try {
+        const delivered = await FireTrigger(triggerID)
+        // A trigger nobody has wired anywhere fails silently otherwise: it
+        // starts a run that ends before anything happens.
+        if (delivered === 0) setError('Tetikleyici hiçbir karta bağlı değil.')
+      } catch (cause) {
+        setError(`Tetikleyici çalıştırılamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  // A join is created empty and named on the card, the way a note is.
+  const addJoin = useCallback(
+    async (input: domain.NewNote) => {
+      try {
+        await CreateJoin(input)
+      } catch (cause) {
+        setError(`Birleştirici oluşturulamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  // The run history is read separately from the board: it outlives the cards
+  // it is about, and a finished run does not change when the canvas does.
+  const loadRuns = useCallback(async () => {
+    try {
+      setRuns(await FlowRuns(0))
+    } catch (cause) {
+      setError(`Akış geçmişi okunamadı: ${cause}`)
+    }
+  }, [])
+
+  const runDetail = useCallback(async (runID: number) => {
+    try {
+      return await FlowRun(runID)
+    } catch (cause) {
+      setError(`Akış okunamadı: ${cause}`)
+      return null
+    }
+  }, [])
+
+  const reportRun = useCallback(
+    async (runID: number) => {
+      try {
+        await ReportFlowRun(runID)
+      } catch (cause) {
+        setError(`Rapor yazılamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  // Stopping a run stops every card still working on it. Catching each card in
+  // turn is what this replaces.
+  const stopRun = useCallback(
+    async (runID: number) => {
+      try {
+        await StopFlowRun(runID)
+      } catch (cause) {
+        setError(`Akış durdurulamadı: ${cause}`)
+        return
+      }
+      await load()
     },
     [load],
   )
 
   const remove = useCallback(async (id: string) => {
+    if (deletingRef.current.has(id)) return
+    deletingRef.current.add(id)
+    setDeletingIds(new Set(deletingRef.current))
     const numeric = Number(id)
-    // Drop it locally first so the board feels immediate, then confirm.
-    setNodes((current) => current.filter((node) => node.id !== id))
     const pending = timers.current.get(id)
     if (pending) {
       window.clearTimeout(pending)
@@ -284,8 +532,12 @@ export function useCanvas(connected: boolean) {
     }
     try {
       await DeleteCanvasNode(numeric)
+      setNodes((current) => current.filter((node) => node.id !== id))
     } catch (cause) {
-      setError(String(cause))
+      setError(`Kart silinemedi: ${cause}`)
+    } finally {
+      deletingRef.current.delete(id)
+      setDeletingIds(new Set(deletingRef.current))
     }
   }, [])
 
@@ -304,13 +556,14 @@ export function useCanvas(connected: boolean) {
   )
 
   const link = useCallback(
-    async (sourceID: string, targetID: string) => {
+    async (sourceID: string, targetID: string, sourceHandle = '') => {
       try {
-        await LinkNodes(Number(sourceID), Number(targetID))
-        await load()
+        await LinkNodes(Number(sourceID), Number(targetID), sourceHandle)
       } catch (cause) {
-        setError(String(cause))
+        setError(`Kartlar bağlanamadı: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -319,10 +572,11 @@ export function useCanvas(connected: boolean) {
     async (firstID: string, secondID: string, mode: string, rounds: number, briefing: string) => {
       try {
         await PairNodes(Number(firstID), Number(secondID), mode, rounds, briefing)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Kartlar eşleştirilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -331,10 +585,11 @@ export function useCanvas(connected: boolean) {
     async (id: string, mode: string, rounds: number, untilDone: boolean, briefing: string) => {
       try {
         await UpdateLink(Number(id), mode, rounds, untilDone, briefing)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Bağlantı güncellenemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -345,10 +600,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, providerName: string, model: string) => {
       try {
         await SetModel(conversationID, providerName, model)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Model kaydedilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -357,10 +613,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, role: string) => {
       try {
         await SetRole(conversationID, role)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Rol kaydedilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -371,10 +628,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, answer: string, providers: string[]) => {
       try {
         await Branch(conversationID, answer, providers)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Dallanma oluşturulamadı: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -394,12 +652,157 @@ export function useCanvas(connected: boolean) {
       try {
         await SetRole(source, sourceRole)
         await SetRole(target, targetRole)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Roller atanamadı: ${cause}`)
+        return
       }
+      await load()
     },
     [nodes, load],
+  )
+
+  // A pipeline card is created empty; its stages and project are filled in on
+  // the card itself, the way a conversation card picks its project.
+  const addPipeline = useCallback(
+    async (input: domain.NewPipeline) => {
+      try {
+        await CreatePipeline(input)
+      } catch (cause) {
+        setError(`Pipeline oluşturulamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  const savePipeline = useCallback(
+    async (pipelineID: number, config: domain.PipelineConfig) => {
+      try {
+        await SetPipeline(pipelineID, config)
+      } catch (cause) {
+        setError(`Pipeline kaydedilemedi: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  // Queueing is all the board does: the daemon claims the run and works
+  // through the stages, exactly as it does for one queued from a terminal.
+  const runPipeline = useCallback(
+    async (pipelineID: number) => {
+      try {
+        await StartPipeline(pipelineID)
+      } catch (cause) {
+        setError(`Pipeline başlatılamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  const pickPipelineProject = useCallback(
+    async (
+      pipelineID: number,
+      current: string,
+      draft?: { title: string; stages: domain.PipelineStage[] },
+    ) => {
+      let chosen = ''
+      try {
+        chosen = await PickProjectDirectory(current)
+      } catch (cause) {
+        setError(`Dizin seçilemedi: ${cause}`)
+        return
+      }
+      if (!chosen) return
+      // The project is one field of a whole-pipeline write, so the rest of
+      // the definition has to be carried over from what is on the board or in the local draft.
+      const node = nodes.find(
+        (item) => item.data.kind === 'pipeline' && item.data.pipeline.id === pipelineID,
+      )
+      const pipeline = node?.data.kind === 'pipeline' ? node.data.pipeline : undefined
+      const title = draft?.title ?? pipeline?.title ?? 'Pipeline'
+      const stages = draft?.stages ?? pipeline?.stages ?? []
+      try {
+        await SetPipeline(pipelineID, {
+          title,
+          project_path: chosen,
+          stages,
+        } as domain.PipelineConfig)
+      } catch (cause) {
+        setError(`Pipeline projesi seçilemedi: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load, nodes],
+  )
+
+  // Exporting a card writes a Markdown file the user picks; a cancelled dialog
+  // returns an empty path and is not an error.
+  const exportConversation = useCallback(
+    async (conversationID: number, title: string) => {
+      try {
+        return await ExportConversation(conversationID, title)
+      } catch (cause) {
+        setError(`Konuşma dışa aktarılamadı: ${cause}`)
+        return ''
+      }
+    },
+    [],
+  )
+
+  const exportBoard = useCallback(async () => {
+    try {
+      return await ExportBoard()
+    } catch (cause) {
+      setError(`Pano dışa aktarılamadı: ${cause}`)
+      return ''
+    }
+  }, [])
+
+  // An import is additive: the file's cards arrive next to what is already on
+  // the board, so the reload afterwards is what makes them appear.
+  const importBoard = useCallback(async () => {
+    try {
+      const result = await ImportBoard()
+      await load()
+      return result
+    } catch (cause) {
+      setError(`Pano içe aktarılamadı: ${cause}`)
+      return undefined
+    }
+  }, [load])
+
+  // Searching is a read the daemon answers; the board only asks and renders.
+  // It deliberately does not touch canvas state: a search must not move, select
+  // or reload anything until the user picks a result.
+  const search = useCallback(async (query: string, limit: number) => {
+    try {
+      return (await Search(query, limit)) ?? []
+    } catch (cause) {
+      setError(`Arama yapılamadı: ${cause}`)
+      return []
+    }
+  }, [])
+
+  // Stopping is written to the daemon, which owns the provider process; the
+  // board only asks. The reload right after is what turns the card's spinner
+  // into a stopped reply without waiting for the next poll.
+  const cancelConversation = useCallback(
+    async (conversationID: number) => {
+      try {
+        await CancelConversation(conversationID)
+      } catch (cause) {
+        setError(`Konuşma durdurulamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
   )
 
   // Clearing the parked state is what lets a stalled pair be pushed on: the
@@ -408,10 +811,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number) => {
       try {
         await ResumeDialogue(conversationID)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Konuşma devam ettirilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -420,10 +824,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, config: domain.LoopConfig) => {
       try {
         await SetLoop(conversationID, config)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Döngü kaydedilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -432,10 +837,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, running: boolean) => {
       try {
         await SetLoopRunning(conversationID, running)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Döngü durumu değiştirilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -446,7 +852,7 @@ export function useCanvas(connected: boolean) {
       try {
         await UnlinkNodes(Number(id))
       } catch (cause) {
-        setError(String(cause))
+        setError(`Bağlantı kaldırılamadı: ${cause}`)
       }
     },
     [],
@@ -454,15 +860,22 @@ export function useCanvas(connected: boolean) {
 
   const pickProject = useCallback(
     async (conversationID: number, current: string) => {
+      let chosen = ''
       try {
-        const chosen = await PickProjectDirectory(current)
-        // An empty result means the dialog was cancelled; leave the card alone.
-        if (!chosen) return
-        await SetProject(conversationID, chosen, 'edit')
-        await load()
+        chosen = await PickProjectDirectory(current)
       } catch (cause) {
-        setError(String(cause))
+        setError(`Dizin seçilemedi: ${cause}`)
+        return
       }
+      // An empty result means the dialog was cancelled; leave the card alone.
+      if (!chosen) return
+      try {
+        await SetProject(conversationID, chosen, 'edit')
+      } catch (cause) {
+        setError(`Proje seçilemedi: ${cause}`)
+        return
+      }
+      await load()
     },
     [load],
   )
@@ -471,10 +884,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, project: string, access: string) => {
       try {
         await SetProject(conversationID, project, access)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Proje erişimi değiştirilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -483,23 +897,35 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, prompt: string) => {
       try {
         await SendTurn(conversationID, prompt)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Mesaj gönderilemedi: ${cause}`)
+        throw cause
       }
+      await load()
     },
     [load],
   )
 
   return useMemo(
     () => ({
-      nodes, setNodes, edges, error, loaded, load, patch,
+      nodes, setNodes, edges, error, clearError, deletingIds, loaded, load, patch,
+      activeRuns, runs, addJoin, stopRun, addTrigger, saveTrigger, fireTrigger,
+      addGate, saveGate,
+      loadRuns, runDetail, reportRun,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
-      saveRole, saveModel, resumeDialogue, assignRoles, branch,
+      addPipeline, savePipeline, runPipeline, pickPipelineProject,
+      exportConversation, exportBoard, importBoard,
+      saveRole, saveModel, resumeDialogue, cancelConversation, search, assignRoles, branch,
     }),
-    [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
+    [nodes, edges, error, clearError, deletingIds, loaded, load, patch,
+     activeRuns, runs, addJoin, stopRun,
+     addTrigger, saveTrigger, fireTrigger, addGate, saveGate,
+     loadRuns, runDetail, reportRun,
+     addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
-     saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, assignRoles, branch],
+     saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, cancelConversation, search,
+     addPipeline, savePipeline, runPipeline, pickPipelineProject,
+     exportConversation, exportBoard, importBoard, assignRoles, branch],
   )
 }

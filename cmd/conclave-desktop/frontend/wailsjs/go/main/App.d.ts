@@ -8,21 +8,43 @@ export function ApplyUpdate():Promise<void>;
 
 export function Branch(arg1:number,arg2:string,arg3:Array<string>):Promise<Array<domain.Conversation>>;
 
+export function CancelConversation(arg1:number):Promise<domain.CancelResult>;
+
 export function Canvas():Promise<domain.Canvas>;
 
 export function CheckUpdate():Promise<update.Status>;
 
 export function CreateConversation(arg1:domain.NewConversation):Promise<domain.Conversation>;
 
+export function CreateGate(arg1:domain.NewGate):Promise<domain.Gate>;
+
+export function CreateJoin(arg1:domain.NewNote):Promise<domain.CanvasNode>;
+
 export function CreateNote(arg1:domain.NewNote):Promise<domain.CanvasNode>;
+
+export function CreatePipeline(arg1:domain.NewPipeline):Promise<domain.Pipeline>;
+
+export function CreateTrigger(arg1:domain.NewTrigger):Promise<domain.Trigger>;
 
 export function DeleteCanvasNode(arg1:number):Promise<void>;
 
 export function EnsureDaemon():Promise<void>;
 
+export function ExportBoard():Promise<string>;
+
+export function ExportConversation(arg1:number,arg2:string):Promise<string>;
+
 export function FileDiff(arg1:number,arg2:string):Promise<vcs.Diff>;
 
-export function LinkNodes(arg1:number,arg2:number):Promise<domain.CanvasLink>;
+export function FireTrigger(arg1:number):Promise<number>;
+
+export function FlowRun(arg1:number):Promise<domain.FlowRunDetail>;
+
+export function FlowRuns(arg1:number):Promise<Array<domain.FlowRun>>;
+
+export function ImportBoard():Promise<domain.ImportResult>;
+
+export function LinkNodes(arg1:number,arg2:number,arg3:string):Promise<domain.CanvasLink>;
 
 export function OpenReleasePage(arg1:string):Promise<void>;
 
@@ -36,9 +58,15 @@ export function ProjectChanges(arg1:number):Promise<vcs.Status>;
 
 export function ProviderModels(arg1:string):Promise<domain.ProviderModels>;
 
+export function ReportFlowRun(arg1:number):Promise<domain.CanvasNode>;
+
 export function ResumeDialogue(arg1:number):Promise<void>;
 
+export function Search(arg1:string,arg2:number):Promise<Array<domain.SearchHit>>;
+
 export function SendTurn(arg1:number,arg2:string):Promise<void>;
+
+export function SetGate(arg1:number,arg2:domain.GateConfig):Promise<void>;
 
 export function SetLoop(arg1:number,arg2:domain.LoopConfig):Promise<void>;
 
@@ -46,14 +74,24 @@ export function SetLoopRunning(arg1:number,arg2:boolean):Promise<void>;
 
 export function SetModel(arg1:number,arg2:string,arg3:string):Promise<void>;
 
+export function SetPipeline(arg1:number,arg2:domain.PipelineConfig):Promise<void>;
+
 export function SetProject(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function SetRole(arg1:number,arg2:string):Promise<void>;
 
+export function SetTrigger(arg1:number,arg2:domain.TriggerConfig):Promise<void>;
+
 export function Snapshot():Promise<domain.Snapshot>;
+
+export function StartPipeline(arg1:number):Promise<number>;
+
+export function StopFlowRun(arg1:number):Promise<number>;
 
 export function UnlinkNodes(arg1:number):Promise<void>;
 
 export function UpdateLink(arg1:number,arg2:string,arg3:number,arg4:boolean,arg5:string):Promise<void>;
 
 export function UpdateStatus():Promise<update.Status>;
+
+export function Usage(arg1:number):Promise<domain.UsageReport>;

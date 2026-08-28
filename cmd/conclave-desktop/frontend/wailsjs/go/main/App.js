@@ -10,6 +10,10 @@ export function Branch(arg1, arg2, arg3) {
   return window['go']['main']['App']['Branch'](arg1, arg2, arg3);
 }
 
+export function CancelConversation(arg1) {
+  return window['go']['main']['App']['CancelConversation'](arg1);
+}
+
 export function Canvas() {
   return window['go']['main']['App']['Canvas']();
 }
@@ -22,8 +26,24 @@ export function CreateConversation(arg1) {
   return window['go']['main']['App']['CreateConversation'](arg1);
 }
 
+export function CreateGate(arg1) {
+  return window['go']['main']['App']['CreateGate'](arg1);
+}
+
+export function CreateJoin(arg1) {
+  return window['go']['main']['App']['CreateJoin'](arg1);
+}
+
 export function CreateNote(arg1) {
   return window['go']['main']['App']['CreateNote'](arg1);
+}
+
+export function CreatePipeline(arg1) {
+  return window['go']['main']['App']['CreatePipeline'](arg1);
+}
+
+export function CreateTrigger(arg1) {
+  return window['go']['main']['App']['CreateTrigger'](arg1);
 }
 
 export function DeleteCanvasNode(arg1) {
@@ -34,12 +54,36 @@ export function EnsureDaemon() {
   return window['go']['main']['App']['EnsureDaemon']();
 }
 
+export function ExportBoard() {
+  return window['go']['main']['App']['ExportBoard']();
+}
+
+export function ExportConversation(arg1, arg2) {
+  return window['go']['main']['App']['ExportConversation'](arg1, arg2);
+}
+
 export function FileDiff(arg1, arg2) {
   return window['go']['main']['App']['FileDiff'](arg1, arg2);
 }
 
-export function LinkNodes(arg1, arg2) {
-  return window['go']['main']['App']['LinkNodes'](arg1, arg2);
+export function FireTrigger(arg1) {
+  return window['go']['main']['App']['FireTrigger'](arg1);
+}
+
+export function FlowRun(arg1) {
+  return window['go']['main']['App']['FlowRun'](arg1);
+}
+
+export function FlowRuns(arg1) {
+  return window['go']['main']['App']['FlowRuns'](arg1);
+}
+
+export function ImportBoard() {
+  return window['go']['main']['App']['ImportBoard']();
+}
+
+export function LinkNodes(arg1, arg2, arg3) {
+  return window['go']['main']['App']['LinkNodes'](arg1, arg2, arg3);
 }
 
 export function OpenReleasePage(arg1) {
@@ -66,12 +110,24 @@ export function ProviderModels(arg1) {
   return window['go']['main']['App']['ProviderModels'](arg1);
 }
 
+export function ReportFlowRun(arg1) {
+  return window['go']['main']['App']['ReportFlowRun'](arg1);
+}
+
 export function ResumeDialogue(arg1) {
   return window['go']['main']['App']['ResumeDialogue'](arg1);
 }
 
+export function Search(arg1, arg2) {
+  return window['go']['main']['App']['Search'](arg1, arg2);
+}
+
 export function SendTurn(arg1, arg2) {
   return window['go']['main']['App']['SendTurn'](arg1, arg2);
+}
+
+export function SetGate(arg1, arg2) {
+  return window['go']['main']['App']['SetGate'](arg1, arg2);
 }
 
 export function SetLoop(arg1, arg2) {
@@ -86,6 +142,10 @@ export function SetModel(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetModel'](arg1, arg2, arg3);
 }
 
+export function SetPipeline(arg1, arg2) {
+  return window['go']['main']['App']['SetPipeline'](arg1, arg2);
+}
+
 export function SetProject(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetProject'](arg1, arg2, arg3);
 }
@@ -94,8 +154,20 @@ export function SetRole(arg1, arg2) {
   return window['go']['main']['App']['SetRole'](arg1, arg2);
 }
 
+export function SetTrigger(arg1, arg2) {
+  return window['go']['main']['App']['SetTrigger'](arg1, arg2);
+}
+
 export function Snapshot() {
   return window['go']['main']['App']['Snapshot']();
+}
+
+export function StartPipeline(arg1) {
+  return window['go']['main']['App']['StartPipeline'](arg1);
+}
+
+export function StopFlowRun(arg1) {
+  return window['go']['main']['App']['StopFlowRun'](arg1);
 }
 
 export function UnlinkNodes(arg1) {
@@ -108,4 +180,8 @@ export function UpdateLink(arg1, arg2, arg3, arg4, arg5) {
 
 export function UpdateStatus() {
   return window['go']['main']['App']['UpdateStatus']();
+}
+
+export function Usage(arg1) {
+  return window['go']['main']['App']['Usage'](arg1);
 }

@@ -13,7 +13,172 @@ const (
 	StatusPassed  Status = "passed"
 	StatusFailed  Status = "failed"
 	StatusBlocked Status = "blocked"
+	// StatusCanceled is a run a person stopped. It is a finished state like
+	// any other, so a canceled turn never blocks a relay waiting for it.
+	StatusCanceled Status = "canceled"
 )
+
+// UsageReport is what the board has spent, per provider, over a window. It is
+// the addable counterpart to Quota: a provider's own allowance report says how
+// full a window is right now, while this says what was actually done.
+type UsageReport struct {
+	// Days is the window the totals cover, counted back from now.
+	Days      int             `json:"days"`
+	Providers []ProviderUsage `json:"providers"`
+}
+
+type ProviderUsage struct {
+	Provider string `json:"provider"`
+	// Turns is how many responses this provider produced in the window,
+	// finished or failed.
+	Turns        int `json:"turns"`
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	// Cards is how many different cards the provider worked on.
+	Cards int `json:"cards"`
+	// Quota is the provider's own last allowance report, when it offers one.
+	Quota *Quota `json:"quota,omitempty"`
+}
+
+// BoardExportVersion is the shape of an exported board. It is written into
+// every export and checked on import: a file from a newer build describes
+// things this one has no place to put.
+const BoardExportVersion = 1
+
+// BoardExport is a whole board as a file: every card with its transcript, every
+// note, every pipeline, and the links between them. Node ids are the export's
+// own internal references — an import maps them onto new ones.
+type BoardExport struct {
+	Version    int            `json:"version"`
+	ExportedAt time.Time      `json:"exported_at"`
+	Nodes      []ExportedNode `json:"nodes"`
+	Links      []ExportedLink `json:"links"`
+}
+
+// ExportedNode is one card, note or pipeline. Which fields carry meaning is
+// decided by Kind; the rest are absent.
+type ExportedNode struct {
+	NodeID int64   `json:"node_id"`
+	Kind   string  `json:"kind"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
+	Color  string  `json:"color,omitempty"`
+	Body   string  `json:"body,omitempty"`
+
+	Title            string            `json:"title,omitempty"`
+	ConversationKind string            `json:"conversation_kind,omitempty"`
+	Providers        []string          `json:"providers,omitempty"`
+	ProjectPath      string            `json:"project_path,omitempty"`
+	Access           string            `json:"access,omitempty"`
+	Role             string            `json:"role,omitempty"`
+	Models           map[string]string `json:"models,omitempty"`
+	Turns            []ExportedTurn    `json:"turns,omitempty"`
+
+	Stages []PipelineStage `json:"stages,omitempty"`
+
+	// A trigger's schedule. Carried so a routine survives an export: without
+	// it a board comes back with the wiring but nothing to start it.
+	Prompt          string `json:"prompt,omitempty"`
+	TriggerMode     string `json:"trigger_mode,omitempty"`
+	IntervalSeconds int    `json:"interval_seconds,omitempty"`
+	AtTime          string `json:"at_time,omitempty"`
+	Enabled         bool   `json:"enabled,omitempty"`
+
+	// A gate's condition.
+	GateMode      string `json:"gate_mode,omitempty"`
+	Pattern       string `json:"pattern,omitempty"`
+	CaseSensitive bool   `json:"case_sensitive,omitempty"`
+}
+
+type ExportedTurn struct {
+	Prompt    string             `json:"prompt"`
+	Kind      string             `json:"kind"`
+	CreatedAt time.Time          `json:"created_at"`
+	Responses []ExportedResponse `json:"responses"`
+}
+
+type ExportedResponse struct {
+	Provider string `json:"provider"`
+	Status   Status `json:"status"`
+	Content  string `json:"content,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+type ExportedLink struct {
+	SourceNodeID int64 `json:"source_node_id"`
+	TargetNodeID int64 `json:"target_node_id"`
+	// SourceHandle is the port the link left by; only a gate has more than one.
+	SourceHandle string `json:"source_handle,omitempty"`
+	Mode         string `json:"mode"`
+	MaxRounds    int    `json:"max_rounds"`
+	UntilDone    bool   `json:"until_done"`
+	Briefing     string `json:"briefing,omitempty"`
+}
+
+// ImportResult reports what an import actually added. An import never replaces
+// the board: it puts the file's contents alongside what is already there.
+type ImportResult struct {
+	Nodes int `json:"nodes"`
+	Links int `json:"links"`
+}
+
+// SearchHit is one place on the board where a query was found. NodeID is what
+// the canvas needs to bring it into view; everything else is what the result
+// list shows, so a person can tell one hit from another without jumping to it.
+type SearchHit struct {
+	NodeID         int64  `json:"node_id"`
+	ConversationID int64  `json:"conversation_id,omitempty"`
+	TurnID         int64  `json:"turn_id,omitempty"`
+	Kind           string `json:"kind"`
+	Title          string `json:"title"`
+	// Provider is set only on an answer, where which provider said it matters.
+	Provider string `json:"provider,omitempty"`
+	// Where is which part of the board matched: title, role, prompt, answer or
+	// note. The wording of it belongs to the UI.
+	Where   string `json:"where"`
+	Snippet string `json:"snippet"`
+}
+
+// SplitCommand turns a typed command line into an argument array. Quoting is
+// honoured so a path with spaces survives, but nothing is evaluated: there is
+// no shell here, and no expansion of any kind. Card cycles and pipelines both
+// take a typed line, and both must read it the same way.
+func SplitCommand(line string) []string {
+	var parts []string
+	var current strings.Builder
+	quote := rune(0)
+	for _, symbol := range line {
+		switch {
+		case quote != 0:
+			if symbol == quote {
+				quote = 0
+			} else {
+				current.WriteRune(symbol)
+			}
+		case symbol == '\'' || symbol == '"':
+			quote = symbol
+		case symbol == ' ' || symbol == '\t':
+			if current.Len() > 0 {
+				parts = append(parts, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteRune(symbol)
+		}
+	}
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+	return parts
+}
+
+// CancelResult reports how many of a card's responses a stop request reached.
+// Zero means the card was already idle, which the UI treats as nothing to say.
+type CancelResult struct {
+	Stopped int `json:"stopped"`
+}
 
 type Provider struct {
 	Name      string `json:"name"`
@@ -124,7 +289,162 @@ const (
 const (
 	NodeConversation = "conversation"
 	NodeNote         = "note"
+	// NodePipeline is a card that runs an ordered list of commands in a project
+	// and keeps its results. It has no provider and no transcript: a pipeline
+	// is deterministic work, which is exactly what a conversation is not.
+	NodePipeline = "pipeline"
+	// NodeJoin waits for every line feeding it and hands on what they all said
+	// as one message. Without it two paths reaching the same card arrive as two
+	// separate turns, and the card answers each in ignorance of the other.
+	NodeJoin = "join"
+	// NodeTrigger starts a flow on its own: on a timer, at a time of day, or
+	// when a person presses it. Everything reachable from it is what it runs,
+	// which is what turns a board of cards into recurring work.
+	NodeTrigger = "trigger"
+	// NodeGate decides where a message goes next. It reads what arrived and
+	// sends it out of one of two ports, which is what lets a board branch on
+	// what actually happened rather than on how it was wired.
+	NodeGate = "gate"
 )
+
+// How a gate decides. All four read the text that arrived; none of them ask a
+// provider, so a gate costs nothing and always answers the same way twice.
+const (
+	// GateContains passes when the pattern appears in the message.
+	GateContains = "contains"
+	// GateMissing passes when it does not.
+	GateMissing = "missing"
+	// GateMatches passes when a regular expression matches.
+	GateMatches = "matches"
+	// GateNotEmpty passes on any message with text in it, which is how a gate
+	// is used as a plain stop before the rest of a flow.
+	GateNotEmpty = "not_empty"
+)
+
+// The two ways out of a gate. A link carries the port it left by, so one gate
+// can send the passing case one way and everything else another.
+const (
+	GatePass = "pass"
+	GateElse = "else"
+)
+
+// How a trigger decides it is due.
+const (
+	// TriggerManual only ever fires when someone presses it.
+	TriggerManual = "manual"
+	// TriggerInterval fires every so often, measured from the last firing.
+	TriggerInterval = "interval"
+	// TriggerDaily fires once a day at a wall-clock time, in local time: a
+	// routine is something a person schedules against their own day.
+	TriggerDaily = "daily"
+)
+
+// A flow run is one journey of a message across the board: what a person sent,
+// and everything that followed from it. Turns carry the run they belong to, so
+// a spreading exchange can be counted, followed and stopped as one thing.
+const (
+	RunRunning = "running"
+	RunDone    = "done"
+)
+
+// FlowRun is one such journey.
+type FlowRun struct {
+	ID int64 `json:"id"`
+	// OriginConversationID is the card a person spoke to. Zero once that card
+	// is gone: a run outlives the card it started from.
+	OriginConversationID int64  `json:"origin_conversation_id,omitempty"`
+	Status               string `json:"status"`
+	// Steps is how many turns this run has produced so far, the first included.
+	Steps      int    `json:"steps"`
+	StartedAt  string `json:"started_at"`
+	FinishedAt string `json:"finished_at,omitempty"`
+	// OriginLabel names what started the run — a card's title, or a trigger's.
+	// A number alone tells nobody which of last night's runs they are reading.
+	OriginLabel string `json:"origin_label,omitempty"`
+	// OriginKind is "user" or "trigger": whether a person started this or it
+	// happened on its own.
+	OriginKind string `json:"origin_kind,omitempty"`
+	// Cards is how many cards the run touched, which is its width the way
+	// Steps is its length.
+	Cards int `json:"cards,omitempty"`
+}
+
+// How a run began.
+const (
+	OriginUser    = "user"
+	OriginTrigger = "trigger"
+)
+
+// FlowStep is one thing that happened during a run: a card, what it was asked
+// and what it answered.
+type FlowStep struct {
+	TurnID       int64  `json:"turn_id"`
+	Conversation int64  `json:"conversation_id"`
+	Card         string `json:"card"`
+	Kind         string `json:"kind"`
+	Prompt       string `json:"prompt"`
+	Answer       string `json:"answer"`
+	Status       string `json:"status"`
+	At           string `json:"at"`
+}
+
+// FlowRunDetail is a run together with everything that happened in it, in
+// order. It is what a person reads when they were not there to watch.
+type FlowRunDetail struct {
+	Run   FlowRun    `json:"run"`
+	Steps []FlowStep `json:"steps"`
+}
+
+// JoinNode is a waiting point on the board. It has no provider and no
+// transcript of its own; it exists to hold a run until every line reaching it
+// has spoken.
+type JoinNode struct {
+	NodeID int64  `json:"node_id"`
+	Title  string `json:"title"`
+	// Waiting is how many inputs the current run has delivered so far, and
+	// Expected how many lines feed this node. Shown so a stalled join says
+	// which side has not answered rather than merely looking idle.
+	Waiting  int      `json:"waiting"`
+	Expected int      `json:"expected"`
+	Sources  []string `json:"sources,omitempty"`
+}
+
+// PipelineStage is one step of a pipeline as the user typed it. The command is
+// a line rather than an argument array because that is what a person writes;
+// it is split with SplitCommand and never handed to a shell.
+type PipelineStage struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
+}
+
+// Pipeline is an ordered command list a card owns. Stages run in order and stop
+// at the first failure.
+type Pipeline struct {
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+	// ProjectPath is the directory the stages run in. A pipeline with no
+	// project has nothing to run against and is refused rather than run
+	// somewhere arbitrary.
+	ProjectPath string          `json:"project_path,omitempty"`
+	Stages      []PipelineStage `json:"stages"`
+	// Runs are this pipeline's most recent results, newest first.
+	Runs []Run `json:"runs,omitempty"`
+}
+
+// NewPipeline creates a pipeline together with the canvas node that shows it.
+type NewPipeline struct {
+	Title string  `json:"title"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+}
+
+// PipelineConfig replaces everything about a pipeline in one write, the way a
+// card's step list is saved.
+type PipelineConfig struct {
+	Title       string          `json:"title"`
+	ProjectPath string          `json:"project_path"`
+	Stages      []PipelineStage `json:"stages"`
+}
 
 type Conversation struct {
 	ID        int64      `json:"id"`
@@ -173,7 +493,81 @@ const (
 	TurnUser  = "user"
 	TurnRelay = "relay"
 	TurnNudge = "nudge"
+	// TurnTrigger is a message a trigger sent. It reads like a user turn but
+	// nobody typed it, and a card's transcript should not pretend otherwise.
+	TurnTrigger = "trigger"
 )
+
+// Trigger is a node that starts work by itself. The flow it runs is whatever
+// the board links to it, so a trigger is a starting point rather than a
+// separate description of a pipeline.
+type Trigger struct {
+	ID     int64  `json:"id"`
+	NodeID int64  `json:"node_id"`
+	Title  string `json:"title"`
+	// Prompt is what the cards linked to it receive when it fires.
+	Prompt          string `json:"prompt"`
+	Mode            string `json:"mode"`
+	IntervalSeconds int    `json:"interval_seconds"`
+	// AtTime is "HH:MM" in local time, used by the daily mode.
+	AtTime      string `json:"at_time"`
+	Enabled     bool   `json:"enabled"`
+	DueAt       string `json:"due_at,omitempty"`
+	LastFiredAt string `json:"last_fired_at,omitempty"`
+	LastRunID   int64  `json:"last_run_id,omitempty"`
+	// Working reports that the run this trigger last started is still going.
+	// A routine that overruns its own interval must not start again on top of
+	// itself.
+	Working bool `json:"working"`
+}
+
+// Gate is a decision point on the board. It reads the message that reached it
+// and sends it out of its pass port or its else port.
+type Gate struct {
+	ID     int64  `json:"id"`
+	NodeID int64  `json:"node_id"`
+	Title  string `json:"title"`
+	Mode   string `json:"mode"`
+	// Pattern is the text or expression the mode reads. Unused by not_empty.
+	Pattern string `json:"pattern"`
+	// CaseSensitive is off by default: a card writing "TAMAM" means the same
+	// thing as one writing "tamam".
+	CaseSensitive bool `json:"case_sensitive"`
+	// LastResult is what the gate decided the last time something reached it,
+	// so a board can be read after the fact: "pass", "else", or empty.
+	LastResult string `json:"last_result,omitempty"`
+	LastSeenAt string `json:"last_seen_at,omitempty"`
+}
+
+type NewGate struct {
+	Title string  `json:"title"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+}
+
+// GateConfig replaces everything about a gate in one write.
+type GateConfig struct {
+	Title         string `json:"title"`
+	Mode          string `json:"mode"`
+	Pattern       string `json:"pattern"`
+	CaseSensitive bool   `json:"case_sensitive"`
+}
+
+type NewTrigger struct {
+	Title string  `json:"title"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+}
+
+// TriggerConfig replaces everything about a trigger in one write.
+type TriggerConfig struct {
+	Title           string `json:"title"`
+	Prompt          string `json:"prompt"`
+	Mode            string `json:"mode"`
+	IntervalSeconds int    `json:"interval_seconds"`
+	AtTime          string `json:"at_time"`
+	Enabled         bool   `json:"enabled"`
+}
 
 // CanvasNode is presentation state the daemon owns so a layout survives a
 // restart and is identical for every client.
@@ -181,6 +575,9 @@ type CanvasNode struct {
 	ID             int64   `json:"id"`
 	Kind           string  `json:"kind"`
 	ConversationID *int64  `json:"conversation_id,omitempty"`
+	PipelineID     *int64  `json:"pipeline_id,omitempty"`
+	TriggerID      *int64  `json:"trigger_id,omitempty"`
+	GateID         *int64  `json:"gate_id,omitempty"`
 	X              float64 `json:"x"`
 	Y              float64 `json:"y"`
 	Width          float64 `json:"width"`
@@ -286,9 +683,12 @@ type NewNote struct {
 // CanvasLink relays a card's finished answer into another card as its next
 // message, which is how two providers hold a conversation with each other.
 type CanvasLink struct {
-	ID        int64  `json:"id"`
-	SourceID  int64  `json:"source_id"`
-	TargetID  int64  `json:"target_id"`
+	ID       int64 `json:"id"`
+	SourceID int64 `json:"source_id"`
+	TargetID int64 `json:"target_id"`
+	// SourceHandle is the port the link leaves by. Empty for every ordinary
+	// card, which has only one way out; a gate uses it to tell its two apart.
+	SourceHandle string `json:"source_handle,omitempty"`
 	Mode      string `json:"mode"`
 	MaxRounds int    `json:"max_rounds"`
 	UntilDone bool   `json:"until_done"`
@@ -317,6 +717,9 @@ type LinkOptions struct {
 	// Briefing is the shared goal, given to each card once before its first
 	// relayed message rather than repeated on every hop.
 	Briefing string `json:"briefing,omitempty"`
+	// SourceHandle is the port the link leaves by. Only a gate has more than
+	// one; anything else leaves this empty.
+	SourceHandle string `json:"source_handle,omitempty"`
 }
 
 // Normalised fills in defaults and clamps the round budget.
@@ -338,6 +741,13 @@ func (o LinkOptions) Normalised() LinkOptions {
 	if len(o.Briefing) > maxBriefingBytes {
 		o.Briefing = o.Briefing[:maxBriefingBytes]
 	}
+	switch o.SourceHandle {
+	case GatePass, GateElse:
+	default:
+		// Anything unrecognised means "the one way out", which is what every
+		// node but a gate has.
+		o.SourceHandle = ""
+	}
 	return o
 }
 
@@ -346,8 +756,9 @@ func (o LinkOptions) Normalised() LinkOptions {
 const maxBriefingBytes = 4000
 
 type NewLink struct {
-	SourceID  int64  `json:"source_id"`
-	TargetID  int64  `json:"target_id"`
+	SourceID     int64  `json:"source_id"`
+	TargetID     int64  `json:"target_id"`
+	SourceHandle string `json:"source_handle,omitempty"`
 	Mode      string `json:"mode,omitempty"`
 	MaxRounds int    `json:"max_rounds,omitempty"`
 	UntilDone bool   `json:"until_done,omitempty"`
@@ -359,8 +770,18 @@ type NewLink struct {
 // Canvas is everything the desktop client needs to draw the board.
 type Canvas struct {
 	Conversations []Conversation `json:"conversations"`
+	Pipelines     []Pipeline     `json:"pipelines"`
 	Nodes         []CanvasNode   `json:"nodes"`
 	Links         []CanvasLink   `json:"links"`
+	// Joins are the waiting points on the board, with what each is holding.
+	Joins []JoinNode `json:"joins"`
+	// Triggers are the starting points that fire on their own.
+	Triggers []Trigger `json:"triggers"`
+	// Gates are the decision points: what each one reads and what it saw last.
+	Gates []Gate `json:"gates"`
+	// Runs are the journeys still in flight: what the board is busy with, as
+	// one thing per message someone sent rather than one per card.
+	Runs []FlowRun `json:"runs"`
 }
 
 // Loop modes for a card's step list.

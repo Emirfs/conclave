@@ -13,11 +13,12 @@ type Props = NodeProps & {
     onResize: (id: string, direction: -1 | 1) => void
     /** Sets the card's height directly, used to fit it to its own content. */
     onSetHeight: (id: string, height: number) => void
+    deleting?: boolean
   }
 }
 
 export const NoteNode = memo(function NoteNode({ id, data, selected }: Props) {
-  const { onBodyChange, onClose, onResize, onSetHeight } = data
+  const { onBodyChange, onClose, onResize, onSetHeight, deleting } = data
   // A result card arrives holding a whole answer, so it opens rendered rather
   // than as raw markdown in a textarea.
   const [preview, setPreview] = useState(data.body.startsWith('## '))
@@ -58,7 +59,7 @@ export const NoteNode = memo(function NoteNode({ id, data, selected }: Props) {
   return (
     <div
       ref={card}
-      className={`node node--note${selected ? ' node--selected' : ''}`}
+      className={`node node--note${selected ? ' node--selected' : ''}${deleting ? ' node--deleting' : ''}`}
       style={{ ['--note-accent' as string]: data.color || 'var(--warning)' }}
     >
       <NodeResizer

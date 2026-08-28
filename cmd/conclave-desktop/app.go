@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -86,6 +87,120 @@ func (a *App) CreateNote(input domain.NewNote) (domain.CanvasNode, error) {
 	return client.CreateNote(ctx, input)
 }
 
+// CreateJoin puts a waiting point on the board: a node that holds what each
+// line feeding it said and passes them on together, once.
+func (a *App) CreateJoin(input domain.NewNote) (domain.CanvasNode, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.CanvasNode{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CreateJoin(ctx, input)
+}
+
+// CreateGate puts a decision point on the board: a card that reads what reached
+// it and sends it out of one of two ports.
+func (a *App) CreateGate(input domain.NewGate) (domain.Gate, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.Gate{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CreateGate(ctx, input)
+}
+
+// SetGate replaces a gate's condition.
+func (a *App) SetGate(id int64, config domain.GateConfig) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.SetGate(ctx, id, config)
+}
+
+// CreateTrigger puts a starting point on the board: a card that fires on a
+// timer, at a time of day, or when someone presses it.
+func (a *App) CreateTrigger(input domain.NewTrigger) (domain.Trigger, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.Trigger{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CreateTrigger(ctx, input)
+}
+
+// SetTrigger replaces a trigger's message and schedule, arming or disarming it.
+func (a *App) SetTrigger(id int64, config domain.TriggerConfig) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.SetTrigger(ctx, id, config)
+}
+
+// FireTrigger runs a trigger now, whatever its schedule says.
+func (a *App) FireTrigger(id int64) (int, error) {
+	client, err := a.client()
+	if err != nil {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+	return client.FireTrigger(ctx, id)
+}
+
+// FlowRuns lists recent journeys across the board, the ones still going first.
+func (a *App) FlowRuns(limit int) ([]domain.FlowRun, error) {
+	client, err := a.client()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.FlowRuns(ctx, limit)
+}
+
+// FlowRun reports everything that happened in one run, in order.
+func (a *App) FlowRun(runID int64) (domain.FlowRunDetail, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.FlowRunDetail{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+	return client.FlowRun(ctx, runID)
+}
+
+// ReportFlowRun writes a run up as a note on the board.
+func (a *App) ReportFlowRun(runID int64) (domain.CanvasNode, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.CanvasNode{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+	return client.ReportFlowRun(ctx, runID)
+}
+
+// StopFlowRun ends one journey across the board, stopping every card still
+// working on it.
+func (a *App) StopFlowRun(runID int64) (int, error) {
+	client, err := a.client()
+	if err != nil {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+	return client.StopFlowRun(ctx, runID)
+}
+
 // SendTurn posts a message into a conversation. Every provider the
 // conversation targets answers it.
 func (a *App) SendTurn(conversationID int64, prompt string) error {
@@ -155,14 +270,16 @@ func (a *App) FileDiff(conversationID int64, path string) (vcs.Diff, error) {
 }
 
 // LinkNodes relays the source card's answers into the target card.
-func (a *App) LinkNodes(sourceID, targetID int64) (domain.CanvasLink, error) {
+func (a *App) LinkNodes(sourceID, targetID int64, sourceHandle string) (domain.CanvasLink, error) {
 	client, err := a.client()
 	if err != nil {
 		return domain.CanvasLink{}, err
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
-	return client.CreateLink(ctx, domain.NewLink{SourceID: sourceID, TargetID: targetID})
+	return client.CreateLink(ctx, domain.NewLink{
+		SourceID: sourceID, TargetID: targetID, SourceHandle: sourceHandle,
+	})
 }
 
 // PairNodes links two cards both ways so they answer each other. The briefing
@@ -243,6 +360,169 @@ func (a *App) Branch(conversationID int64, answer string, providers []string) ([
 }
 
 // ResumeDialogue clears a parked exchange so the next message starts it again.
+// Usage reports what each provider spent over the last few days.
+func (a *App) Usage(days int) (domain.UsageReport, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.UsageReport{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+	return client.Usage(ctx, days)
+}
+
+// ExportConversation writes a card's transcript to a Markdown file the user
+// picks. It returns the chosen path, or an empty string when the dialog was
+// cancelled — a cancel is not an error.
+func (a *App) ExportConversation(conversationID int64, suggestedName string) (string, error) {
+	client, err := a.client()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	markdown, err := client.ExportConversation(ctx, conversationID)
+	if err != nil {
+		return "", err
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		DefaultFilename: safeFilename(suggestedName) + ".md",
+		Filters:         []runtime.FileFilter{{DisplayName: "Markdown", Pattern: "*.md"}},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(markdown), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// ExportBoard writes the whole board to a JSON file the user picks.
+func (a *App) ExportBoard() (string, error) {
+	client, err := a.client()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+	defer cancel()
+	export, err := client.ExportBoard(ctx)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.MarshalIndent(export, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		DefaultFilename: "conclave-pano-" + time.Now().Format("2006-01-02") + ".json",
+		Filters:         []runtime.FileFilter{{DisplayName: "Conclave panosu", Pattern: "*.json"}},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// ImportBoard adds an exported board to the current one. Nothing is replaced:
+// the file's cards arrive alongside what is already on the canvas.
+func (a *App) ImportBoard() (domain.ImportResult, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Filters: []runtime.FileFilter{{DisplayName: "Conclave panosu", Pattern: "*.json"}},
+	})
+	if err != nil || path == "" {
+		return domain.ImportResult{}, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return domain.ImportResult{}, err
+	}
+	var export domain.BoardExport
+	if err := json.Unmarshal(raw, &export); err != nil {
+		return domain.ImportResult{}, errors.New("this file is not a Conclave board export")
+	}
+	client, err := a.client()
+	if err != nil {
+		return domain.ImportResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+	defer cancel()
+	return client.ImportBoard(ctx, export)
+}
+
+// safeFilename keeps a card title usable as a file name without deciding what
+// the user may call the file: the dialog is still theirs to edit.
+func safeFilename(name string) string {
+	cleaned := strings.Map(func(symbol rune) rune {
+		if strings.ContainsRune(`\/:*?"<>|`, symbol) {
+			return '-'
+		}
+		return symbol
+	}, strings.TrimSpace(name))
+	if cleaned == "" {
+		return "conclave"
+	}
+	return cleaned
+}
+
+// CreatePipeline puts a new pipeline card on the board.
+func (a *App) CreatePipeline(input domain.NewPipeline) (domain.Pipeline, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.Pipeline{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CreatePipeline(ctx, input)
+}
+
+// SetPipeline replaces a pipeline card's title, project and stage list.
+func (a *App) SetPipeline(id int64, config domain.PipelineConfig) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.SetPipeline(ctx, id, config)
+}
+
+// StartPipeline queues a pipeline card's stages.
+func (a *App) StartPipeline(id int64) (int64, error) {
+	client, err := a.client()
+	if err != nil {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.StartPipeline(ctx, id)
+}
+
+// Search looks for text across every card and note on the board.
+func (a *App) Search(query string, limit int) ([]domain.SearchHit, error) {
+	client, err := a.client()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+	return client.Search(ctx, query, limit)
+}
+
+// CancelConversation stops a card's running or queued turns.
+func (a *App) CancelConversation(conversationID int64) (domain.CancelResult, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.CancelResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CancelConversation(ctx, conversationID)
+}
+
 func (a *App) ResumeDialogue(conversationID int64) error {
 	client, err := a.client()
 	if err != nil {

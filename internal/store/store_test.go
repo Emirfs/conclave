@@ -1386,3 +1386,179 @@ func TestRelayedPromptNamesTheSpeakingCard(t *testing.T) {
 		}
 	}
 }
+
+// Three cards arranged A → B → C → A (closed loop) must stop at relay_depth limit
+// and not loop forever. Messages flow: A (depth 0) → B (depth 1) → C (depth 2) → A (depth 3, blocked).
+// The links are one-way on purpose: a dialogue link creates its own return
+// link, which would make this a triangle where everyone talks to everyone.
+func TestThreeCardLoopStopsAtRelayDepthLimit(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+
+	// Create three cards
+	cardA, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "A", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+	cardB, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "B", Kind: domain.KindSolo, Providers: []string{"openai"},
+	})
+	if err != nil {
+		t.Fatalf("create B: %v", err)
+	}
+	cardC, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "C", Kind: domain.KindSolo, Providers: []string{"gemini"},
+	})
+	if err != nil {
+		t.Fatalf("create C: %v", err)
+	}
+
+	canvas, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+
+	// Create links A → B → C → A
+	aNode := nodeOf(t, canvas, cardA.ID)
+	bNode := nodeOf(t, canvas, cardB.ID)
+	cNode := nodeOf(t, canvas, cardC.ID)
+
+	if _, err := store.CreateLink(ctx, aNode, bNode, domain.LinkOptions{
+		Mode:      domain.LinkRelay,
+		MaxRounds: defaultRounds,
+	}); err != nil {
+		t.Fatalf("link A->B: %v", err)
+	}
+	if _, err := store.CreateLink(ctx, bNode, cNode, domain.LinkOptions{
+		Mode:      domain.LinkRelay,
+		MaxRounds: defaultRounds,
+	}); err != nil {
+		t.Fatalf("link B->C: %v", err)
+	}
+	if _, err := store.CreateLink(ctx, cNode, aNode, domain.LinkOptions{
+		Mode:      domain.LinkRelay,
+		MaxRounds: defaultRounds,
+	}); err != nil {
+		t.Fatalf("link C->A: %v", err)
+	}
+
+	// Start conversation in A
+	if _, err := store.CreateConversationTurn(ctx, cardA.ID, "başlat"); err != nil {
+		t.Fatalf("turn A: %v", err)
+	}
+
+	// Answer all turns until they settle (should be 3 rounds + 1 origin)
+	answered := answerAll(t, store, "devam")
+	if answered != defaultRounds+1 {
+		t.Fatalf("answered %d turns, want %d (original + %d relayed)", answered, defaultRounds+1, defaultRounds)
+	}
+
+	// Verify depth progression: 0 → 1 → 2 → 3 (blocked)
+	var depths []int
+	rows, err := store.db.QueryContext(ctx, "SELECT relay_depth FROM chat_turns ORDER BY id")
+	if err != nil {
+		t.Fatalf("read depths: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var depth int
+		if err := rows.Scan(&depth); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		depths = append(depths, depth)
+	}
+
+	// Expected: [0, 1, 2, 3] — depth 3 should exist (attempted), but nothing beyond
+	expected := []int{0, 1, 2, 3}
+	if len(depths) != len(expected) {
+		t.Fatalf("got depths %v, want %v", depths, expected)
+	}
+	for i, d := range depths {
+		if d != expected[i] {
+			t.Fatalf("depth[%d] = %d, want %d", i, d, expected[i])
+		}
+	}
+}
+
+// Fan-out (A → B and A → C) allows both branches independently,
+// each consuming its own relay_depth budget.
+func TestFanOutBranchesIndependently(t *testing.T) {
+	store := openTemp(t)
+	ctx := context.Background()
+
+	cardA, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "A", Kind: domain.KindSolo, Providers: []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+	cardB, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "B", Kind: domain.KindSolo, Providers: []string{"openai"},
+	})
+	if err != nil {
+		t.Fatalf("create B: %v", err)
+	}
+	cardC, err := store.CreateConversation(ctx, domain.NewConversation{
+		Title: "C", Kind: domain.KindSolo, Providers: []string{"gemini"},
+	})
+	if err != nil {
+		t.Fatalf("create C: %v", err)
+	}
+
+	canvas, err := store.Canvas(ctx)
+	if err != nil {
+		t.Fatalf("canvas: %v", err)
+	}
+
+	aNode := nodeOf(t, canvas, cardA.ID)
+	bNode := nodeOf(t, canvas, cardB.ID)
+	cNode := nodeOf(t, canvas, cardC.ID)
+
+	// Create A → B and A → C (fan-out)
+	if _, err := store.CreateLink(ctx, aNode, bNode, domain.LinkOptions{
+		Mode:      domain.LinkRelay,
+		MaxRounds: 2,
+	}); err != nil {
+		t.Fatalf("link A->B: %v", err)
+	}
+	if _, err := store.CreateLink(ctx, aNode, cNode, domain.LinkOptions{
+		Mode:      domain.LinkRelay,
+		MaxRounds: 2,
+	}); err != nil {
+		t.Fatalf("link A->C: %v", err)
+	}
+
+	// Start in A
+	if _, err := store.CreateConversationTurn(ctx, cardA.ID, "fork"); err != nil {
+		t.Fatalf("turn A: %v", err)
+	}
+
+	// Answer A, B, C repeatedly
+	answered := answerAll(t, store, "branch response")
+
+	// A speaks once and both branches answer once. Neither B nor C links
+	// onwards, so the fan-out is three turns wide and one deep.
+	if answered != 3 {
+		t.Fatalf("answered %d turns, want 3", answered)
+	}
+
+	// Verify B and C each see only up to depth 2
+	var cardBMaxDepth, cardCMaxDepth int
+	if err := store.db.QueryRowContext(ctx, `
+		SELECT MAX(relay_depth) FROM chat_turns WHERE conversation_id = ?
+	`, cardB.ID).Scan(&cardBMaxDepth); err != nil && err != sql.ErrNoRows {
+		t.Fatalf("read B max depth: %v", err)
+	}
+	if err := store.db.QueryRowContext(ctx, `
+		SELECT MAX(relay_depth) FROM chat_turns WHERE conversation_id = ?
+	`, cardC.ID).Scan(&cardCMaxDepth); err != nil && err != sql.ErrNoRows {
+		t.Fatalf("read C max depth: %v", err)
+	}
+
+	if cardBMaxDepth != 1 || cardCMaxDepth != 1 {
+		t.Fatalf("B max depth = %d, C max depth = %d; want both 1", cardBMaxDepth, cardCMaxDepth)
+	}
+}
+

@@ -228,6 +228,124 @@ CREATE TABLE conversation_models (
     PRIMARY KEY (conversation_id, provider)
 );
 `,
+	// 13: a person can stop a turn that is already under way. The request is
+	// written here rather than handed to the worker directly, because the
+	// daemon owns runtime state and a client only ever writes to the database.
+	`
+ALTER TABLE chat_responses ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0;
+`,
+	// 14: a pipeline is a card on the board rather than something only a
+	// terminal can queue. The definition lives here; a queued execution still
+	// goes through runs and stages, which the daemon already knows how to run.
+	`
+CREATE TABLE pipelines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL DEFAULT '',
+    project_path TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE pipeline_stages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pipeline_id INTEGER NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    command TEXT NOT NULL,
+    UNIQUE(pipeline_id, position)
+);
+ALTER TABLE canvas_nodes ADD COLUMN pipeline_id INTEGER REFERENCES pipelines(id) ON DELETE CASCADE;
+ALTER TABLE runs ADD COLUMN pipeline_id INTEGER REFERENCES pipelines(id) ON DELETE SET NULL;
+CREATE INDEX canvas_nodes_pipeline_idx ON canvas_nodes(pipeline_id);
+CREATE INDEX runs_pipeline_idx ON runs(pipeline_id, id DESC);
+`,
+	// 15: what one turn cost, as the provider reported it. Unlike
+	// provider_sessions.context_tokens, which grows with a session and is
+	// last-value-wins, these are per-response and therefore addable: a week of
+	// turns sums to a week of usage.
+	`
+ALTER TABLE chat_responses ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE chat_responses ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0;
+`,
+	// 16: a message and everything that follows from it are one run. Turns
+	// carry the run they belong to, which is what lets a spreading exchange be
+	// counted and followed as one thing rather than as unrelated turns.
+	//
+	// A join node is a waiting point in that run: it holds what each incoming
+	// line said until they have all spoken, then hands the lot on as one
+	// message. Its inputs are per-run, because two runs may sit at the same
+	// join at once and must not be mixed.
+	`
+CREATE TABLE flow_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    origin_conversation_id INTEGER REFERENCES conversations(id) ON DELETE SET NULL,
+    status TEXT NOT NULL,
+    steps INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL DEFAULT ''
+);
+ALTER TABLE chat_turns ADD COLUMN flow_run_id INTEGER REFERENCES flow_runs(id) ON DELETE SET NULL;
+CREATE INDEX chat_turns_flow_idx ON chat_turns(flow_run_id, id);
+CREATE TABLE join_inputs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Not a foreign key: a turn from before runs existed carries no run, and
+    -- an answer relayed from one must still be able to reach a join. Runs clear
+    -- their own parked inputs when they end.
+    flow_run_id INTEGER NOT NULL,
+    node_id INTEGER NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+    source_node_id INTEGER NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+    source_title TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL,
+    arrived_at TEXT NOT NULL,
+    UNIQUE(flow_run_id, node_id, source_node_id)
+);
+CREATE INDEX join_inputs_node_idx ON join_inputs(node_id, flow_run_id);
+`,
+	// 17: a trigger starts a flow by itself — on a timer, at a time of day, or
+	// when someone presses it. What it runs is whatever the board links to it,
+	// so there is no separate description of a flow to keep in step with the
+	// canvas: the flow is the subgraph reachable from the trigger.
+	`
+CREATE TABLE triggers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL DEFAULT '',
+    prompt TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT 'manual',
+    interval_seconds INTEGER NOT NULL DEFAULT 3600,
+    at_time TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 0,
+    due_at TEXT NOT NULL DEFAULT '',
+    last_fired_at TEXT NOT NULL DEFAULT '',
+    last_run_id INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+ALTER TABLE canvas_nodes ADD COLUMN trigger_id INTEGER REFERENCES triggers(id) ON DELETE CASCADE;
+CREATE INDEX triggers_due_idx ON triggers(enabled, due_at);
+`,
+	// 18: a gate reads the message that reached it and sends it out of one of
+	// two ports. Links therefore have to remember which port they left by:
+	// without that, both ways out of a gate would be the same way.
+	`
+CREATE TABLE gates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT 'contains',
+    pattern TEXT NOT NULL DEFAULT '',
+    case_sensitive INTEGER NOT NULL DEFAULT 0,
+    last_result TEXT NOT NULL DEFAULT '',
+    last_seen_at TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+ALTER TABLE canvas_nodes ADD COLUMN gate_id INTEGER REFERENCES gates(id) ON DELETE CASCADE;
+ALTER TABLE canvas_links ADD COLUMN source_handle TEXT NOT NULL DEFAULT '';
+`,
+	// 19: a run says what started it and is kept after it ends. A routine fires
+	// while nobody is watching, so "what happened last night" has to be a
+	// question the board can answer rather than one only a live panel could.
+	`
+ALTER TABLE flow_runs ADD COLUMN origin_label TEXT NOT NULL DEFAULT '';
+ALTER TABLE flow_runs ADD COLUMN origin_kind TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE flow_runs ADD COLUMN reported INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX flow_runs_recent_idx ON flow_runs(id DESC);
+`,
 }
 
 func (s *Store) init() error {
@@ -297,6 +415,17 @@ func (s *Store) CreateConversationTurn(ctx context.Context, conversationID int64
 	}
 	turnID, err := insertTurn(ctx, tx, conversationID, prompt, providers, domain.TurnUser)
 	if err != nil {
+		return 0, err
+	}
+	// A person speaking starts a run: this message and everything that follows
+	// from it across the board are one thing, which is what makes the spread
+	// something you can watch and stop as a whole.
+	runID, err := s.StartFlowRun(ctx, tx, conversationID)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE chat_turns SET flow_run_id = ? WHERE id = ?", runID, turnID); err != nil {
 		return 0, err
 	}
 	// A person speaking is the answer a parked exchange was waiting for.
@@ -374,6 +503,7 @@ LEFT JOIN provider_sessions ps
 LEFT JOIN conversation_models cm
        ON cm.conversation_id = t.conversation_id AND cm.provider = r.provider
 WHERE r.status = ?
+  AND r.cancel_requested = 0
   AND NOT EXISTS (
     SELECT 1 FROM chat_responses active
     WHERE active.provider = r.provider AND active.status = ?
@@ -483,6 +613,16 @@ ORDER BY t.id DESC LIMIT 8`, turnID, provider, conversationID, turnID, turnID, d
 	return prompt.String(), nil
 }
 
+// RecordChatUsage stores what one turn cost. It is written apart from the
+// answer because a provider reports usage on its own event, which may arrive
+// before the run is finished — or, on a failure, instead of a finished answer.
+func (s *Store) RecordChatUsage(ctx context.Context, id int64, input, output int) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE chat_responses SET input_tokens = ?, output_tokens = ? WHERE id = ?",
+		input, output, id)
+	return err
+}
+
 func (s *Store) FinishChatResponse(ctx context.Context, id int64, status domain.Status, content, failure string) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE chat_responses SET status = ?, content = ?, error = ?, activity = '', updated_at = ? WHERE id = ?`,
@@ -495,6 +635,70 @@ func (s *Store) RequeueChatResponse(ctx context.Context, id int64) error {
 		"UPDATE chat_responses SET status = ?, updated_at = ? WHERE id = ?",
 		domain.StatusQueued, time.Now().UTC().Format(time.RFC3339Nano), id)
 	return err
+}
+
+// RequestConversationCancel stops what a card is doing. A response that has not
+// been claimed yet is finished on the spot; one already running is only flagged,
+// because the process belongs to a daemon worker and only that worker can end
+// it. The card's cycle is disarmed too: stopping a card should not leave a timer
+// about to start the next round.
+//
+// It returns how many responses were affected, which is zero for an idle card.
+func (s *Store) RequestConversationCancel(ctx context.Context, conversationID int64) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := tx.ExecContext(ctx, `
+UPDATE chat_responses SET cancel_requested = 1, updated_at = ?
+WHERE status IN (?, ?)
+  AND turn_id IN (SELECT id FROM chat_turns WHERE conversation_id = ?)`,
+		now, domain.StatusQueued, domain.StatusRunning, conversationID)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	// Nothing owns a queued response, so it can be finished here and now.
+	if _, err := tx.ExecContext(ctx, `
+UPDATE chat_responses SET status = ?, activity = '', updated_at = ?
+WHERE status = ? AND cancel_requested = 1
+  AND turn_id IN (SELECT id FROM chat_turns WHERE conversation_id = ?)`,
+		domain.StatusCanceled, now, domain.StatusQueued, conversationID); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE conversations SET loop_running = 0 WHERE id = ?", conversationID); err != nil {
+		return 0, err
+	}
+	return int(affected), tx.Commit()
+}
+
+// CancelChatResponse finishes a stopped response. It deliberately leaves
+// content alone: whatever the provider managed to say was already streamed into
+// the row, and a stop should not erase it.
+func (s *Store) CancelChatResponse(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `
+UPDATE chat_responses SET status = ?, error = '', activity = '', updated_at = ? WHERE id = ?`,
+		domain.StatusCanceled, time.Now().UTC().Format(time.RFC3339Nano), id)
+	return err
+}
+
+// ChatCancelRequested reports whether a person asked for this response to stop.
+// The worker running it polls this: it is the only channel a client has into a
+// process the daemon already started.
+func (s *Store) ChatCancelRequested(ctx context.Context, id int64) (bool, error) {
+	var requested int
+	err := s.db.QueryRowContext(ctx,
+		"SELECT cancel_requested FROM chat_responses WHERE id = ?", id).Scan(&requested)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return requested != 0, err
 }
 
 // conversationTurns returns the most recent turns of one conversation in
@@ -746,10 +950,18 @@ func (s *Store) stages(ctx context.Context, runID int64) ([]domain.Stage, error)
 const transcriptLimit = 24
 
 const (
+	gateWidth          = 300
+	gateHeight         = 230
+	triggerWidth       = 320
+	triggerHeight      = 300
 	conversationWidth  = 420
 	conversationHeight = 340
 	noteWidth          = 240
 	noteHeight         = 180
+	pipelineWidth      = 360
+	pipelineHeight     = 300
+	joinWidth          = 220
+	joinHeight         = 150
 )
 
 // CreateConversation stores a conversation together with the canvas node that
@@ -909,8 +1121,13 @@ func (s *Store) branchPosition(ctx context.Context, conversationID int64) (float
 func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 	canvas := domain.Canvas{
 		Conversations: []domain.Conversation{},
+		Pipelines:     []domain.Pipeline{},
 		Nodes:         []domain.CanvasNode{},
 		Links:         []domain.CanvasLink{},
+		Joins:         []domain.JoinNode{},
+		Triggers:      []domain.Trigger{},
+		Gates:         []domain.Gate{},
+		Runs:          []domain.FlowRun{},
 	}
 	conversations, err := s.listConversations(ctx)
 	if err != nil {
@@ -934,6 +1151,11 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 		conversations[index].Runs = runs
 	}
 	canvas.Conversations = conversations
+	pipelines, err := s.listPipelines(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Pipelines = pipelines
 	nodes, err := s.listCanvasNodes(ctx)
 	if err != nil {
 		return canvas, err
@@ -944,6 +1166,26 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 		return canvas, err
 	}
 	canvas.Links = links
+	joins, err := s.listJoins(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Joins = joins
+	triggers, err := s.listTriggers(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Triggers = triggers
+	gates, err := s.listGates(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Gates = gates
+	runs, err := s.ActiveFlowRuns(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Runs = runs
 	return canvas, nil
 }
 
@@ -1016,7 +1258,8 @@ func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, e
 
 func (s *Store) listCanvasNodes(ctx context.Context) ([]domain.CanvasNode, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, kind, conversation_id, x, y, width, height, z, color, body
+SELECT id, kind, conversation_id, pipeline_id, trigger_id, gate_id,
+       x, y, width, height, z, color, body
 FROM canvas_nodes ORDER BY z, id`)
 	if err != nil {
 		return nil, err
@@ -1025,14 +1268,26 @@ FROM canvas_nodes ORDER BY z, id`)
 	nodes := []domain.CanvasNode{}
 	for rows.Next() {
 		var node domain.CanvasNode
-		var conversationID sql.NullInt64
-		if err := rows.Scan(&node.ID, &node.Kind, &conversationID, &node.X, &node.Y,
-			&node.Width, &node.Height, &node.Z, &node.Color, &node.Body); err != nil {
+		var conversationID, pipelineID, triggerID, gateID sql.NullInt64
+		if err := rows.Scan(&node.ID, &node.Kind, &conversationID, &pipelineID, &triggerID, &gateID,
+			&node.X, &node.Y, &node.Width, &node.Height, &node.Z, &node.Color, &node.Body); err != nil {
 			return nil, err
 		}
 		if conversationID.Valid {
 			value := conversationID.Int64
 			node.ConversationID = &value
+		}
+		if pipelineID.Valid {
+			value := pipelineID.Int64
+			node.PipelineID = &value
+		}
+		if triggerID.Valid {
+			value := triggerID.Int64
+			node.TriggerID = &value
+		}
+		if gateID.Valid {
+			value := gateID.Int64
+			node.GateID = &value
 		}
 		nodes = append(nodes, node)
 	}
@@ -1095,9 +1350,10 @@ func (s *Store) DeleteCanvasNode(ctx context.Context, id int64) error {
 	}
 	defer tx.Rollback()
 	var kind string
-	var conversationID sql.NullInt64
+	var conversationID, pipelineID, triggerID, gateID sql.NullInt64
 	err = tx.QueryRowContext(ctx,
-		"SELECT kind, conversation_id FROM canvas_nodes WHERE id = ?", id).Scan(&kind, &conversationID)
+		"SELECT kind, conversation_id, pipeline_id, trigger_id, gate_id FROM canvas_nodes WHERE id = ?", id).
+		Scan(&kind, &conversationID, &pipelineID, &triggerID, &gateID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return sql.ErrNoRows
 	}
@@ -1110,6 +1366,28 @@ func (s *Store) DeleteCanvasNode(ctx context.Context, id int64) error {
 	if kind == domain.NodeConversation && conversationID.Valid {
 		if _, err := tx.ExecContext(ctx,
 			"DELETE FROM conversations WHERE id = ?", conversationID.Int64); err != nil {
+			return err
+		}
+	}
+	// The node is how a pipeline is reached, so closing the card takes the
+	// definition with it. A pipeline with no node would be unreachable state.
+	if kind == domain.NodePipeline && pipelineID.Valid {
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM pipelines WHERE id = ?", pipelineID.Int64); err != nil {
+			return err
+		}
+	}
+	// Same for a trigger: closing the card is how a routine is switched off for
+	// good, and a trigger left behind would keep firing into nothing.
+	if kind == domain.NodeTrigger && triggerID.Valid {
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM triggers WHERE id = ?", triggerID.Int64); err != nil {
+			return err
+		}
+	}
+	if kind == domain.NodeGate && gateID.Valid {
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM gates WHERE id = ?", gateID.Int64); err != nil {
 			return err
 		}
 	}
@@ -1182,27 +1460,46 @@ func (s *Store) CreateLink(ctx context.Context, sourceID, targetID int64, option
 		return domain.CanvasLink{}, errors.New("a card cannot be linked to itself")
 	}
 	options = options.Normalised()
-	var conversations int
+	// A link carries an answer, so both ends must be something an answer can
+	// travel through: a card that speaks, a join that waits for several, a
+	// trigger that starts them, or a gate that decides where they go.
+	var linkable int
 	err := s.db.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM canvas_nodes
-WHERE id IN (?, ?) AND kind = ? AND conversation_id IS NOT NULL`,
-		sourceID, targetID, domain.NodeConversation).Scan(&conversations)
+WHERE id IN (?, ?)
+  AND ((kind = ? AND conversation_id IS NOT NULL) OR kind IN (?, ?, ?))`,
+		sourceID, targetID, domain.NodeConversation,
+		domain.NodeJoin, domain.NodeTrigger, domain.NodeGate).Scan(&linkable)
 	if err != nil {
 		return domain.CanvasLink{}, err
 	}
-	if conversations != 2 {
-		return domain.CanvasLink{}, errors.New("only conversation cards can be linked")
+	if linkable != 2 {
+		return domain.CanvasLink{},
+			errors.New("only conversation cards, joins, triggers and gates can be linked")
+	}
+	// A trigger starts a flow; nothing flows back into one. Accepting such a
+	// link would draw a line on the board that never carries anything.
+	var intoTrigger int
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM canvas_nodes WHERE id = ? AND kind = ?",
+		targetID, domain.NodeTrigger).Scan(&intoTrigger); err != nil {
+		return domain.CanvasLink{}, err
+	}
+	if intoTrigger > 0 {
+		return domain.CanvasLink{}, errors.New("a trigger starts a flow; nothing links into one")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := s.db.ExecContext(ctx, `
-INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done, briefing)
-VALUES(?, ?, ?, ?, ?, ?, ?)
+INSERT INTO canvas_links(source_id, target_id, created_at, mode, max_rounds, until_done, briefing, source_handle)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(source_id, target_id) DO UPDATE SET
     mode = excluded.mode,
     max_rounds = excluded.max_rounds,
     until_done = excluded.until_done,
-    briefing = excluded.briefing`,
-		sourceID, targetID, now, options.Mode, options.MaxRounds, options.UntilDone, options.Briefing)
+    briefing = excluded.briefing,
+    source_handle = excluded.source_handle`,
+		sourceID, targetID, now, options.Mode, options.MaxRounds, options.UntilDone,
+		options.Briefing, options.SourceHandle)
 	if err != nil {
 		return domain.CanvasLink{}, err
 	}
@@ -1221,7 +1518,13 @@ ON CONFLICT(source_id, target_id) DO UPDATE SET
 	}
 	// "Dialogue" only means anything if the other card can answer back, so the
 	// return link is created with it rather than left for the user to notice.
-	if options.Mode == domain.LinkDialogue {
+	// A join has nothing to answer with and a trigger only starts things, so a
+	// link through either of them stays one-way.
+	oneWay, err := s.linkMustBeOneWay(ctx, sourceID, targetID)
+	if err != nil {
+		return domain.CanvasLink{}, err
+	}
+	if options.Mode == domain.LinkDialogue && !oneWay {
 		if err := s.ensureReverseLink(ctx, sourceID, targetID, options); err != nil {
 			return domain.CanvasLink{}, err
 		}
@@ -1314,7 +1617,9 @@ func (s *Store) DeleteLink(ctx context.Context, id int64) error {
 
 func (s *Store) listLinks(ctx context.Context) ([]domain.CanvasLink, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, source_id, target_id, mode, max_rounds, until_done, COALESCE(briefing, '') FROM canvas_links ORDER BY id")
+		`SELECT id, source_id, target_id, mode, max_rounds, until_done,
+		        COALESCE(briefing, ''), COALESCE(source_handle, '')
+		 FROM canvas_links ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -1322,7 +1627,8 @@ func (s *Store) listLinks(ctx context.Context) ([]domain.CanvasLink, error) {
 	links := []domain.CanvasLink{}
 	for rows.Next() {
 		var link domain.CanvasLink
-		if err := rows.Scan(&link.ID, &link.SourceID, &link.TargetID, &link.Mode, &link.MaxRounds, &link.UntilDone, &link.Briefing); err != nil {
+		if err := rows.Scan(&link.ID, &link.SourceID, &link.TargetID, &link.Mode,
+			&link.MaxRounds, &link.UntilDone, &link.Briefing, &link.SourceHandle); err != nil {
 			return nil, err
 		}
 		links = append(links, link)
@@ -1348,6 +1654,12 @@ func (s *Store) RelayPayload(ctx context.Context, turnID int64) (string, bool, e
 			return "", false, err
 		}
 		if status == string(domain.StatusQueued) || status == string(domain.StatusRunning) {
+			return "", false, nil
+		}
+		// A stopped turn is not an answer. Relaying what a provider had
+		// managed to say before a person cut it off would carry the
+		// interruption on to the next card.
+		if status == string(domain.StatusCanceled) {
 			return "", false, nil
 		}
 		multiple++
@@ -1388,46 +1700,153 @@ WHERE t.id = ?`, turnID).Scan(&conversationID, &depth, &sourceTitle, &sourceKind
 	if conversationID == 0 {
 		return 0, nil
 	}
-	payload, ready, err := s.RelayPayload(ctx, turnID)
-	if err != nil || !ready {
-		return 0, err
-	}
-
-	rows, err := s.db.QueryContext(ctx, `
-SELECT target.conversation_id, link.mode, link.max_rounds, link.until_done, link.briefing
-FROM canvas_links link
-JOIN canvas_nodes source ON source.id = link.source_id
-JOIN canvas_nodes target ON target.id = link.target_id
-WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conversationID)
+	runID, err := s.runOfTurn(ctx, turnID)
 	if err != nil {
 		return 0, err
 	}
-	type destination struct {
-		conversation int64
-		mode         string
-		maxRounds    int
-		untilDone    bool
-		briefing     string
+	payload, ready, err := s.RelayPayload(ctx, turnID)
+	if err != nil {
+		return 0, err
 	}
-	var targets []destination
-	for rows.Next() {
-		var item destination
-		if err := rows.Scan(&item.conversation, &item.mode, &item.maxRounds, &item.untilDone, &item.briefing); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		targets = append(targets, item)
+	if !ready {
+		// A turn that was stopped, or one still waiting on a sibling provider,
+		// hands nothing on. The first of those can be the last thing a run
+		// does, so the run still gets a chance to close.
+		return 0, s.maybeFinishRun(ctx, runID)
 	}
-	if err := rows.Close(); err != nil {
+	sourceNodeID, err := s.nodeOfConversation(ctx, conversationID)
+	if err != nil {
+		return 0, err
+	}
+
+	delivered, err := s.relayFrom(ctx, relaySource{
+		runID:          runID,
+		nodeID:         sourceNodeID,
+		conversationID: conversationID,
+		title:          sourceTitle,
+		turnKind:       sourceKind,
+		payload:        payload,
+		depth:          depth,
+	})
+	if err != nil {
+		return delivered, err
+	}
+	// The run ends when the board falls quiet, not when one card stops: a
+	// branch that finishes early must not close a run its sibling is still in.
+	if err := s.maybeFinishRun(ctx, runID); err != nil {
+		return delivered, err
+	}
+	return delivered, nil
+}
+
+// relaySource is one card's finished answer, on its way to whatever the board
+// links it to. It carries the run so everything downstream stays part of the
+// same journey, and the node rather than the conversation because a join has no
+// conversation of its own.
+type relaySource struct {
+	runID          int64
+	nodeID         int64
+	conversationID int64
+	title          string
+	turnKind       string
+	payload        string
+	depth          int
+	hop            int
+	// handle narrows which way out of the node is being followed. Only a gate
+	// sets it; everything else has one way out and leaves it empty.
+	handle string
+}
+
+// maxJoinHops bounds a chain of nodes that produce no turns of their own —
+// joins and gates. The run budget never sees them, so a board wired in a circle
+// through them would otherwise recurse without ever spending a step.
+const maxJoinHops = 8
+
+// relayFrom hands one answer to everything a node links to. A conversation
+// receives it as a turn; a join parks it until every line feeding that join has
+// spoken, and only then does the combined message travel on.
+func (s *Store) relayFrom(ctx context.Context, src relaySource) (int, error) {
+	if src.nodeID == 0 || src.hop > maxJoinHops {
+		return 0, nil
+	}
+	targets, err := s.relayTargets(ctx, src.nodeID, src.handle)
+	if err != nil {
 		return 0, err
 	}
 
 	delivered := 0
 	for _, target := range targets {
+		if target.kind == domain.NodeGate {
+			// A gate reads what arrived and picks the way out. The message
+			// itself is passed on unchanged: a decision point is not a speaker.
+			gate, err := s.gateOfNode(ctx, target.nodeID)
+			if err != nil {
+				return delivered, err
+			}
+			passed := gateAllows(gate, src.payload)
+			if err := s.recordGateDecision(ctx, gate.ID, passed); err != nil {
+				return delivered, err
+			}
+			way := domain.GateElse
+			if passed {
+				way = domain.GatePass
+			}
+			count, err := s.relayFrom(ctx, relaySource{
+				runID:          src.runID,
+				nodeID:         target.nodeID,
+				conversationID: src.conversationID,
+				title:          src.title,
+				turnKind:       src.turnKind,
+				payload:        src.payload,
+				depth:          src.depth,
+				hop:            src.hop + 1,
+				handle:         way,
+			})
+			delivered += count
+			if err != nil {
+				return delivered, err
+			}
+			continue
+		}
+		if target.kind == domain.NodeJoin {
+			combined, ready, err := s.deliverToJoin(
+				ctx, src.runID, target.nodeID, src.nodeID, src.title, src.payload)
+			if err != nil {
+				return delivered, err
+			}
+			if !ready {
+				continue
+			}
+			count, err := s.relayFrom(ctx, relaySource{
+				runID:   src.runID,
+				nodeID:  target.nodeID,
+				title:   target.title,
+				payload: combined,
+				depth:   src.depth + 1,
+				hop:     src.hop + 1,
+			})
+			delivered += count
+			if err != nil {
+				return delivered, err
+			}
+			continue
+		}
+		if target.conversation == 0 {
+			continue
+		}
+
 		kind := domain.TurnRelay
+		if src.turnKind == domain.TurnTrigger {
+			// A message a trigger sent is not an answer being passed along, and
+			// the card's transcript should say which it was.
+			kind = domain.TurnTrigger
+		}
 		nudge := false
-		if target.untilDone {
-			outcome, err := s.dialogueOutcome(ctx, conversationID, target.conversation, payload, sourceKind)
+		// An exchange that runs until it is done is a property of two talking
+		// cards. A message arriving from a join came from several at once, so
+		// there is no exchange to read an outcome from.
+		if target.untilDone && src.conversationID != 0 {
+			outcome, err := s.dialogueOutcome(ctx, src.conversationID, target.conversation, src.payload, src.turnKind)
 			if err != nil {
 				return delivered, err
 			}
@@ -1440,13 +1859,13 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 				if outcome == dialogueOutcomeParked {
 					state = domain.DialogueWaiting
 				}
-				if err := s.setDialogueState(ctx, conversationID, target.conversation, state); err != nil {
+				if err := s.setDialogueState(ctx, src.conversationID, target.conversation, state); err != nil {
 					return delivered, err
 				}
 				// The result of an exchange is buried at the bottom of a card
 				// nobody scrolled to. It goes on the board instead, next to the
 				// two cards that produced it.
-				if err := s.createOutcomeNote(ctx, conversationID, target.conversation, sourceTitle, payload, state); err != nil {
+				if err := s.createOutcomeNote(ctx, src.conversationID, target.conversation, src.title, src.payload, state); err != nil {
 					return delivered, err
 				}
 				continue
@@ -1459,15 +1878,25 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 			}
 		}
 		// Each link decides for itself when the exchange has gone far enough.
-		if !target.untilDone && depth >= target.maxRounds {
+		if !target.untilDone && src.depth >= target.maxRounds {
 			continue
 		}
-		briefing, err := s.takeBriefing(ctx, target.conversation, target.briefing, sourceTitle, target.mode, target.untilDone)
+		// The run budget is the width limit the per-link round count cannot be:
+		// it counts every turn the whole spread produces, not the length of one
+		// path through it.
+		allowed, err := s.countRunStep(ctx, src.runID)
 		if err != nil {
 			return delivered, err
 		}
-		prompt := framePayload(target.mode, sourceTitle, payload, briefing, nudge)
-		if err := s.createRelayTurn(ctx, target.conversation, prompt, depth+1, kind); err != nil {
+		if !allowed {
+			return delivered, nil
+		}
+		briefing, err := s.takeBriefing(ctx, target.conversation, target.briefing, src.title, target.mode, target.untilDone)
+		if err != nil {
+			return delivered, err
+		}
+		prompt := framePayload(target.mode, src.title, src.payload, briefing, nudge)
+		if err := s.createRelayTurn(ctx, target.conversation, prompt, src.depth+1, kind, src.runID); err != nil {
 			return delivered, err
 		}
 		delivered++
@@ -1783,7 +2212,7 @@ func (s *Store) setDialogueState(ctx context.Context, sourceID, targetID int64, 
 	return err
 }
 
-func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, prompt string, depth int, kind string) error {
+func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, prompt string, depth int, kind string, runID int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -1801,7 +2230,8 @@ func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, promp
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		"UPDATE chat_turns SET relay_depth = ? WHERE id = ?", depth, turnID); err != nil {
+		"UPDATE chat_turns SET relay_depth = ?, flow_run_id = ? WHERE id = ?",
+		depth, sql.NullInt64{Int64: runID, Valid: runID != 0}, turnID); err != nil {
 		return err
 	}
 	return tx.Commit()

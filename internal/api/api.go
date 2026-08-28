@@ -45,8 +45,26 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/runs", s.createRun)
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/turns", s.createTurn)
 	mux.HandleFunc("GET /v1/canvas", s.canvas)
+	mux.HandleFunc("GET /v1/search", s.search)
+	mux.HandleFunc("GET /v1/usage", s.usage)
+	mux.HandleFunc("GET /v1/canvas/conversations/{id}/export", s.exportConversation)
+	mux.HandleFunc("GET /v1/canvas/export", s.exportBoard)
+	mux.HandleFunc("POST /v1/canvas/import", s.importBoard)
 	mux.HandleFunc("POST /v1/canvas/conversations", s.createConversation)
 	mux.HandleFunc("POST /v1/canvas/notes", s.createNote)
+	mux.HandleFunc("POST /v1/canvas/joins", s.createJoin)
+	mux.HandleFunc("POST /v1/canvas/gates", s.createGate)
+	mux.HandleFunc("PUT /v1/canvas/gates/{id}", s.setGate)
+	mux.HandleFunc("POST /v1/canvas/triggers", s.createTrigger)
+	mux.HandleFunc("PUT /v1/canvas/triggers/{id}", s.setTrigger)
+	mux.HandleFunc("POST /v1/canvas/triggers/{id}/fire", s.fireTrigger)
+	mux.HandleFunc("GET /v1/canvas/runs", s.flowRuns)
+	mux.HandleFunc("GET /v1/canvas/runs/{id}", s.flowRun)
+	mux.HandleFunc("POST /v1/canvas/runs/{id}/report", s.reportFlowRun)
+	mux.HandleFunc("POST /v1/canvas/runs/{id}/stop", s.stopFlowRun)
+	mux.HandleFunc("POST /v1/canvas/pipelines", s.createPipeline)
+	mux.HandleFunc("PUT /v1/canvas/pipelines/{id}", s.setPipeline)
+	mux.HandleFunc("POST /v1/canvas/pipelines/{id}/runs", s.startPipeline)
 	mux.HandleFunc("PATCH /v1/canvas/nodes", s.patchCanvasNode)
 	mux.HandleFunc("DELETE /v1/canvas/nodes/{id}", s.deleteCanvasNode)
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/project", s.setProject)
@@ -60,6 +78,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/role", s.setRole)
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/model", s.setModel)
 	mux.HandleFunc("GET /v1/providers/{name}/models", s.providerModels)
+	mux.HandleFunc("POST /v1/canvas/conversations/{id}/cancel", s.cancelConversation)
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/resume", s.resumeDialogue)
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/branch", s.branch)
 	mux.HandleFunc("GET /v1/update", s.updateStatus)
@@ -284,6 +303,205 @@ func (s *Server) createNote(response http.ResponseWriter, request *http.Request)
 	writeJSON(response, http.StatusCreated, note)
 }
 
+// createJoin puts a waiting point on the board. It carries no text of its own
+// beyond a name, so it takes the same body a note does.
+func (s *Server) createJoin(response http.ResponseWriter, request *http.Request) {
+	var input domain.NewNote
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	if utf8.RuneCountInString(input.Body) > 200 {
+		writeError(response, http.StatusBadRequest, errors.New("join name is limited to 200 characters"))
+		return
+	}
+	join, err := s.store.CreateJoin(request.Context(), input)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, join)
+}
+
+// createGate puts a decision point on the board. It starts as a plain "is
+// there anything here" check, the one condition useful before a pattern exists.
+func (s *Server) createGate(response http.ResponseWriter, request *http.Request) {
+	var input domain.NewGate
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	gate, err := s.store.CreateGate(request.Context(), input)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, gate)
+}
+
+// setGate replaces a gate's condition. A pattern that will not compile is
+// refused here, not when a run reaches the gate and stops for no visible reason.
+func (s *Server) setGate(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("gate id must be a positive integer"))
+		return
+	}
+	var input domain.GateConfig
+	if !decodeJSON(response, request, 16<<10, &input) {
+		return
+	}
+	if utf8.RuneCountInString(input.Pattern) > 2000 {
+		writeError(response, http.StatusBadRequest,
+			errors.New("a gate condition is limited to 2000 characters"))
+		return
+	}
+	if err := s.store.SetGate(request.Context(), id, input); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("gate not found"))
+			return
+		}
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// createTrigger puts a starting point on the board. It arrives switched off
+// and empty; what it sends and when is set on the card itself.
+func (s *Server) createTrigger(response http.ResponseWriter, request *http.Request) {
+	var input domain.NewTrigger
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	trigger, err := s.store.CreateTrigger(request.Context(), input)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, trigger)
+}
+
+// setTrigger replaces a trigger's message and schedule in one write, arming or
+// disarming it at the same time.
+func (s *Server) setTrigger(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("trigger id must be a positive integer"))
+		return
+	}
+	var input domain.TriggerConfig
+	if !decodeJSON(response, request, 64<<10, &input) {
+		return
+	}
+	if utf8.RuneCountInString(input.Prompt) > 20_000 {
+		writeError(response, http.StatusBadRequest,
+			errors.New("a trigger message is limited to 20000 characters"))
+		return
+	}
+	if err := s.store.SetTrigger(request.Context(), id, input); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("trigger not found"))
+			return
+		}
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// fireTrigger runs a trigger now, whatever its schedule says. A routine nobody
+// can start by hand is a routine nobody can test.
+func (s *Server) fireTrigger(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("trigger id must be a positive integer"))
+		return
+	}
+	delivered, err := s.store.FireTrigger(request.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("trigger not found"))
+			return
+		}
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]int{"delivered": delivered})
+}
+
+// flowRuns lists recent journeys across the board, the ones still going first.
+func (s *Server) flowRuns(response http.ResponseWriter, request *http.Request) {
+	limit := 0
+	if raw := request.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			writeError(response, http.StatusBadRequest, errors.New("limit must be a positive integer"))
+			return
+		}
+		limit = parsed
+	}
+	runs, err := s.store.FlowRuns(request.Context(), limit)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, runs)
+}
+
+// flowRun reports everything that happened in one run, in order.
+func (s *Server) flowRun(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("run id must be a positive integer"))
+		return
+	}
+	detail, err := s.store.FlowRunDetail(request.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("run not found"))
+			return
+		}
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, detail)
+}
+
+// reportFlowRun writes a run up as a note on the board.
+func (s *Server) reportFlowRun(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("run id must be a positive integer"))
+		return
+	}
+	note, err := s.store.ReportRunToBoard(request.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("run not found"))
+			return
+		}
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, note)
+}
+
+// stopFlowRun ends one journey across the board and stops every card still
+// working on it. Stopping cards one at a time is the thing this exists to
+// replace.
+func (s *Server) stopFlowRun(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("run id must be a positive integer"))
+		return
+	}
+	stopped, err := s.store.StopFlowRun(request.Context(), id)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, domain.CancelResult{Stopped: stopped})
+}
+
 func (s *Server) patchCanvasNode(response http.ResponseWriter, request *http.Request) {
 	var input domain.CanvasNodePatch
 	if !decodeJSON(response, request, 64<<10, &input) {
@@ -482,6 +700,179 @@ func (s *Server) providerModels(response http.ResponseWriter, request *http.Requ
 
 // resumeDialogue clears the parked state so a stalled exchange can be pushed on
 // without the user having to remember what it was waiting for.
+// exportConversation renders one card's whole transcript as Markdown. It is
+// text, not JSON: what comes out is meant to be read and kept.
+// usage reports what each provider spent over a window, together with its own
+// allowance report. It is a read and answers from SQLite, so a panel may poll.
+func (s *Server) usage(response http.ResponseWriter, request *http.Request) {
+	days := 7
+	if raw := request.URL.Query().Get("days"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			writeError(response, http.StatusBadRequest, errors.New("days must be a positive integer"))
+			return
+		}
+		days = parsed
+	}
+	report, err := s.store.Usage(request.Context(), days)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, report)
+}
+
+// boardImportOffset is how far an imported board lands from the origin, so it
+// does not arrive on top of what is already on the canvas.
+const boardImportOffset = 120
+
+func (s *Server) exportConversation(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	markdown, err := s.store.ExportConversation(request.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("conversation not found"))
+			return
+		}
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	response.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(response, markdown)
+}
+
+// exportBoard writes the whole board out as one self-contained value.
+func (s *Server) exportBoard(response http.ResponseWriter, request *http.Request) {
+	export, err := s.store.ExportBoard(request.Context())
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, export)
+}
+
+// importBoard adds an exported board alongside the current one. It is additive
+// on purpose: replacing a board would throw away work that is still running.
+func (s *Server) importBoard(response http.ResponseWriter, request *http.Request) {
+	var input domain.BoardExport
+	if !decodeJSON(response, request, 32<<20, &input) {
+		return
+	}
+	result, err := s.store.ImportBoard(request.Context(), input, boardImportOffset, boardImportOffset)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, result)
+}
+
+// createPipeline puts a new, empty pipeline card on the board.
+func (s *Server) createPipeline(response http.ResponseWriter, request *http.Request) {
+	var input domain.NewPipeline
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	pipeline, err := s.store.CreatePipeline(request.Context(), input)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, pipeline)
+}
+
+// setPipeline replaces a pipeline's title, project and stages in one write.
+func (s *Server) setPipeline(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("pipeline id must be a positive integer"))
+		return
+	}
+	var input domain.PipelineConfig
+	if !decodeJSON(response, request, 64<<10, &input) {
+		return
+	}
+	// A pipeline runs commands in a directory, so its project is validated the
+	// same way a card's is.
+	project, err := validProject(input.ProjectPath)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	input.ProjectPath = project
+	if err := s.store.SetPipeline(request.Context(), id, input); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("pipeline not found"))
+			return
+		}
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// startPipeline queues the pipeline's stages as an ordinary run, which the
+// daemon's existing pipeline worker picks up.
+func (s *Server) startPipeline(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("pipeline id must be a positive integer"))
+		return
+	}
+	runID, err := s.store.StartPipelineRun(request.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("pipeline not found"))
+			return
+		}
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, map[string]int64{"run_id": runID})
+}
+
+// search looks for text anywhere on the board. It is a read, so it takes its
+// query from the URL and answers with whatever it found, including nothing.
+func (s *Server) search(response http.ResponseWriter, request *http.Request) {
+	query := strings.TrimSpace(request.URL.Query().Get("q"))
+	limit := 50
+	if raw := request.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			writeError(response, http.StatusBadRequest, errors.New("limit must be a positive integer"))
+			return
+		}
+		limit = parsed
+	}
+	hits, err := s.store.Search(request.Context(), query, limit)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, hits)
+}
+
+// cancelConversation stops whatever a card is doing. The request is recorded
+// and answered immediately; the worker that owns a running provider process
+// ends it on its next poll, so this never blocks on a provider.
+func (s *Server) cancelConversation(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	stopped, err := s.store.RequestConversationCancel(request.Context(), id)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, domain.CancelResult{Stopped: stopped})
+}
+
 func (s *Server) resumeDialogue(response http.ResponseWriter, request *http.Request) {
 	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -585,6 +976,7 @@ func (s *Server) createLink(response http.ResponseWriter, request *http.Request)
 	options := domain.LinkOptions{
 		Mode: input.Mode, MaxRounds: input.MaxRounds,
 		UntilDone: input.UntilDone, Briefing: input.Briefing,
+		SourceHandle: input.SourceHandle,
 	}
 	if input.Pair {
 		// Pairing links both ways, so the two cards answer each other.
@@ -799,6 +1191,34 @@ func (c *Client) do(ctx context.Context, method, path string, payload, result an
 	return json.NewDecoder(response.Body).Decode(result)
 }
 
+// text fetches a response that is not JSON. Only the Markdown export needs it,
+// and decoding that as JSON would mean quoting a document into a string.
+func (c *Client) text(ctx context.Context, path string) (string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	response, err := c.http.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode != http.StatusOK {
+		var failure map[string]string
+		_ = json.Unmarshal(body, &failure)
+		if message := failure["error"]; message != "" {
+			return "", errors.New(message)
+		}
+		return "", fmt.Errorf("daemon returned %s", response.Status)
+	}
+	return string(body), nil
+}
+
 func (c *Client) Canvas(ctx context.Context) (domain.Canvas, error) {
 	var canvas domain.Canvas
 	err := c.do(ctx, http.MethodGet, "/v1/canvas", nil, &canvas, http.StatusOK)
@@ -815,6 +1235,74 @@ func (c *Client) CreateNote(ctx context.Context, input domain.NewNote) (domain.C
 	var node domain.CanvasNode
 	err := c.do(ctx, http.MethodPost, "/v1/canvas/notes", input, &node, http.StatusCreated)
 	return node, err
+}
+
+func (c *Client) CreateJoin(ctx context.Context, input domain.NewNote) (domain.CanvasNode, error) {
+	var node domain.CanvasNode
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/joins", input, &node, http.StatusCreated)
+	return node, err
+}
+
+func (c *Client) CreateGate(ctx context.Context, input domain.NewGate) (domain.Gate, error) {
+	var gate domain.Gate
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/gates", input, &gate, http.StatusCreated)
+	return gate, err
+}
+
+func (c *Client) SetGate(ctx context.Context, id int64, config domain.GateConfig) error {
+	path := "/v1/canvas/gates/" + strconv.FormatInt(id, 10)
+	return c.do(ctx, http.MethodPut, path, config, nil, http.StatusNoContent)
+}
+
+func (c *Client) CreateTrigger(ctx context.Context, input domain.NewTrigger) (domain.Trigger, error) {
+	var trigger domain.Trigger
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/triggers", input, &trigger, http.StatusCreated)
+	return trigger, err
+}
+
+func (c *Client) SetTrigger(ctx context.Context, id int64, config domain.TriggerConfig) error {
+	path := "/v1/canvas/triggers/" + strconv.FormatInt(id, 10)
+	return c.do(ctx, http.MethodPut, path, config, nil, http.StatusNoContent)
+}
+
+func (c *Client) FireTrigger(ctx context.Context, id int64) (int, error) {
+	var result struct {
+		Delivered int `json:"delivered"`
+	}
+	path := "/v1/canvas/triggers/" + strconv.FormatInt(id, 10) + "/fire"
+	err := c.do(ctx, http.MethodPost, path, nil, &result, http.StatusOK)
+	return result.Delivered, err
+}
+
+func (c *Client) FlowRuns(ctx context.Context, limit int) ([]domain.FlowRun, error) {
+	path := "/v1/canvas/runs"
+	if limit > 0 {
+		path += "?limit=" + strconv.Itoa(limit)
+	}
+	var runs []domain.FlowRun
+	err := c.do(ctx, http.MethodGet, path, nil, &runs, http.StatusOK)
+	return runs, err
+}
+
+func (c *Client) FlowRun(ctx context.Context, runID int64) (domain.FlowRunDetail, error) {
+	var detail domain.FlowRunDetail
+	path := "/v1/canvas/runs/" + strconv.FormatInt(runID, 10)
+	err := c.do(ctx, http.MethodGet, path, nil, &detail, http.StatusOK)
+	return detail, err
+}
+
+func (c *Client) ReportFlowRun(ctx context.Context, runID int64) (domain.CanvasNode, error) {
+	var note domain.CanvasNode
+	path := "/v1/canvas/runs/" + strconv.FormatInt(runID, 10) + "/report"
+	err := c.do(ctx, http.MethodPost, path, nil, &note, http.StatusCreated)
+	return note, err
+}
+
+func (c *Client) StopFlowRun(ctx context.Context, runID int64) (int, error) {
+	var result domain.CancelResult
+	path := "/v1/canvas/runs/" + strconv.FormatInt(runID, 10) + "/stop"
+	err := c.do(ctx, http.MethodPost, path, nil, &result, http.StatusOK)
+	return result.Stopped, err
 }
 
 func (c *Client) PatchCanvasNode(ctx context.Context, patch domain.CanvasNodePatch) error {
@@ -842,6 +1330,63 @@ func (c *Client) ProviderModels(ctx context.Context, name string) (domain.Provid
 		return domain.ProviderModels{}, err
 	}
 	return models, nil
+}
+
+func (c *Client) Usage(ctx context.Context, days int) (domain.UsageReport, error) {
+	var report domain.UsageReport
+	err := c.do(ctx, http.MethodGet, "/v1/usage?days="+strconv.Itoa(days), nil, &report, http.StatusOK)
+	return report, err
+}
+
+func (c *Client) ExportConversation(ctx context.Context, conversationID int64) (string, error) {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/export"
+	return c.text(ctx, path)
+}
+
+func (c *Client) ExportBoard(ctx context.Context) (domain.BoardExport, error) {
+	var export domain.BoardExport
+	err := c.do(ctx, http.MethodGet, "/v1/canvas/export", nil, &export, http.StatusOK)
+	return export, err
+}
+
+func (c *Client) ImportBoard(ctx context.Context, export domain.BoardExport) (domain.ImportResult, error) {
+	var result domain.ImportResult
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/import", export, &result, http.StatusCreated)
+	return result, err
+}
+
+func (c *Client) CreatePipeline(ctx context.Context, input domain.NewPipeline) (domain.Pipeline, error) {
+	var pipeline domain.Pipeline
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/pipelines", input, &pipeline, http.StatusCreated)
+	return pipeline, err
+}
+
+func (c *Client) SetPipeline(ctx context.Context, id int64, config domain.PipelineConfig) error {
+	path := "/v1/canvas/pipelines/" + strconv.FormatInt(id, 10)
+	return c.do(ctx, http.MethodPut, path, config, nil, http.StatusNoContent)
+}
+
+func (c *Client) StartPipeline(ctx context.Context, id int64) (int64, error) {
+	path := "/v1/canvas/pipelines/" + strconv.FormatInt(id, 10) + "/runs"
+	var created struct {
+		RunID int64 `json:"run_id"`
+	}
+	err := c.do(ctx, http.MethodPost, path, nil, &created, http.StatusCreated)
+	return created.RunID, err
+}
+
+func (c *Client) Search(ctx context.Context, query string, limit int) ([]domain.SearchHit, error) {
+	path := "/v1/search?q=" + url.QueryEscape(query) + "&limit=" + strconv.Itoa(limit)
+	var hits []domain.SearchHit
+	err := c.do(ctx, http.MethodGet, path, nil, &hits, http.StatusOK)
+	return hits, err
+}
+
+func (c *Client) CancelConversation(ctx context.Context, conversationID int64) (domain.CancelResult, error) {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/cancel"
+	var result domain.CancelResult
+	err := c.do(ctx, http.MethodPost, path, nil, &result, http.StatusOK)
+	return result, err
 }
 
 func (c *Client) ResumeDialogue(ctx context.Context, conversationID int64) error {

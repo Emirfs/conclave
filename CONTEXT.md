@@ -18,6 +18,7 @@ nodes the daemon persists, so a layout survives a restart.
 | `internal/vcs/` | Read-only git status and diff for a card's project. |
 | `internal/version/` | The running build's version, stamped in at link time. |
 | `install.ps1` | Installs and updates a released build on Windows. |
+| `install.sh` | Installs the daemon and command on macOS and Linux. |
 
 ## Invariants
 
@@ -26,6 +27,12 @@ nodes the daemon persists, so a layout survives a restart.
   bindings; only the Go side reads the token and reaches the local API. This is what keeps the
   browser-origin rejection in `internal/api` meaningful.
 - Pipeline stages are ordered and stop at the first failure.
+- A pipeline card holds the definition; running it queues an ordinary run. Nothing about execution is
+  special-cased for the board, which is what keeps a pipeline queued from a terminal and one queued
+  from a card the same thing. A pipeline needs a project and at least one stage before it can run,
+  and is never queued twice at once: two copies would work the same tree simultaneously.
+- A pipeline card carries no provider and no transcript. Deterministic work is exactly what a
+  conversation card is not, and merging the two would make a card's colour mean nothing.
 - Commands are argument arrays and bypass the command shell.
 - Chat context is scoped by conversation *and* provider. Two conversations with the same provider must
   never see each other's history.
@@ -37,6 +44,11 @@ nodes the daemon persists, so a layout survives a restart.
   decide and go on. Two such requests in a row park the dialogue for the user.
 - A role is only text in the briefing. It never changes a card's access or what it may decide, so any
   provider can take any position in a workflow.
+- What a turn cost and how full a window is are different numbers off the same event. Per-response
+  input and output tokens are addable across turns and are the basis of the usage report; the
+  session's context size grows with the session and is last-value-wins. Never sum the second.
+  Usage is recorded even for a failed run: a turn that burned a window and then errored still
+  burned it.
 - Context size is read from each provider's own usage report. A large window restates the card's role;
   a full one drops the provider session and lets the transcript carry the conversation into a new one.
 - A finished exchange leaves its result on the board as its own card. The conclusion of a dialogue is
@@ -51,10 +63,26 @@ nodes the daemon persists, so a layout survives a restart.
   ollama reports what is pulled. Only Claude Code, which cannot be asked, carries a list in this
   build. No list is a constraint — an unlisted name is still accepted, because a provider gains
   models between releases and a card must not be held back by this build's idea of what exists.
+- An import is additive and never replaces a board: replacing one would throw away work that is
+  still running. An imported transcript is written as history, never queued — a response that was
+  mid-answer when the board was exported arrives canceled, because re-queueing it would send
+  somebody else's prompt to a provider. An export from a newer build is refused rather than
+  half-understood.
+- Search matches in Go, not in SQL. SQLite's LIKE folds ASCII only, and the board is written in
+  Turkish; the fold also flattens Turkish letters onto their plain forms, so a query typed without
+  diacritics still finds what is there. It maps one rune to one rune, which is what lets a match be
+  located back in the original text.
+- Stopping a turn is a client writing a request to SQLite, never a client reaching a process. The
+  worker that owns the provider polls for it and kills the tree; a queued response, which no worker
+  owns, is finished on the spot. A stop keeps the partial answer, is not a failure, and relays
+  nothing onwards: an interrupted answer is not a result.
 - A provider runs at most one chat job at a time.
 - Each card carries its own project directory and access level; providers run there, as they would in
   a terminal. `edit` access auto-approves file changes and commands, because `--print` runs cannot ask.
 - Client-supplied paths are untrusted: reject absolute paths and parent traversal before touching disk.
+- The daemon and the command are platform-neutral Go and are tested on every platform they ship to;
+  a target that is only ever cross-compiled breaks quietly. The desktop client is Windows-only for
+  now, and that is a packaging boundary rather than a code one.
 - Nothing installs itself. The daemon only ever *looks* for a newer release, on a timer, and caches
   the answer; the bytes are fetched and the binaries replaced by `install.ps1`, and only after a
   person clicks Güncelle or runs the script. A build that cannot say which release it is reports

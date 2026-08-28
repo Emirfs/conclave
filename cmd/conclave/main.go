@@ -49,6 +49,12 @@ func run(arguments []string) error {
 		return submitRun(arguments)
 	case "chat":
 		return submitChat(arguments)
+	case "search":
+		return searchBoard(arguments)
+	case "export":
+		return exportBoard(arguments)
+	case "usage":
+		return reportUsage(arguments)
 	case "version", "-v", "--version":
 		fmt.Println(version.Version)
 		return nil
@@ -140,6 +146,111 @@ func runDaemon(arguments []string) error {
 		return nil
 	}
 	return err
+}
+
+// reportUsage prints what each provider spent over a window, next to whatever
+// allowance it reports about itself.
+func reportUsage(arguments []string) error {
+	flags := flag.NewFlagSet("usage", flag.ContinueOnError)
+	jsonOutput := flags.Bool("json", false, "emit JSON")
+	days := flags.Int("days", 7, "how many days back to total")
+	address := flags.String("address", defaultAddress, "daemon address")
+	tokenFile := flags.String("token-file", statedir.TokenPath(), "daemon token file")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	token, err := statedir.ReadToken(*tokenFile)
+	if err != nil {
+		return err
+	}
+	report, err := api.NewClient("http://"+*address, token).Usage(context.Background(), *days)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	if len(report.Providers) == 0 {
+		fmt.Printf("no turns in the last %d days\n", report.Days)
+		return nil
+	}
+	for _, item := range report.Providers {
+		fmt.Printf("%-12s %4d turns  %9d in  %9d out  %d cards\n",
+			item.Provider, item.Turns, item.InputTokens, item.OutputTokens, item.Cards)
+	}
+	return nil
+}
+
+// exportBoard writes the board, or one card's transcript, to stdout. Redirecting
+// it is the whole interface: this is a client, not a file manager.
+func exportBoard(arguments []string) error {
+	flags := flag.NewFlagSet("export", flag.ContinueOnError)
+	conversation := flags.Int64("conversation", 0, "export one card's transcript as Markdown")
+	address := flags.String("address", defaultAddress, "daemon address")
+	tokenFile := flags.String("token-file", statedir.TokenPath(), "daemon token file")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	token, err := statedir.ReadToken(*tokenFile)
+	if err != nil {
+		return err
+	}
+	client := api.NewClient("http://"+*address, token)
+	if *conversation > 0 {
+		markdown, err := client.ExportConversation(context.Background(), *conversation)
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.WriteString(markdown)
+		return err
+	}
+	board, err := client.ExportBoard(context.Background())
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(board)
+}
+
+// searchBoard finds text on the canvas from a terminal. The daemon does the
+// looking; this only prints what came back.
+func searchBoard(arguments []string) error {
+	flags := flag.NewFlagSet("search", flag.ContinueOnError)
+	jsonOutput := flags.Bool("json", false, "emit JSON")
+	limit := flags.Int("limit", 20, "maximum results")
+	address := flags.String("address", defaultAddress, "daemon address")
+	tokenFile := flags.String("token-file", statedir.TokenPath(), "daemon token file")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	query := strings.TrimSpace(strings.Join(flags.Args(), " "))
+	if query == "" {
+		return errors.New("search needs something to look for")
+	}
+	token, err := statedir.ReadToken(*tokenFile)
+	if err != nil {
+		return err
+	}
+	hits, err := api.NewClient("http://"+*address, token).Search(context.Background(), query, *limit)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(hits)
+	}
+	if len(hits) == 0 {
+		fmt.Printf("no match for %q\n", query)
+		return nil
+	}
+	for _, hit := range hits {
+		fmt.Printf("%s [%s] %s\n", hit.Title, hit.Where, hit.Snippet)
+	}
+	return nil
 }
 
 func runStatus(arguments []string) error {
@@ -320,5 +431,5 @@ func isLoopbackAddress(address string) bool {
 }
 
 func usage() {
-	fmt.Println("conclave [status|daemon|run|chat|update|version] [options]")
+	fmt.Println("conclave [status|daemon|run|chat|search|export|usage|update|version] [options]")
 }

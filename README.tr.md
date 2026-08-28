@@ -14,13 +14,17 @@ Yapay zekâ kodlama CLI'ları tek başlarına kullanışlıdır; ancak birkaçı
 - görsel canvas üzerinde tek sağlayıcılı veya çok sağlayıcılı konuşmalar açar;
 - sağlayıcı yanıtını ve anlık etkinliğini konuşma kartına canlı aktarır;
 - sağlayıcı oturumunu saklayarak sonraki mesajı aynı uzak konuşmada sürdürür;
+- çalışan veya sırada bekleyen bir turu tek düğmeyle durdurur; yarım kalan cevap kartta kalır;
 - her karta bağımsız proje dizini ve `read` veya `edit` erişimi atar;
 - her kartın sağlayıcılarını kart başına seçilen bir modelle ya da CLI'ın kendi varsayılanıyla çalıştırır;
+- her turun sağlayıcıya neye mal olduğunu kaydeder; kullanım panelinde harcamayı ve sağlayıcının kendi kota raporunu yan yana gösterir;
+- bir kartın transkriptini Markdown, tüm panoyu JSON olarak dışa aktarır; içe aktarma panonun yerine geçmez, üstüne ekler;
+- Ctrl+F ile pano genelinde arar: başlık, rol, mesaj, cevap ve notlar; sonuca tıklayınca kartı ortalar;
 - proje kartı içinde Git çalışma ağacı değişikliklerini ve unified diff'i gösterir;
 - tamamlanan yanıtları yapılandırılabilir canvas bağlantılarıyla aktarır, tartıştırır veya inceletir;
 - iki kartı sınırlı konuşma veya açıkça seçilen iş-bitene-kadar akışı için eşleştirir;
 - her turdan sonra isteğe bağlı komut çalıştırıp hatayı aynı karta geri besler;
-- istemci bağlantısından bağımsız, sıralı build ve test pipeline'ları çalıştırır;
+- sıralı build ve test pipeline'larını canvas üzerinde bir kart olarak tutar; istemci kapansa da çalışmayı sürdürür;
 - konuşmaları, canvas konumlarını, bağlantıları, kotaları, oturumları ve pipeline durumunu SQLite'ta saklar.
 
 Conclave sağlayıcı CLI'larının veya aboneliklerinin yerine geçmez. Makinede kurulu ve kendi yöntemiyle kimlik doğrulaması yapılmış resmî yerel çalıştırılabilir dosyaları kullanır.
@@ -111,6 +115,18 @@ Belirli bir sürümü kurmak veya başka bir dizine kurmak için betiği boru ye
 `-InstallDir`, `-NoShortcuts` ve `-NoPath` da kabul edilir.
 
 Sihirbaz tercih ediyorsanız her yayında `conclave-windows-amd64-setup.exe` de var: yönetici hakkı istemeyen, aynı iki binary'yi taşıyan kullanıcı kapsamlı bir kurulum.
+
+### macOS ve Linux
+
+Daemon ve `conclave` komutu saf Go; Go'nun çalıştığı her yerde çalışır. Kabukta tek satır:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Emirfs/conclave/main/install.sh | sh
+```
+
+Betik platformunuza uygun yapıyı seçer, SHA256'sını yayındaki `checksums-unix.txt` ile doğrular ve `conclave` komutunu `~/.local/bin` altına kurar. `CONCLAVE_VERSION` bir sürüme sabitler, `CONCLAVE_BIN` başka bir dizin seçer.
+
+Yayınlar `linux/amd64`, `linux/arm64`, `darwin/amd64` ve `darwin/arm64` taşır. Kurulan şey daemon ile komut satırı istemcisi: yerel API'nin sunduğu her şey, canvas hariç. Masaüstü istemcisi şimdilik yalnızca Windows'ta yayınlanıyor — Wails yapısı ve tek tıkla güncelleme dosyaları Windows'un gerektirdiği biçimde değiştiriyor. Başka bir platformda kaynaktan derlemek Wails'in kendi gereksinimlerine bakar.
 
 ## Güncelleme
 

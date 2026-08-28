@@ -1,9 +1,130 @@
 export namespace domain {
 	
+	export class CancelResult {
+	    stopped: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CancelResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.stopped = source["stopped"];
+	    }
+	}
+	export class FlowRun {
+	    id: number;
+	    origin_conversation_id?: number;
+	    status: string;
+	    steps: number;
+	    started_at: string;
+	    finished_at?: string;
+	    origin_label?: string;
+	    origin_kind?: string;
+	    cards?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FlowRun(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.origin_conversation_id = source["origin_conversation_id"];
+	        this.status = source["status"];
+	        this.steps = source["steps"];
+	        this.started_at = source["started_at"];
+	        this.finished_at = source["finished_at"];
+	        this.origin_label = source["origin_label"];
+	        this.origin_kind = source["origin_kind"];
+	        this.cards = source["cards"];
+	    }
+	}
+	export class Gate {
+	    id: number;
+	    node_id: number;
+	    title: string;
+	    mode: string;
+	    pattern: string;
+	    case_sensitive: boolean;
+	    last_result?: string;
+	    last_seen_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Gate(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.node_id = source["node_id"];
+	        this.title = source["title"];
+	        this.mode = source["mode"];
+	        this.pattern = source["pattern"];
+	        this.case_sensitive = source["case_sensitive"];
+	        this.last_result = source["last_result"];
+	        this.last_seen_at = source["last_seen_at"];
+	    }
+	}
+	export class Trigger {
+	    id: number;
+	    node_id: number;
+	    title: string;
+	    prompt: string;
+	    mode: string;
+	    interval_seconds: number;
+	    at_time: string;
+	    enabled: boolean;
+	    due_at?: string;
+	    last_fired_at?: string;
+	    last_run_id?: number;
+	    working: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Trigger(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.node_id = source["node_id"];
+	        this.title = source["title"];
+	        this.prompt = source["prompt"];
+	        this.mode = source["mode"];
+	        this.interval_seconds = source["interval_seconds"];
+	        this.at_time = source["at_time"];
+	        this.enabled = source["enabled"];
+	        this.due_at = source["due_at"];
+	        this.last_fired_at = source["last_fired_at"];
+	        this.last_run_id = source["last_run_id"];
+	        this.working = source["working"];
+	    }
+	}
+	export class JoinNode {
+	    node_id: number;
+	    title: string;
+	    waiting: number;
+	    expected: number;
+	    sources?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new JoinNode(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.node_id = source["node_id"];
+	        this.title = source["title"];
+	        this.waiting = source["waiting"];
+	        this.expected = source["expected"];
+	        this.sources = source["sources"];
+	    }
+	}
 	export class CanvasLink {
 	    id: number;
 	    source_id: number;
 	    target_id: number;
+	    source_handle?: string;
 	    mode: string;
 	    max_rounds: number;
 	    until_done: boolean;
@@ -18,6 +139,7 @@ export namespace domain {
 	        this.id = source["id"];
 	        this.source_id = source["source_id"];
 	        this.target_id = source["target_id"];
+	        this.source_handle = source["source_handle"];
 	        this.mode = source["mode"];
 	        this.max_rounds = source["max_rounds"];
 	        this.until_done = source["until_done"];
@@ -28,6 +150,9 @@ export namespace domain {
 	    id: number;
 	    kind: string;
 	    conversation_id?: number;
+	    pipeline_id?: number;
+	    trigger_id?: number;
+	    gate_id?: number;
 	    x: number;
 	    y: number;
 	    width: number;
@@ -45,6 +170,9 @@ export namespace domain {
 	        this.id = source["id"];
 	        this.kind = source["kind"];
 	        this.conversation_id = source["conversation_id"];
+	        this.pipeline_id = source["pipeline_id"];
+	        this.trigger_id = source["trigger_id"];
+	        this.gate_id = source["gate_id"];
 	        this.x = source["x"];
 	        this.y = source["y"];
 	        this.width = source["width"];
@@ -53,6 +181,126 @@ export namespace domain {
 	        this.color = source["color"];
 	        this.body = source["body"];
 	    }
+	}
+	export class Stage {
+	    id: number;
+	    run_id: number;
+	    position: number;
+	    name: string;
+	    command: string[];
+	    status: string;
+	    exit_code?: number;
+	    output?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Stage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.run_id = source["run_id"];
+	        this.position = source["position"];
+	        this.name = source["name"];
+	        this.command = source["command"];
+	        this.status = source["status"];
+	        this.exit_code = source["exit_code"];
+	        this.output = source["output"];
+	    }
+	}
+	export class Run {
+	    id: number;
+	    project: string;
+	    status: string;
+	    // Go type: time
+	    created_at: any;
+	    // Go type: time
+	    updated_at: any;
+	    stages?: Stage[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Run(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.project = source["project"];
+	        this.status = source["status"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.updated_at = this.convertValues(source["updated_at"], null);
+	        this.stages = this.convertValues(source["stages"], Stage);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PipelineStage {
+	    name: string;
+	    command: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PipelineStage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.command = source["command"];
+	    }
+	}
+	export class Pipeline {
+	    id: number;
+	    title: string;
+	    project_path?: string;
+	    stages: PipelineStage[];
+	    runs?: Run[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Pipeline(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.project_path = source["project_path"];
+	        this.stages = this.convertValues(source["stages"], PipelineStage);
+	        this.runs = this.convertValues(source["runs"], Run);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class CardRun {
 	    id: number;
@@ -252,8 +500,13 @@ export namespace domain {
 	}
 	export class Canvas {
 	    conversations: Conversation[];
+	    pipelines: Pipeline[];
 	    nodes: CanvasNode[];
 	    links: CanvasLink[];
+	    joins: JoinNode[];
+	    triggers: Trigger[];
+	    gates: Gate[];
+	    runs: FlowRun[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Canvas(source);
@@ -262,8 +515,13 @@ export namespace domain {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.conversations = this.convertValues(source["conversations"], Conversation);
+	        this.pipelines = this.convertValues(source["pipelines"], Pipeline);
 	        this.nodes = this.convertValues(source["nodes"], CanvasNode);
 	        this.links = this.convertValues(source["links"], CanvasLink);
+	        this.joins = this.convertValues(source["joins"], JoinNode);
+	        this.triggers = this.convertValues(source["triggers"], Trigger);
+	        this.gates = this.convertValues(source["gates"], Gate);
+	        this.runs = this.convertValues(source["runs"], FlowRun);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -318,6 +576,100 @@ export namespace domain {
 	
 	
 	
+	export class FlowStep {
+	    turn_id: number;
+	    conversation_id: number;
+	    card: string;
+	    kind: string;
+	    prompt: string;
+	    answer: string;
+	    status: string;
+	    at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FlowStep(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.turn_id = source["turn_id"];
+	        this.conversation_id = source["conversation_id"];
+	        this.card = source["card"];
+	        this.kind = source["kind"];
+	        this.prompt = source["prompt"];
+	        this.answer = source["answer"];
+	        this.status = source["status"];
+	        this.at = source["at"];
+	    }
+	}
+	export class FlowRunDetail {
+	    run: FlowRun;
+	    steps: FlowStep[];
+	
+	    static createFrom(source: any = {}) {
+	        return new FlowRunDetail(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.run = this.convertValues(source["run"], FlowRun);
+	        this.steps = this.convertValues(source["steps"], FlowStep);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	export class GateConfig {
+	    title: string;
+	    mode: string;
+	    pattern: string;
+	    case_sensitive: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new GateConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.mode = source["mode"];
+	        this.pattern = source["pattern"];
+	        this.case_sensitive = source["case_sensitive"];
+	    }
+	}
+	export class ImportResult {
+	    nodes: number;
+	    links: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.nodes = source["nodes"];
+	        this.links = source["links"];
+	    }
+	}
+	
+	
 	export class Model {
 	    id: string;
 	    label?: string;
@@ -356,6 +708,22 @@ export namespace domain {
 	        this.y = source["y"];
 	    }
 	}
+	export class NewGate {
+	    title: string;
+	    x: number;
+	    y: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new NewGate(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.x = source["x"];
+	        this.y = source["y"];
+	    }
+	}
 	export class NewNote {
 	    body: string;
 	    color: string;
@@ -374,6 +742,74 @@ export namespace domain {
 	        this.y = source["y"];
 	    }
 	}
+	export class NewPipeline {
+	    title: string;
+	    x: number;
+	    y: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new NewPipeline(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.x = source["x"];
+	        this.y = source["y"];
+	    }
+	}
+	export class NewTrigger {
+	    title: string;
+	    x: number;
+	    y: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new NewTrigger(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.x = source["x"];
+	        this.y = source["y"];
+	    }
+	}
+	
+	export class PipelineConfig {
+	    title: string;
+	    project_path: string;
+	    stages: PipelineStage[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PipelineConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.project_path = source["project_path"];
+	        this.stages = this.convertValues(source["stages"], PipelineStage);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class Quota {
 	    short_label?: string;
 	    short_utilization: number;
@@ -468,55 +904,26 @@ export namespace domain {
 		    return a;
 		}
 	}
-	
-	export class Stage {
-	    id: number;
-	    run_id: number;
-	    position: number;
-	    name: string;
-	    command: string[];
-	    status: string;
-	    exit_code?: number;
-	    output?: string;
+	export class ProviderUsage {
+	    provider: string;
+	    turns: number;
+	    input_tokens: number;
+	    output_tokens: number;
+	    cards: number;
+	    quota?: Quota;
 	
 	    static createFrom(source: any = {}) {
-	        return new Stage(source);
+	        return new ProviderUsage(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.run_id = source["run_id"];
-	        this.position = source["position"];
-	        this.name = source["name"];
-	        this.command = source["command"];
-	        this.status = source["status"];
-	        this.exit_code = source["exit_code"];
-	        this.output = source["output"];
-	    }
-	}
-	export class Run {
-	    id: number;
-	    project: string;
-	    status: string;
-	    // Go type: time
-	    created_at: any;
-	    // Go type: time
-	    updated_at: any;
-	    stages?: Stage[];
-	
-	    static createFrom(source: any = {}) {
-	        return new Run(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.project = source["project"];
-	        this.status = source["status"];
-	        this.created_at = this.convertValues(source["created_at"], null);
-	        this.updated_at = this.convertValues(source["updated_at"], null);
-	        this.stages = this.convertValues(source["stages"], Stage);
+	        this.provider = source["provider"];
+	        this.turns = source["turns"];
+	        this.input_tokens = source["input_tokens"];
+	        this.output_tokens = source["output_tokens"];
+	        this.cards = source["cards"];
+	        this.quota = this.convertValues(source["quota"], Quota);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -537,6 +944,34 @@ export namespace domain {
 		    return a;
 		}
 	}
+	
+	
+	export class SearchHit {
+	    node_id: number;
+	    conversation_id?: number;
+	    turn_id?: number;
+	    kind: string;
+	    title: string;
+	    provider?: string;
+	    where: string;
+	    snippet: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SearchHit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.node_id = source["node_id"];
+	        this.conversation_id = source["conversation_id"];
+	        this.turn_id = source["turn_id"];
+	        this.kind = source["kind"];
+	        this.title = source["title"];
+	        this.provider = source["provider"];
+	        this.where = source["where"];
+	        this.snippet = source["snippet"];
+	    }
+	}
 	export class Snapshot {
 	    healthy: boolean;
 	    version: string;
@@ -553,6 +988,62 @@ export namespace domain {
 	        this.version = source["version"];
 	        this.providers = this.convertValues(source["providers"], Provider);
 	        this.runs = this.convertValues(source["runs"], Run);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	export class TriggerConfig {
+	    title: string;
+	    prompt: string;
+	    mode: string;
+	    interval_seconds: number;
+	    at_time: string;
+	    enabled: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new TriggerConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.prompt = source["prompt"];
+	        this.mode = source["mode"];
+	        this.interval_seconds = source["interval_seconds"];
+	        this.at_time = source["at_time"];
+	        this.enabled = source["enabled"];
+	    }
+	}
+	export class UsageReport {
+	    days: number;
+	    providers: ProviderUsage[];
+	
+	    static createFrom(source: any = {}) {
+	        return new UsageReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.days = source["days"];
+	        this.providers = this.convertValues(source["providers"], ProviderUsage);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

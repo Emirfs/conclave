@@ -14,13 +14,17 @@ AI coding CLIs are useful in isolation, but coordinating them usually means jugg
 - opens solo or multi-provider conversations on a visual canvas;
 - streams provider output and current activity into conversation cards;
 - preserves provider sessions so later turns continue the same upstream conversation;
+- stops a running or queued turn on one click, keeping whatever the provider had already said;
 - assigns a project directory and `read` or `edit` access independently to each card;
 - runs each card's providers on a model chosen per card, or on the CLI's own default;
+- records what each turn cost and shows spend next to each provider's own allowance report in one usage panel;
+- exports a card's transcript as Markdown and the whole board as JSON; importing adds to a board rather than replacing it;
+- searches the whole board with Ctrl+F — titles, roles, messages, answers and notes — and centres the card a result belongs to;
 - shows Git working-tree changes and unified diffs inside project cards;
 - relays, discusses, or reviews completed answers through configurable canvas links;
 - pairs two cards for a bounded conversation or an explicit work-until-done exchange;
 - runs an optional command after each turn and feeds failures back to the same card;
-- queues ordered build and test pipelines that survive client disconnection;
+- keeps ordered build and test pipelines as cards on the board, still running when the client disconnects;
 - persists conversations, canvas geometry, links, provider quota, sessions, and pipeline state in SQLite.
 
 Conclave does not replace provider CLIs or their subscriptions. It runs the official local executables already installed and authenticated on the machine.
@@ -112,6 +116,18 @@ To pin a version or install somewhere else, run the script with parameters inste
 
 Prefer a wizard? Each release also ships `conclave-windows-amd64-setup.exe`, a per-user installer that needs no administrator rights and carries the same two binaries.
 
+### macOS and Linux
+
+The daemon and the `conclave` command are pure Go and run wherever Go runs. One line in a shell:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Emirfs/conclave/main/install.sh | sh
+```
+
+It picks the build for your platform, verifies its SHA256 against the published `checksums-unix.txt`, and installs `conclave` into `~/.local/bin`. `CONCLAVE_VERSION` pins a release and `CONCLAVE_BIN` chooses another directory.
+
+Releases carry `linux/amd64`, `linux/arm64`, `darwin/amd64` and `darwin/arm64`. What you get is the daemon and its command-line client — everything the local API offers, minus the canvas. The desktop client is Windows-only for now: it is a Wails build, and the one-click update replaces files the way Windows needs. Building it from source on another platform is a matter of Wails' own requirements.
+
 ## Updates
 
 The daemon asks GitHub once a day whether a newer release exists. It only ever looks: nothing is downloaded or replaced without being asked for.
@@ -123,7 +139,7 @@ The daemon asks GitHub once a day whether a newer release exists. It only ever l
 
 ## Requirements
 
-Running an installed release needs nothing but Windows and the provider CLIs. The following are for building from source:
+Running an installed release needs nothing but the provider CLIs. The desktop client needs Windows; the daemon and command run on Windows, macOS and Linux. The following are for building from source:
 
 - Go `1.26.7` or newer
 - Wails v2 CLI
@@ -180,6 +196,27 @@ Check daemon health, discovered providers, and recent pipelines:
 ```powershell
 go run ./cmd/conclave status
 go run ./cmd/conclave status --json
+```
+
+Find something on the board without opening the desktop client:
+
+```powershell
+go run ./cmd/conclave search "linker"
+go run ./cmd/conclave search --json --limit 5 "bootloader"
+```
+
+See what the providers have been spending:
+
+```powershell
+go run ./cmd/conclave usage
+go run ./cmd/conclave usage --days 30 --json
+```
+
+Write the board, or one card's transcript, to a file:
+
+```powershell
+go run ./cmd/conclave export > board.json
+go run ./cmd/conclave export --conversation 12 > transcript.md
 ```
 
 Open a conversation and queue its first turn:

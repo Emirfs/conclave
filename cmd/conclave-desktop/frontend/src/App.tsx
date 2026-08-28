@@ -7,6 +7,7 @@ import { providerStyle } from './providers'
 import { Board } from './canvas/Board'
 import { useCanvas } from './canvas/useCanvas'
 import { UpdateBanner } from './UpdateBanner'
+import { UsagePanel } from './UsagePanel'
 import './canvas/canvas.css'
 
 type Connection = 'connecting' | 'online' | 'offline'
@@ -18,6 +19,7 @@ export function App() {
   const [connection, setConnection] = useState<Connection>('connecting')
   const [error, setError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
+  const [usageOpen, setUsageOpen] = useState(false)
   // Guards against a slow response from a previous poll overwriting a newer one.
   const generation = useRef(0)
 
@@ -80,6 +82,30 @@ export function App() {
     void canvas.addNote({ body: '', color: '', ...scatter() } as domain.NewNote)
   }, [canvas])
 
+  // A pipeline card holds deterministic work: an ordered command list run in a
+  // project. It has no provider, so it is created from the rail, not by
+  // clicking one.
+  const addPipeline = useCallback(() => {
+    void canvas.addPipeline({ title: 'Pipeline', ...scatter() } as domain.NewPipeline)
+  }, [canvas])
+
+  // A join is a waiting point: every line feeding it must speak before it
+  // passes anything on, and then it passes on one message carrying all of them.
+  const addJoin = useCallback(() => {
+    void canvas.addJoin({ body: 'Birleştirici', color: '', ...scatter() } as domain.NewNote)
+  }, [canvas])
+
+  // A trigger starts a flow by itself. What it runs is whatever the board
+  // links to it, so it is created bare and wired up on the canvas.
+  const addTrigger = useCallback(() => {
+    void canvas.addTrigger({ title: 'Tetikleyici', ...scatter() } as domain.NewTrigger)
+  }, [canvas])
+
+  // A gate reads the message that reaches it and picks which way it goes on.
+  const addGate = useCallback(() => {
+    void canvas.addGate({ title: 'Kapı', ...scatter() } as domain.NewGate)
+  }, [canvas])
+
   const addGroup = useCallback(() => {
     if (ready.length === 0) return
     void canvas.addConversation({
@@ -105,12 +131,43 @@ export function App() {
             <button className="button button--block" onClick={addNote}>
               Not
             </button>
+            <button className="button button--block" onClick={addPipeline}>
+              Pipeline
+            </button>
+            <button className="button button--block" onClick={addJoin}>
+              Birleştirici
+            </button>
+            <button className="button button--block" onClick={addTrigger}>
+              Tetikleyici
+            </button>
+            <button className="button button--block" onClick={addGate}>
+              Kapı
+            </button>
+          </section>
+          <section className="rail__group">
+            <h2 className="rail__heading">Pano</h2>
+            <button className="button button--block" onClick={() => void canvas.exportBoard()}>
+              Dışa aktar
+            </button>
+            <button className="button button--block" onClick={() => void canvas.importBoard()}>
+              İçe aktar
+            </button>
+            <button className="button button--block" onClick={() => setUsageOpen((open) => !open)}>
+              {usageOpen ? 'Kullanımı gizle' : 'Kullanım'}
+            </button>
+            <p className="rail__hint">
+              İçe aktarma hiçbir şeyin yerine geçmez: dosyadaki kartlar panoda
+              duranların yanına eklenir.
+            </p>
             <p className="rail__hint">
               Sağlayıcıya tıkla: tekil konuşma. Boş zemine çift tıkla: not.
               Boş zeminde sürükle: toplu seç. Ctrl+A: hepsi. Orta/sağ tuş: panoyu kaydır.
               İki kart seç, bağlama düğmeleri çıksın.
             </p>
           </section>
+          {usageOpen && (
+            <UsagePanel online={connection === 'online'} onClose={() => setUsageOpen(false)} />
+          )}
           {memory.length > 0 && <ProviderGroup heading="Bellek" providers={memory} />}
         </aside>
         <main className={connection === 'online' ? 'stage stage--board' : 'stage'}>

@@ -8,6 +8,9 @@
 # most likely to open in Notepad.
 *.ps1 text eol=crlf
 
+# A shell script with CRLF line endings fails on its own shebang line.
+*.sh text eol=lf
+
 *.go text eol=lf
 *.ts text eol=lf
 *.tsx text eol=lf
