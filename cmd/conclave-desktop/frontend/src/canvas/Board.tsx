@@ -20,6 +20,7 @@ import { domain } from '../../wailsjs/go/models'
 import { BranchPanel } from './BranchPanel'
 import { ConfirmPanel, type PendingConfirm } from './ConfirmPanel'
 import { ConversationNode } from './ConversationNode'
+import { JoinNode } from './JoinNode'
 import { LinkPanel } from './LinkPanel'
 import { NoteNode } from './NoteNode'
 import { PipelineNode } from './PipelineNode'
@@ -27,7 +28,12 @@ import { ProviderEdge } from './ProviderEdge'
 import { SearchPanel } from './SearchPanel'
 import type { BoardNode, useCanvas } from './useCanvas'
 
-const nodeTypes = { conversation: ConversationNode, note: NoteNode, pipeline: PipelineNode }
+const nodeTypes = {
+  conversation: ConversationNode,
+  note: NoteNode,
+  pipeline: PipelineNode,
+  join: JoinNode,
+}
 const edgeTypes = { provider: ProviderEdge }
 
 export type BoardHandle = ReturnType<typeof useCanvas>
@@ -45,7 +51,8 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
     pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
     saveRole, saveModel, resumeDialogue, cancelConversation, search,
     savePipeline, runPipeline, pickPipelineProject, exportConversation,
-    assignRoles, branch, addNote, error, clearError, deletingIds } = canvas
+    assignRoles, branch, addNote, error, clearError, deletingIds,
+    runs, stopRun } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
   const [searching, setSearching] = useState(false)
   // A deletion waiting for an answer. Held here rather than asked with
@@ -185,6 +192,12 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
               onResize: resize,
               deleting,
             },
+          }
+        }
+        if (node.data.kind === 'join') {
+          return {
+            ...node,
+            data: { ...node.data, onBodyChange: setNoteBody, onClose: close, deleting },
           }
         }
         return node.data.kind === 'note'
@@ -432,6 +445,25 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
         deleteKeyCode={['Delete']}
         elevateNodesOnSelect
       >
+        {runs.length > 0 && (
+          <Panel position="bottom-center" className="runpanel">
+            {runs.map((run) => (
+              <div className="runpanel__run" key={run.id}>
+                <span className="runpanel__dot" aria-hidden="true" />
+                <span className="runpanel__text">
+                  akış #{run.id} · {run.steps} adım
+                </span>
+                <button
+                  className="runpanel__stop"
+                  onClick={() => void stopRun(run.id)}
+                  title="Bu akıştaki her kartı durdur"
+                >
+                  durdur
+                </button>
+              </div>
+            ))}
+          </Panel>
+        )}
         {pending && (
           <Panel position="top-center" className="confirmpanel">
             <ConfirmPanel pending={pending} onCancel={() => setPending(null)} />

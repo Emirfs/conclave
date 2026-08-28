@@ -12,6 +12,46 @@ export namespace domain {
 	        this.stopped = source["stopped"];
 	    }
 	}
+	export class FlowRun {
+	    id: number;
+	    origin_conversation_id?: number;
+	    status: string;
+	    steps: number;
+	    started_at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FlowRun(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.origin_conversation_id = source["origin_conversation_id"];
+	        this.status = source["status"];
+	        this.steps = source["steps"];
+	        this.started_at = source["started_at"];
+	    }
+	}
+	export class JoinNode {
+	    node_id: number;
+	    title: string;
+	    waiting: number;
+	    expected: number;
+	    sources?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new JoinNode(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.node_id = source["node_id"];
+	        this.title = source["title"];
+	        this.waiting = source["waiting"];
+	        this.expected = source["expected"];
+	        this.sources = source["sources"];
+	    }
+	}
 	export class CanvasLink {
 	    id: number;
 	    source_id: number;
@@ -389,6 +429,8 @@ export namespace domain {
 	    pipelines: Pipeline[];
 	    nodes: CanvasNode[];
 	    links: CanvasLink[];
+	    joins: JoinNode[];
+	    runs: FlowRun[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Canvas(source);
@@ -400,6 +442,8 @@ export namespace domain {
 	        this.pipelines = this.convertValues(source["pipelines"], Pipeline);
 	        this.nodes = this.convertValues(source["nodes"], CanvasNode);
 	        this.links = this.convertValues(source["links"], CanvasLink);
+	        this.joins = this.convertValues(source["joins"], JoinNode);
+	        this.runs = this.convertValues(source["runs"], FlowRun);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -453,6 +497,7 @@ export namespace domain {
 	
 	
 	
+	
 	export class ImportResult {
 	    nodes: number;
 	    links: number;
@@ -467,6 +512,7 @@ export namespace domain {
 	        this.links = source["links"];
 	    }
 	}
+	
 	
 	export class Model {
 	    id: string;

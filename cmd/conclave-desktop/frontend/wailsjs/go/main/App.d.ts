@@ -16,6 +16,8 @@ export function CheckUpdate():Promise<update.Status>;
 
 export function CreateConversation(arg1:domain.NewConversation):Promise<domain.Conversation>;
 
+export function CreateJoin(arg1:domain.NewNote):Promise<domain.CanvasNode>;
+
 export function CreateNote(arg1:domain.NewNote):Promise<domain.CanvasNode>;
 
 export function CreatePipeline(arg1:domain.NewPipeline):Promise<domain.Pipeline>;
@@ -67,6 +69,8 @@ export function SetRole(arg1:number,arg2:string):Promise<void>;
 export function Snapshot():Promise<domain.Snapshot>;
 
 export function StartPipeline(arg1:number):Promise<number>;
+
+export function StopFlowRun(arg1:number):Promise<number>;
 
 export function UnlinkNodes(arg1:number):Promise<void>;
 

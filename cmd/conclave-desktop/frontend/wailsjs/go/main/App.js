@@ -26,6 +26,10 @@ export function CreateConversation(arg1) {
   return window['go']['main']['App']['CreateConversation'](arg1);
 }
 
+export function CreateJoin(arg1) {
+  return window['go']['main']['App']['CreateJoin'](arg1);
+}
+
 export function CreateNote(arg1) {
   return window['go']['main']['App']['CreateNote'](arg1);
 }
@@ -128,6 +132,10 @@ export function Snapshot() {
 
 export function StartPipeline(arg1) {
   return window['go']['main']['App']['StartPipeline'](arg1);
+}
+
+export function StopFlowRun(arg1) {
+  return window['go']['main']['App']['StopFlowRun'](arg1);
 }
 
 export function UnlinkNodes(arg1) {

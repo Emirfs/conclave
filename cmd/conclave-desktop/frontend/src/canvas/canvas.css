@@ -2718,3 +2718,139 @@
   color: var(--text-primary);
   border-color: var(--line-strong);
 }
+
+/* ---------- join card and run panel ---------- */
+
+/* A join is not a card that speaks, so it is drawn as a small waiting point
+   rather than as a conversation with an empty transcript. */
+.node--join {
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-raised));
+}
+
+.node--join.node--selected {
+  border-style: solid;
+  border-color: var(--accent);
+}
+
+.node__join-title {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.node__join-title:focus {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--surface-input);
+}
+
+.join__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 12px 12px;
+  text-align: center;
+}
+
+/* The count is the whole point of the card: how many lines have spoken out of
+   how many the board is waiting on. */
+.join__count {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  line-height: 1.1;
+}
+
+.join__label {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.join__sources {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.join__source {
+  padding: 1px 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* One line per journey the board is in the middle of. A run is what a person
+   started, so it is what they get to stop. */
+.runpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.runpanel__run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+}
+
+.runpanel__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: run-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes run-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.runpanel__text {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.runpanel__stop {
+  padding: 2px 9px;
+  border: 1px solid color-mix(in srgb, var(--negative) 45%, var(--line));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--negative);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.runpanel__stop:hover {
+  background: color-mix(in srgb, var(--negative) 16%, transparent);
+}

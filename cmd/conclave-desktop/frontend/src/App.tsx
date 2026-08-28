@@ -89,6 +89,12 @@ export function App() {
     void canvas.addPipeline({ title: 'Pipeline', ...scatter() } as domain.NewPipeline)
   }, [canvas])
 
+  // A join is a waiting point: every line feeding it must speak before it
+  // passes anything on, and then it passes on one message carrying all of them.
+  const addJoin = useCallback(() => {
+    void canvas.addJoin({ body: 'Birleştirici', color: '', ...scatter() } as domain.NewNote)
+  }, [canvas])
+
   const addGroup = useCallback(() => {
     if (ready.length === 0) return
     void canvas.addConversation({
@@ -116,6 +122,9 @@ export function App() {
             </button>
             <button className="button button--block" onClick={addPipeline}>
               Pipeline
+            </button>
+            <button className="button button--block" onClick={addJoin}>
+              Birleştirici
             </button>
           </section>
           <section className="rail__group">

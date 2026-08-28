@@ -6,6 +6,7 @@ import {
   CancelConversation,
   Canvas as LoadCanvas,
   CreateConversation,
+  CreateJoin,
   CreateNote,
   CreatePipeline,
   ExportBoard,
@@ -26,6 +27,7 @@ import {
   SetModel,
   SetRole,
   StartPipeline,
+  StopFlowRun,
   UnlinkNodes,
   UpdateLink,
 } from '../../wailsjs/go/main/App'
@@ -48,7 +50,18 @@ export type PipelineNodeData = {
   pipeline: domain.Pipeline
 }
 
-export type BoardNode = Node<ConversationNodeData | NoteNodeData | PipelineNodeData>
+export type JoinNodeData = {
+  kind: 'join'
+  /** The join's name, which is also the node's body text. */
+  body: string
+  /** How many lines feed it and which of them have spoken. Absent only in the
+   *  moment between a join being created and the next board load. */
+  join?: domain.JoinNode
+}
+
+export type BoardNode = Node<
+  ConversationNodeData | NoteNodeData | PipelineNodeData | JoinNodeData
+>
 
 /** How long a drag or keystroke settles before it is written to the daemon. */
 const PATCH_DEBOUNCE = 350
@@ -63,6 +76,7 @@ function toBoardNode(
   node: domain.CanvasNode,
   conversations: Map<number, domain.Conversation>,
   pipelines: Map<number, domain.Pipeline>,
+  joins: Map<number, domain.JoinNode>,
 ): BoardNode | null {
   const shared = {
     id: String(node.id),
@@ -79,6 +93,13 @@ function toBoardNode(
       ...shared,
       type: 'note',
       data: { kind: 'note', body: node.body ?? '', color: node.color ?? '' },
+    }
+  }
+  if (node.kind === 'join') {
+    return {
+      ...shared,
+      type: 'join',
+      data: { kind: 'join', body: node.body ?? '', join: joins.get(node.id) },
     }
   }
   if (node.kind === 'pipeline') {
@@ -116,6 +137,7 @@ export function useCanvas(connected: boolean) {
   const deletingRef = useRef(new Set<string>())
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [runs, setRuns] = useState<domain.FlowRun[]>([])
   const timers = useRef(new Map<string, number>())
 
   const clearError = useCallback(() => setError(null), [])
@@ -133,6 +155,12 @@ export function useCanvas(connected: boolean) {
           if (run.status === 'queued' || run.status === 'running') working = true
         }
       }
+      const joins = new Map<number, domain.JoinNode>()
+      for (const item of canvas.joins ?? []) joins.set(item.node_id, item)
+      // A run still in flight is work in progress: something on the board is
+      // about to move even if no provider is mid-answer this instant.
+      if ((canvas.runs ?? []).length > 0) working = true
+      setRuns(canvas.runs ?? [])
       const conversations = new Map<number, domain.Conversation>()
       for (const item of canvas.conversations ?? []) {
         conversations.set(item.id, item)
@@ -212,7 +240,7 @@ export function useCanvas(connected: boolean) {
         return mappedEdges.map((edge) => ({ ...edge, selected: local.get(edge.id)?.selected }))
       })
       const mapped = (canvas.nodes ?? [])
-        .map((node) => toBoardNode(node, conversations, pipelines))
+        .map((node) => toBoardNode(node, conversations, pipelines, joins))
         .filter((node): node is BoardNode => node !== null)
       setNodes((current) => {
         const local = new Map(current.map((node) => [node.id, node]))
@@ -301,6 +329,35 @@ export function useCanvas(connected: boolean) {
         await CreateNote(input)
       } catch (cause) {
         setError(`Not oluşturulamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  // A join is created empty and named on the card, the way a note is.
+  const addJoin = useCallback(
+    async (input: domain.NewNote) => {
+      try {
+        await CreateJoin(input)
+      } catch (cause) {
+        setError(`Birleştirici oluşturulamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  // Stopping a run stops every card still working on it. Catching each card in
+  // turn is what this replaces.
+  const stopRun = useCallback(
+    async (runID: number) => {
+      try {
+        await StopFlowRun(runID)
+      } catch (cause) {
+        setError(`Akış durdurulamadı: ${cause}`)
         return
       }
       await load()
@@ -697,13 +754,15 @@ export function useCanvas(connected: boolean) {
   return useMemo(
     () => ({
       nodes, setNodes, edges, error, clearError, deletingIds, loaded, load, patch,
+      runs, addJoin, stopRun,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
       addPipeline, savePipeline, runPipeline, pickPipelineProject,
       exportConversation, exportBoard, importBoard,
       saveRole, saveModel, resumeDialogue, cancelConversation, search, assignRoles, branch,
     }),
-    [nodes, edges, error, clearError, deletingIds, loaded, load, patch, addConversation, addNote, remove,
+    [nodes, edges, error, clearError, deletingIds, loaded, load, patch, runs, addJoin, stopRun,
+     addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
      saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, cancelConversation, search,
      addPipeline, savePipeline, runPipeline, pickPipelineProject,
