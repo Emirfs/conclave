@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -243,6 +244,103 @@ func (a *App) Branch(conversationID int64, answer string, providers []string) ([
 }
 
 // ResumeDialogue clears a parked exchange so the next message starts it again.
+// ExportConversation writes a card's transcript to a Markdown file the user
+// picks. It returns the chosen path, or an empty string when the dialog was
+// cancelled — a cancel is not an error.
+func (a *App) ExportConversation(conversationID int64, suggestedName string) (string, error) {
+	client, err := a.client()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	markdown, err := client.ExportConversation(ctx, conversationID)
+	if err != nil {
+		return "", err
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		DefaultFilename: safeFilename(suggestedName) + ".md",
+		Filters:         []runtime.FileFilter{{DisplayName: "Markdown", Pattern: "*.md"}},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(markdown), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// ExportBoard writes the whole board to a JSON file the user picks.
+func (a *App) ExportBoard() (string, error) {
+	client, err := a.client()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+	defer cancel()
+	export, err := client.ExportBoard(ctx)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.MarshalIndent(export, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		DefaultFilename: "conclave-pano-" + time.Now().Format("2006-01-02") + ".json",
+		Filters:         []runtime.FileFilter{{DisplayName: "Conclave panosu", Pattern: "*.json"}},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// ImportBoard adds an exported board to the current one. Nothing is replaced:
+// the file's cards arrive alongside what is already on the canvas.
+func (a *App) ImportBoard() (domain.ImportResult, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Filters: []runtime.FileFilter{{DisplayName: "Conclave panosu", Pattern: "*.json"}},
+	})
+	if err != nil || path == "" {
+		return domain.ImportResult{}, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return domain.ImportResult{}, err
+	}
+	var export domain.BoardExport
+	if err := json.Unmarshal(raw, &export); err != nil {
+		return domain.ImportResult{}, errors.New("this file is not a Conclave board export")
+	}
+	client, err := a.client()
+	if err != nil {
+		return domain.ImportResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+	defer cancel()
+	return client.ImportBoard(ctx, export)
+}
+
+// safeFilename keeps a card title usable as a file name without deciding what
+// the user may call the file: the dialog is still theirs to edit.
+func safeFilename(name string) string {
+	cleaned := strings.Map(func(symbol rune) rune {
+		if strings.ContainsRune(`\/:*?"<>|`, symbol) {
+			return '-'
+		}
+		return symbol
+	}, strings.TrimSpace(name))
+	if cleaned == "" {
+		return "conclave"
+	}
+	return cleaned
+}
+
 // CreatePipeline puts a new pipeline card on the board.
 func (a *App) CreatePipeline(input domain.NewPipeline) (domain.Pipeline, error) {
 	client, err := a.client()

@@ -42,8 +42,20 @@ export function EnsureDaemon() {
   return window['go']['main']['App']['EnsureDaemon']();
 }
 
+export function ExportBoard() {
+  return window['go']['main']['App']['ExportBoard']();
+}
+
+export function ExportConversation(arg1, arg2) {
+  return window['go']['main']['App']['ExportConversation'](arg1, arg2);
+}
+
 export function FileDiff(arg1, arg2) {
   return window['go']['main']['App']['FileDiff'](arg1, arg2);
+}
+
+export function ImportBoard() {
+  return window['go']['main']['App']['ImportBoard']();
 }
 
 export function LinkNodes(arg1, arg2) {

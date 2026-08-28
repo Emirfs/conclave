@@ -46,6 +46,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/turns", s.createTurn)
 	mux.HandleFunc("GET /v1/canvas", s.canvas)
 	mux.HandleFunc("GET /v1/search", s.search)
+	mux.HandleFunc("GET /v1/canvas/conversations/{id}/export", s.exportConversation)
+	mux.HandleFunc("GET /v1/canvas/export", s.exportBoard)
+	mux.HandleFunc("POST /v1/canvas/import", s.importBoard)
 	mux.HandleFunc("POST /v1/canvas/conversations", s.createConversation)
 	mux.HandleFunc("POST /v1/canvas/notes", s.createNote)
 	mux.HandleFunc("POST /v1/canvas/pipelines", s.createPipeline)
@@ -487,6 +490,57 @@ func (s *Server) providerModels(response http.ResponseWriter, request *http.Requ
 
 // resumeDialogue clears the parked state so a stalled exchange can be pushed on
 // without the user having to remember what it was waiting for.
+// exportConversation renders one card's whole transcript as Markdown. It is
+// text, not JSON: what comes out is meant to be read and kept.
+// boardImportOffset is how far an imported board lands from the origin, so it
+// does not arrive on top of what is already on the canvas.
+const boardImportOffset = 120
+
+func (s *Server) exportConversation(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	markdown, err := s.store.ExportConversation(request.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("conversation not found"))
+			return
+		}
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	response.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	response.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(response, markdown)
+}
+
+// exportBoard writes the whole board out as one self-contained value.
+func (s *Server) exportBoard(response http.ResponseWriter, request *http.Request) {
+	export, err := s.store.ExportBoard(request.Context())
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, export)
+}
+
+// importBoard adds an exported board alongside the current one. It is additive
+// on purpose: replacing a board would throw away work that is still running.
+func (s *Server) importBoard(response http.ResponseWriter, request *http.Request) {
+	var input domain.BoardExport
+	if !decodeJSON(response, request, 32<<20, &input) {
+		return
+	}
+	result, err := s.store.ImportBoard(request.Context(), input, boardImportOffset, boardImportOffset)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, result)
+}
+
 // createPipeline puts a new, empty pipeline card on the board.
 func (s *Server) createPipeline(response http.ResponseWriter, request *http.Request) {
 	var input domain.NewPipeline
@@ -906,6 +960,34 @@ func (c *Client) do(ctx context.Context, method, path string, payload, result an
 	return json.NewDecoder(response.Body).Decode(result)
 }
 
+// text fetches a response that is not JSON. Only the Markdown export needs it,
+// and decoding that as JSON would mean quoting a document into a string.
+func (c *Client) text(ctx context.Context, path string) (string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	response, err := c.http.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode != http.StatusOK {
+		var failure map[string]string
+		_ = json.Unmarshal(body, &failure)
+		if message := failure["error"]; message != "" {
+			return "", errors.New(message)
+		}
+		return "", fmt.Errorf("daemon returned %s", response.Status)
+	}
+	return string(body), nil
+}
+
 func (c *Client) Canvas(ctx context.Context) (domain.Canvas, error) {
 	var canvas domain.Canvas
 	err := c.do(ctx, http.MethodGet, "/v1/canvas", nil, &canvas, http.StatusOK)
@@ -949,6 +1031,23 @@ func (c *Client) ProviderModels(ctx context.Context, name string) (domain.Provid
 		return domain.ProviderModels{}, err
 	}
 	return models, nil
+}
+
+func (c *Client) ExportConversation(ctx context.Context, conversationID int64) (string, error) {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/export"
+	return c.text(ctx, path)
+}
+
+func (c *Client) ExportBoard(ctx context.Context) (domain.BoardExport, error) {
+	var export domain.BoardExport
+	err := c.do(ctx, http.MethodGet, "/v1/canvas/export", nil, &export, http.StatusOK)
+	return export, err
+}
+
+func (c *Client) ImportBoard(ctx context.Context, export domain.BoardExport) (domain.ImportResult, error) {
+	var result domain.ImportResult
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/import", export, &result, http.StatusCreated)
+	return result, err
 }
 
 func (c *Client) CreatePipeline(ctx context.Context, input domain.NewPipeline) (domain.Pipeline, error) {

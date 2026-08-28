@@ -8,6 +8,9 @@ import {
   CreateConversation,
   CreateNote,
   CreatePipeline,
+  ExportBoard,
+  ExportConversation,
+  ImportBoard,
   DeleteCanvasNode,
   LinkNodes,
   PairNodes,
@@ -493,6 +496,42 @@ export function useCanvas(connected: boolean) {
     [load, nodes],
   )
 
+  // Exporting a card writes a Markdown file the user picks; a cancelled dialog
+  // returns an empty path and is not an error.
+  const exportConversation = useCallback(
+    async (conversationID: number, title: string) => {
+      try {
+        return await ExportConversation(conversationID, title)
+      } catch (cause) {
+        setError(String(cause))
+        return ''
+      }
+    },
+    [],
+  )
+
+  const exportBoard = useCallback(async () => {
+    try {
+      return await ExportBoard()
+    } catch (cause) {
+      setError(String(cause))
+      return ''
+    }
+  }, [])
+
+  // An import is additive: the file's cards arrive next to what is already on
+  // the board, so the reload afterwards is what makes them appear.
+  const importBoard = useCallback(async () => {
+    try {
+      const result = await ImportBoard()
+      await load()
+      return result
+    } catch (cause) {
+      setError(String(cause))
+      return null
+    }
+  }, [load])
+
   // Searching is a read the daemon answers; the board only asks and renders.
   // It deliberately does not touch canvas state: a search must not move, select
   // or reload anything until the user picks a result.
@@ -615,11 +654,13 @@ export function useCanvas(connected: boolean) {
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
       addPipeline, savePipeline, runPipeline, pickPipelineProject,
+      exportConversation, exportBoard, importBoard,
       saveRole, saveModel, resumeDialogue, cancelConversation, search, assignRoles, branch,
     }),
     [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
      saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, cancelConversation, search,
-     addPipeline, savePipeline, runPipeline, pickPipelineProject, assignRoles, branch],
+     addPipeline, savePipeline, runPipeline, pickPipelineProject,
+     exportConversation, exportBoard, importBoard, assignRoles, branch],
   )
 }

@@ -51,6 +51,8 @@ func run(arguments []string) error {
 		return submitChat(arguments)
 	case "search":
 		return searchBoard(arguments)
+	case "export":
+		return exportBoard(arguments)
 	case "version", "-v", "--version":
 		fmt.Println(version.Version)
 		return nil
@@ -142,6 +144,38 @@ func runDaemon(arguments []string) error {
 		return nil
 	}
 	return err
+}
+
+// exportBoard writes the board, or one card's transcript, to stdout. Redirecting
+// it is the whole interface: this is a client, not a file manager.
+func exportBoard(arguments []string) error {
+	flags := flag.NewFlagSet("export", flag.ContinueOnError)
+	conversation := flags.Int64("conversation", 0, "export one card's transcript as Markdown")
+	address := flags.String("address", defaultAddress, "daemon address")
+	tokenFile := flags.String("token-file", statedir.TokenPath(), "daemon token file")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	token, err := statedir.ReadToken(*tokenFile)
+	if err != nil {
+		return err
+	}
+	client := api.NewClient("http://"+*address, token)
+	if *conversation > 0 {
+		markdown, err := client.ExportConversation(context.Background(), *conversation)
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.WriteString(markdown)
+		return err
+	}
+	board, err := client.ExportBoard(context.Background())
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(board)
 }
 
 // searchBoard finds text on the canvas from a terminal. The daemon does the
@@ -360,5 +394,5 @@ func isLoopbackAddress(address string) bool {
 }
 
 func usage() {
-	fmt.Println("conclave [status|daemon|run|chat|search|update|version] [options]")
+	fmt.Println("conclave [status|daemon|run|chat|search|export|update|version] [options]")
 }

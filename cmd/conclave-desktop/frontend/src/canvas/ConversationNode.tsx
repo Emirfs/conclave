@@ -24,6 +24,7 @@ type Props = NodeProps & {
     onSaveModel: (conversationID: number, provider: string, model: string) => Promise<void>
     onResumeDialogue: (conversationID: number) => Promise<void>
     onCancel: (conversationID: number) => Promise<void>
+    onExport: (conversationID: number, title: string) => Promise<string>
     onBranch: (conversationID: number, answer: string) => void
     /** Puts text on the board as its own note card, next to this one. */
     onPinNote: (body: string) => void
@@ -35,7 +36,8 @@ type Tab = 'chat' | 'changes' | 'tests'
 
 export const ConversationNode = memo(function ConversationNode({ id, data, selected }: Props) {
   const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop,
-    onSaveRole, onSaveModel, onResumeDialogue, onCancel, onBranch, onPinNote, onResize } = data
+    onSaveRole, onSaveModel, onResumeDialogue, onCancel, onExport, onBranch,
+    onPinNote, onResize } = data
   const project = conversation.project_path ?? ''
   const access = conversation.access ?? 'edit'
   const [tab, setTab] = useState<Tab>('chat')
@@ -184,6 +186,15 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
           chosen={conversation.models ?? {}}
           onSave={(name, model) => onSaveModel(conversation.id, name, model)}
         />
+        {/* A transcript nobody can take out of the app is only half a record. */}
+        <button
+          className="node__tab nodrag"
+          onClick={() => void onExport(conversation.id, conversation.title)}
+          disabled={turns.length === 0}
+          title={turns.length === 0 ? 'Dışa aktarılacak mesaj yok' : 'Konuşmayı Markdown olarak kaydet'}
+        >
+          dışa aktar
+        </button>
         <span className="node__tabs">
           <button
             className={`node__tab${tab === 'chat' ? ' node__tab--active' : ''}`}

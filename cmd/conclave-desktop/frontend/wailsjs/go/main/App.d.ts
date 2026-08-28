@@ -24,7 +24,13 @@ export function DeleteCanvasNode(arg1:number):Promise<void>;
 
 export function EnsureDaemon():Promise<void>;
 
+export function ExportBoard():Promise<string>;
+
+export function ExportConversation(arg1:number,arg2:string):Promise<string>;
+
 export function FileDiff(arg1:number,arg2:string):Promise<vcs.Diff>;
+
+export function ImportBoard():Promise<domain.ImportResult>;
 
 export function LinkNodes(arg1:number,arg2:number):Promise<domain.CanvasLink>;
 

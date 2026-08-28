@@ -453,6 +453,20 @@ export namespace domain {
 	
 	
 	
+	export class ImportResult {
+	    nodes: number;
+	    links: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.nodes = source["nodes"];
+	        this.links = source["links"];
+	    }
+	}
 	
 	export class Model {
 	    id: string;

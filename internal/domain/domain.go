@@ -18,6 +18,75 @@ const (
 	StatusCanceled Status = "canceled"
 )
 
+// BoardExportVersion is the shape of an exported board. It is written into
+// every export and checked on import: a file from a newer build describes
+// things this one has no place to put.
+const BoardExportVersion = 1
+
+// BoardExport is a whole board as a file: every card with its transcript, every
+// note, every pipeline, and the links between them. Node ids are the export's
+// own internal references — an import maps them onto new ones.
+type BoardExport struct {
+	Version    int            `json:"version"`
+	ExportedAt time.Time      `json:"exported_at"`
+	Nodes      []ExportedNode `json:"nodes"`
+	Links      []ExportedLink `json:"links"`
+}
+
+// ExportedNode is one card, note or pipeline. Which fields carry meaning is
+// decided by Kind; the rest are absent.
+type ExportedNode struct {
+	NodeID int64   `json:"node_id"`
+	Kind   string  `json:"kind"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
+	Color  string  `json:"color,omitempty"`
+	Body   string  `json:"body,omitempty"`
+
+	Title            string            `json:"title,omitempty"`
+	ConversationKind string            `json:"conversation_kind,omitempty"`
+	Providers        []string          `json:"providers,omitempty"`
+	ProjectPath      string            `json:"project_path,omitempty"`
+	Access           string            `json:"access,omitempty"`
+	Role             string            `json:"role,omitempty"`
+	Models           map[string]string `json:"models,omitempty"`
+	Turns            []ExportedTurn    `json:"turns,omitempty"`
+
+	Stages []PipelineStage `json:"stages,omitempty"`
+}
+
+type ExportedTurn struct {
+	Prompt    string             `json:"prompt"`
+	Kind      string             `json:"kind"`
+	CreatedAt time.Time          `json:"created_at"`
+	Responses []ExportedResponse `json:"responses"`
+}
+
+type ExportedResponse struct {
+	Provider string `json:"provider"`
+	Status   Status `json:"status"`
+	Content  string `json:"content,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+type ExportedLink struct {
+	SourceNodeID int64  `json:"source_node_id"`
+	TargetNodeID int64  `json:"target_node_id"`
+	Mode         string `json:"mode"`
+	MaxRounds    int    `json:"max_rounds"`
+	UntilDone    bool   `json:"until_done"`
+	Briefing     string `json:"briefing,omitempty"`
+}
+
+// ImportResult reports what an import actually added. An import never replaces
+// the board: it puts the file's contents alongside what is already there.
+type ImportResult struct {
+	Nodes int `json:"nodes"`
+	Links int `json:"links"`
+}
+
 // SearchHit is one place on the board where a query was found. NodeID is what
 // the canvas needs to bring it into view; everything else is what the result
 // list shows, so a person can tell one hit from another without jumping to it.

@@ -57,6 +57,11 @@ nodes the daemon persists, so a layout survives a restart.
   ollama reports what is pulled. Only Claude Code, which cannot be asked, carries a list in this
   build. No list is a constraint — an unlisted name is still accepted, because a provider gains
   models between releases and a card must not be held back by this build's idea of what exists.
+- An import is additive and never replaces a board: replacing one would throw away work that is
+  still running. An imported transcript is written as history, never queued — a response that was
+  mid-answer when the board was exported arrives canceled, because re-queueing it would send
+  somebody else's prompt to a provider. An export from a newer build is refused rather than
+  half-understood.
 - Search matches in Go, not in SQL. SQLite's LIKE folds ASCII only, and the board is written in
   Turkish; the fold also flattens Turkish letters onto their plain forms, so a query typed without
   diacritics still finds what is there. It maps one rune to one rune, which is what lets a match be

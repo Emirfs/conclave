@@ -17,6 +17,7 @@ AI coding CLIs are useful in isolation, but coordinating them usually means jugg
 - stops a running or queued turn on one click, keeping whatever the provider had already said;
 - assigns a project directory and `read` or `edit` access independently to each card;
 - runs each card's providers on a model chosen per card, or on the CLI's own default;
+- exports a card's transcript as Markdown and the whole board as JSON; importing adds to a board rather than replacing it;
 - searches the whole board with Ctrl+F — titles, roles, messages, answers and notes — and centres the card a result belongs to;
 - shows Git working-tree changes and unified diffs inside project cards;
 - relays, discusses, or reviews completed answers through configurable canvas links;
@@ -189,6 +190,13 @@ Find something on the board without opening the desktop client:
 ```powershell
 go run ./cmd/conclave search "linker"
 go run ./cmd/conclave search --json --limit 5 "bootloader"
+```
+
+Write the board, or one card's transcript, to a file:
+
+```powershell
+go run ./cmd/conclave export > board.json
+go run ./cmd/conclave export --conversation 12 > transcript.md
 ```
 
 Open a conversation and queue its first turn:

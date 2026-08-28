@@ -43,7 +43,8 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
   const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink,
     pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
     saveRole, saveModel, resumeDialogue, cancelConversation, search,
-    savePipeline, runPipeline, pickPipelineProject, assignRoles, branch, addNote } = canvas
+    savePipeline, runPipeline, pickPipelineProject, exportConversation,
+    assignRoles, branch, addNote } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
   const [searching, setSearching] = useState(false)
   // The answer a branch would start from, held while the user picks providers.
@@ -158,6 +159,7 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
                 onSaveModel: saveModel,
                 onResumeDialogue: resumeDialogue,
                 onCancel: cancelConversation,
+                onExport: exportConversation,
                 onBranch: (conversationID: number, answer: string) =>
                   setBranching({ conversationID, answer }),
                 onPinNote: (body: string) => void pinNote(node.id, body),
@@ -167,7 +169,7 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
       }),
     [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop,
      saveRole, saveModel, resumeDialogue, cancelConversation, savePipeline, runPipeline,
-     pickPipelineProject, pinNote, resize, setHeight],
+     pickPipelineProject, exportConversation, pinNote, resize, setHeight],
   )
 
   const onNodesChange = useCallback(

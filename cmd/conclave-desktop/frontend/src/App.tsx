@@ -115,6 +115,19 @@ export function App() {
             <button className="button button--block" onClick={addPipeline}>
               Pipeline
             </button>
+          </section>
+          <section className="rail__group">
+            <h2 className="rail__heading">Pano</h2>
+            <button className="button button--block" onClick={() => void canvas.exportBoard()}>
+              Dışa aktar
+            </button>
+            <button className="button button--block" onClick={() => void canvas.importBoard()}>
+              İçe aktar
+            </button>
+            <p className="rail__hint">
+              İçe aktarma hiçbir şeyin yerine geçmez: dosyadaki kartlar panoda
+              duranların yanına eklenir.
+            </p>
             <p className="rail__hint">
               Sağlayıcıya tıkla: tekil konuşma. Boş zemine çift tıkla: not.
               Boş zeminde sürükle: toplu seç. Ctrl+A: hepsi. Orta/sağ tuş: panoyu kaydır.
