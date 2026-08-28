@@ -116,6 +116,18 @@ To pin a version or install somewhere else, run the script with parameters inste
 
 Prefer a wizard? Each release also ships `conclave-windows-amd64-setup.exe`, a per-user installer that needs no administrator rights and carries the same two binaries.
 
+### macOS and Linux
+
+The daemon and the `conclave` command are pure Go and run wherever Go runs. One line in a shell:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Emirfs/conclave/main/install.sh | sh
+```
+
+It picks the build for your platform, verifies its SHA256 against the published `checksums-unix.txt`, and installs `conclave` into `~/.local/bin`. `CONCLAVE_VERSION` pins a release and `CONCLAVE_BIN` chooses another directory.
+
+Releases carry `linux/amd64`, `linux/arm64`, `darwin/amd64` and `darwin/arm64`. What you get is the daemon and its command-line client — everything the local API offers, minus the canvas. The desktop client is Windows-only for now: it is a Wails build, and the one-click update replaces files the way Windows needs. Building it from source on another platform is a matter of Wails' own requirements.
+
 ## Updates
 
 The daemon asks GitHub once a day whether a newer release exists. It only ever looks: nothing is downloaded or replaced without being asked for.
@@ -127,7 +139,7 @@ The daemon asks GitHub once a day whether a newer release exists. It only ever l
 
 ## Requirements
 
-Running an installed release needs nothing but Windows and the provider CLIs. The following are for building from source:
+Running an installed release needs nothing but the provider CLIs. The desktop client needs Windows; the daemon and command run on Windows, macOS and Linux. The following are for building from source:
 
 - Go `1.26.7` or newer
 - Wails v2 CLI

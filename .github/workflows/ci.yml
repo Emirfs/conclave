@@ -7,7 +7,14 @@ on:
 
 jobs:
   go:
-    runs-on: windows-latest
+    # The daemon and the command are pure Go and run wherever Go runs, so they
+    # are tested wherever they run. A platform that is only ever cross-compiled
+    # breaks quietly.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -19,7 +26,26 @@ jobs:
       - name: Yayın derlemesi tutuyor mu
         # A release stamps the version in with -ldflags. If that path only ever
         # runs on a tag, it breaks on the day it matters.
-        run: go build -trimpath -ldflags "-X github.com/Emirfs/conclave/internal/version.Version=0.0.0-ci" ./...
+        run: go build -trimpath -ldflags "-X github.com/Emirfs/conclave/internal/version.Version=0.0.0-ci" ./cmd/conclave
+
+  cross:
+    # The release ships binaries for platforms no runner builds natively.
+    # modernc.org/sqlite is pure Go, so these are ordinary cross-compiles — and
+    # a cross-compile that only happens on a tag is one nobody has tried.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Her hedef derleniyor mu
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            GOOS=${target%/*} GOARCH=${target#*/} go build -trimpath -o /dev/null ./cmd/conclave
+          done
 
   frontend:
     runs-on: ubuntu-latest

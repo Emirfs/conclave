@@ -116,6 +116,18 @@ Belirli bir sürümü kurmak veya başka bir dizine kurmak için betiği boru ye
 
 Sihirbaz tercih ediyorsanız her yayında `conclave-windows-amd64-setup.exe` de var: yönetici hakkı istemeyen, aynı iki binary'yi taşıyan kullanıcı kapsamlı bir kurulum.
 
+### macOS ve Linux
+
+Daemon ve `conclave` komutu saf Go; Go'nun çalıştığı her yerde çalışır. Kabukta tek satır:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Emirfs/conclave/main/install.sh | sh
+```
+
+Betik platformunuza uygun yapıyı seçer, SHA256'sını yayındaki `checksums-unix.txt` ile doğrular ve `conclave` komutunu `~/.local/bin` altına kurar. `CONCLAVE_VERSION` bir sürüme sabitler, `CONCLAVE_BIN` başka bir dizin seçer.
+
+Yayınlar `linux/amd64`, `linux/arm64`, `darwin/amd64` ve `darwin/arm64` taşır. Kurulan şey daemon ile komut satırı istemcisi: yerel API'nin sunduğu her şey, canvas hariç. Masaüstü istemcisi şimdilik yalnızca Windows'ta yayınlanıyor — Wails yapısı ve tek tıkla güncelleme dosyaları Windows'un gerektirdiği biçimde değiştiriyor. Başka bir platformda kaynaktan derlemek Wails'in kendi gereksinimlerine bakar.
+
 ## Güncelleme
 
 Daemon günde bir kez GitHub'a yeni bir yayın olup olmadığını sorar. Yalnızca bakar: istenmeden hiçbir şey indirilmez, hiçbir dosya değiştirilmez.

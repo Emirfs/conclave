@@ -18,6 +18,7 @@ nodes the daemon persists, so a layout survives a restart.
 | `internal/vcs/` | Read-only git status and diff for a card's project. |
 | `internal/version/` | The running build's version, stamped in at link time. |
 | `install.ps1` | Installs and updates a released build on Windows. |
+| `install.sh` | Installs the daemon and command on macOS and Linux. |
 
 ## Invariants
 
@@ -79,6 +80,9 @@ nodes the daemon persists, so a layout survives a restart.
 - Each card carries its own project directory and access level; providers run there, as they would in
   a terminal. `edit` access auto-approves file changes and commands, because `--print` runs cannot ask.
 - Client-supplied paths are untrusted: reject absolute paths and parent traversal before touching disk.
+- The daemon and the command are platform-neutral Go and are tested on every platform they ship to;
+  a target that is only ever cross-compiled breaks quietly. The desktop client is Windows-only for
+  now, and that is a packaging boundary rather than a code one.
 - Nothing installs itself. The daemon only ever *looks* for a newer release, on a timer, and caches
   the answer; the bytes are fetched and the binaries replaced by `install.ps1`, and only after a
   person clicks Güncelle or runs the script. A build that cannot say which release it is reports
