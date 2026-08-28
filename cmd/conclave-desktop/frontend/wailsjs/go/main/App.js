@@ -70,6 +70,14 @@ export function FireTrigger(arg1) {
   return window['go']['main']['App']['FireTrigger'](arg1);
 }
 
+export function FlowRun(arg1) {
+  return window['go']['main']['App']['FlowRun'](arg1);
+}
+
+export function FlowRuns(arg1) {
+  return window['go']['main']['App']['FlowRuns'](arg1);
+}
+
 export function ImportBoard() {
   return window['go']['main']['App']['ImportBoard']();
 }
@@ -100,6 +108,10 @@ export function ProjectChanges(arg1) {
 
 export function ProviderModels(arg1) {
   return window['go']['main']['App']['ProviderModels'](arg1);
+}
+
+export function ReportFlowRun(arg1) {
+  return window['go']['main']['App']['ReportFlowRun'](arg1);
 }
 
 export function ResumeDialogue(arg1) {

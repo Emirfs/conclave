@@ -19,10 +19,35 @@ const maxRunSteps = 40
 // StartFlowRun opens a run for a message a person sent. Everything that follows
 // from it — relays, nudges, joins — belongs to the same run.
 func (s *Store) StartFlowRun(ctx context.Context, tx *sql.Tx, conversationID int64) (int64, error) {
+	label := ""
+	if conversationID != 0 {
+		// The title is copied rather than looked up later: a run outlives the
+		// card it started from, and "run 41" tells nobody anything.
+		if err := tx.QueryRowContext(ctx,
+			"SELECT COALESCE(title, '') FROM conversations WHERE id = ?",
+			conversationID).Scan(&label); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return 0, err
+		}
+	}
+	return s.startRun(ctx, tx, conversationID, label, domain.OriginUser)
+}
+
+// StartTriggerRun opens a run nobody asked for in the moment. It is named after
+// the trigger, because that is the only thing a person will recognise when they
+// read it the next morning.
+func (s *Store) StartTriggerRun(ctx context.Context, tx *sql.Tx, label string) (int64, error) {
+	return s.startRun(ctx, tx, 0, label, domain.OriginTrigger)
+}
+
+func (s *Store) startRun(
+	ctx context.Context, tx *sql.Tx, conversationID int64, label, kind string,
+) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	result, err := tx.ExecContext(ctx,
-		"INSERT INTO flow_runs(origin_conversation_id, status, steps, started_at) VALUES(?, ?, 0, ?)",
-		sql.NullInt64{Int64: conversationID, Valid: conversationID != 0}, domain.RunRunning, now)
+	result, err := tx.ExecContext(ctx, `
+INSERT INTO flow_runs(origin_conversation_id, status, steps, started_at, origin_label, origin_kind)
+VALUES(?, ?, 0, ?, ?, ?)`,
+		sql.NullInt64{Int64: conversationID, Valid: conversationID != 0},
+		domain.RunRunning, now, label, kind)
 	if err != nil {
 		return 0, err
 	}
@@ -87,9 +112,31 @@ func (s *Store) runOfTurn(ctx context.Context, turnID int64) (int64, error) {
 // shows these so a spreading exchange is something you can see rather than
 // something you infer from cards lighting up.
 func (s *Store) ActiveFlowRuns(ctx context.Context) ([]domain.FlowRun, error) {
+	return s.queryRuns(ctx, "WHERE status = ? ORDER BY id DESC LIMIT 20", domain.RunRunning)
+}
+
+// runHistory is how many past runs the board carries. A working surface, not an
+// archive: enough to answer "what happened last night" and no more.
+const runHistory = 40
+
+// FlowRuns reports recent runs, the ones still going first. A routine fires
+// while nobody is watching, so what happened has to be readable afterwards.
+func (s *Store) FlowRuns(ctx context.Context, limit int) ([]domain.FlowRun, error) {
+	if limit <= 0 || limit > runHistory {
+		limit = runHistory
+	}
+	return s.queryRuns(ctx, "ORDER BY (status = ?) DESC, id DESC LIMIT ?",
+		domain.RunRunning, limit)
+}
+
+func (s *Store) queryRuns(
+	ctx context.Context, clause string, arguments ...any,
+) ([]domain.FlowRun, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, COALESCE(origin_conversation_id, 0), status, steps, started_at
-FROM flow_runs WHERE status = ? ORDER BY id DESC LIMIT 20`, domain.RunRunning)
+SELECT id, COALESCE(origin_conversation_id, 0), status, steps, started_at,
+       COALESCE(finished_at, ''), COALESCE(origin_label, ''), COALESCE(origin_kind, 'user'),
+       (SELECT COUNT(DISTINCT conversation_id) FROM chat_turns WHERE flow_run_id = flow_runs.id)
+FROM flow_runs ` + clause, arguments...)
 	if err != nil {
 		return nil, err
 	}
@@ -97,13 +144,115 @@ FROM flow_runs WHERE status = ? ORDER BY id DESC LIMIT 20`, domain.RunRunning)
 	runs := []domain.FlowRun{}
 	for rows.Next() {
 		var run domain.FlowRun
-		if err := rows.Scan(&run.ID, &run.OriginConversationID,
-			&run.Status, &run.Steps, &run.StartedAt); err != nil {
+		if err := rows.Scan(&run.ID, &run.OriginConversationID, &run.Status, &run.Steps,
+			&run.StartedAt, &run.FinishedAt, &run.OriginLabel, &run.OriginKind,
+			&run.Cards); err != nil {
 			return nil, err
 		}
 		runs = append(runs, run)
 	}
 	return runs, rows.Err()
+}
+
+// FlowRunDetail reports everything that happened in one run, in order: which
+// card, what it was asked, what it said. This is the run as something to read
+// rather than something to watch.
+func (s *Store) FlowRunDetail(ctx context.Context, runID int64) (domain.FlowRunDetail, error) {
+	detail := domain.FlowRunDetail{Steps: []domain.FlowStep{}}
+	runs, err := s.queryRuns(ctx, "WHERE id = ?", runID)
+	if err != nil {
+		return detail, err
+	}
+	if len(runs) == 0 {
+		return detail, sql.ErrNoRows
+	}
+	detail.Run = runs[0]
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT t.id, COALESCE(t.conversation_id, 0), COALESCE(c.title, ''), t.kind, t.prompt, t.created_at
+FROM chat_turns t LEFT JOIN conversations c ON c.id = t.conversation_id
+WHERE t.flow_run_id = ? ORDER BY t.id`, runID)
+	if err != nil {
+		return detail, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var step domain.FlowStep
+		if err := rows.Scan(&step.TurnID, &step.Conversation, &step.Card,
+			&step.Kind, &step.Prompt, &step.At); err != nil {
+			return detail, err
+		}
+		if step.Card == "" {
+			step.Card = "Silinmiş kart"
+		}
+		detail.Steps = append(detail.Steps, step)
+	}
+	if err := rows.Err(); err != nil {
+		return detail, err
+	}
+	for index := range detail.Steps {
+		answer, status, err := s.turnAnswer(ctx, detail.Steps[index].TurnID)
+		if err != nil {
+			return detail, err
+		}
+		detail.Steps[index].Answer = answer
+		detail.Steps[index].Status = status
+	}
+	return detail, nil
+}
+
+// turnAnswer reports what a turn produced and how it ended. A turn with several
+// providers is reported as one answer, the way it is relayed as one.
+func (s *Store) turnAnswer(ctx context.Context, turnID int64) (string, string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT provider, status, content FROM chat_responses WHERE turn_id = ? ORDER BY id", turnID)
+	if err != nil {
+		return "", "", err
+	}
+	defer rows.Close()
+	var parts []string
+	status := ""
+	count := 0
+	for rows.Next() {
+		var provider, responseStatus, content string
+		if err := rows.Scan(&provider, &responseStatus, &content); err != nil {
+			return "", "", err
+		}
+		count++
+		// The worst outcome is the one worth reporting: a run in which one
+		// provider failed did not go well, however the others ended.
+		if worseStatus(responseStatus, status) {
+			status = responseStatus
+		}
+		if strings.TrimSpace(content) != "" {
+			parts = append(parts, provider+": "+strings.TrimSpace(content))
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", err
+	}
+	if count == 1 && len(parts) == 1 {
+		_, answer, _ := strings.Cut(parts[0], ": ")
+		return answer, status, nil
+	}
+	return strings.Join(parts, "\n\n"), status, nil
+}
+
+// statusRank orders outcomes from best to worst, so a mixed turn is reported by
+// the one a person would want to know about.
+var statusRank = map[string]int{
+	string(domain.StatusPassed):   0,
+	string(domain.StatusQueued):   1,
+	string(domain.StatusRunning):  2,
+	string(domain.StatusCanceled): 3,
+	string(domain.StatusFailed):   4,
+}
+
+func worseStatus(candidate, current string) bool {
+	if current == "" {
+		return true
+	}
+	return statusRank[candidate] > statusRank[current]
 }
 
 // StopFlowRun ends a run and stops every card still working on it. A run is the
@@ -140,7 +289,12 @@ func (s *Store) StopFlowRun(ctx context.Context, runID int64) (int, error) {
 	if _, err := s.db.ExecContext(ctx, "DELETE FROM join_inputs WHERE flow_run_id = ?", runID); err != nil {
 		return stopped, err
 	}
-	return stopped, s.FinishFlowRun(ctx, runID)
+	if err := s.FinishFlowRun(ctx, runID); err != nil {
+		return stopped, err
+	}
+	// A routine that was cut short still gets its write-up: "it was stopped
+	// half way" is exactly the sort of thing a person needs to be told.
+	return stopped, s.reportRun(ctx, runID)
 }
 
 // deliverToJoin records one line's answer at a waiting point and reports the
@@ -385,7 +539,12 @@ WHERE t.flow_run_id = ? AND r.status IN (?, ?)`,
 		"DELETE FROM join_inputs WHERE flow_run_id = ?", runID); err != nil {
 		return err
 	}
-	return s.FinishFlowRun(ctx, runID)
+	if err := s.FinishFlowRun(ctx, runID); err != nil {
+		return err
+	}
+	// A run that went through while nobody was watching leaves its result on
+	// the board, where it can be read the next morning.
+	return s.reportRun(ctx, runID)
 }
 
 // linkMustBeOneWay reports whether a link can only ever run one way. A return

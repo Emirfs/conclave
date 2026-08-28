@@ -58,6 +58,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/canvas/triggers", s.createTrigger)
 	mux.HandleFunc("PUT /v1/canvas/triggers/{id}", s.setTrigger)
 	mux.HandleFunc("POST /v1/canvas/triggers/{id}/fire", s.fireTrigger)
+	mux.HandleFunc("GET /v1/canvas/runs", s.flowRuns)
+	mux.HandleFunc("GET /v1/canvas/runs/{id}", s.flowRun)
+	mux.HandleFunc("POST /v1/canvas/runs/{id}/report", s.reportFlowRun)
 	mux.HandleFunc("POST /v1/canvas/runs/{id}/stop", s.stopFlowRun)
 	mux.HandleFunc("POST /v1/canvas/pipelines", s.createPipeline)
 	mux.HandleFunc("PUT /v1/canvas/pipelines/{id}", s.setPipeline)
@@ -423,6 +426,63 @@ func (s *Server) fireTrigger(response http.ResponseWriter, request *http.Request
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]int{"delivered": delivered})
+}
+
+// flowRuns lists recent journeys across the board, the ones still going first.
+func (s *Server) flowRuns(response http.ResponseWriter, request *http.Request) {
+	limit := 0
+	if raw := request.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			writeError(response, http.StatusBadRequest, errors.New("limit must be a positive integer"))
+			return
+		}
+		limit = parsed
+	}
+	runs, err := s.store.FlowRuns(request.Context(), limit)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, runs)
+}
+
+// flowRun reports everything that happened in one run, in order.
+func (s *Server) flowRun(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("run id must be a positive integer"))
+		return
+	}
+	detail, err := s.store.FlowRunDetail(request.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("run not found"))
+			return
+		}
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, detail)
+}
+
+// reportFlowRun writes a run up as a note on the board.
+func (s *Server) reportFlowRun(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("run id must be a positive integer"))
+		return
+	}
+	note, err := s.store.ReportRunToBoard(request.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("run not found"))
+			return
+		}
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, note)
 }
 
 // stopFlowRun ends one journey across the board and stops every card still
@@ -1212,6 +1272,30 @@ func (c *Client) FireTrigger(ctx context.Context, id int64) (int, error) {
 	path := "/v1/canvas/triggers/" + strconv.FormatInt(id, 10) + "/fire"
 	err := c.do(ctx, http.MethodPost, path, nil, &result, http.StatusOK)
 	return result.Delivered, err
+}
+
+func (c *Client) FlowRuns(ctx context.Context, limit int) ([]domain.FlowRun, error) {
+	path := "/v1/canvas/runs"
+	if limit > 0 {
+		path += "?limit=" + strconv.Itoa(limit)
+	}
+	var runs []domain.FlowRun
+	err := c.do(ctx, http.MethodGet, path, nil, &runs, http.StatusOK)
+	return runs, err
+}
+
+func (c *Client) FlowRun(ctx context.Context, runID int64) (domain.FlowRunDetail, error) {
+	var detail domain.FlowRunDetail
+	path := "/v1/canvas/runs/" + strconv.FormatInt(runID, 10)
+	err := c.do(ctx, http.MethodGet, path, nil, &detail, http.StatusOK)
+	return detail, err
+}
+
+func (c *Client) ReportFlowRun(ctx context.Context, runID int64) (domain.CanvasNode, error) {
+	var note domain.CanvasNode
+	path := "/v1/canvas/runs/" + strconv.FormatInt(runID, 10) + "/report"
+	err := c.do(ctx, http.MethodPost, path, nil, &note, http.StatusCreated)
+	return note, err
 }
 
 func (c *Client) StopFlowRun(ctx context.Context, runID int64) (int, error) {

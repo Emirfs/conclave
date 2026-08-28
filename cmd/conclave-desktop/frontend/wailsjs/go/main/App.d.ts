@@ -38,6 +38,10 @@ export function FileDiff(arg1:number,arg2:string):Promise<vcs.Diff>;
 
 export function FireTrigger(arg1:number):Promise<number>;
 
+export function FlowRun(arg1:number):Promise<domain.FlowRunDetail>;
+
+export function FlowRuns(arg1:number):Promise<Array<domain.FlowRun>>;
+
 export function ImportBoard():Promise<domain.ImportResult>;
 
 export function LinkNodes(arg1:number,arg2:number,arg3:string):Promise<domain.CanvasLink>;
@@ -53,6 +57,8 @@ export function PickProjectDirectory(arg1:string):Promise<string>;
 export function ProjectChanges(arg1:number):Promise<vcs.Status>;
 
 export function ProviderModels(arg1:string):Promise<domain.ProviderModels>;
+
+export function ReportFlowRun(arg1:number):Promise<domain.CanvasNode>;
 
 export function ResumeDialogue(arg1:number):Promise<void>;
 

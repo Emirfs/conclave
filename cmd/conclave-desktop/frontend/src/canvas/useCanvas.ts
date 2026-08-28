@@ -13,6 +13,8 @@ import {
   CreateTrigger,
   ExportBoard,
   FireTrigger,
+  FlowRun,
+  FlowRuns,
   ExportConversation,
   ImportBoard,
   DeleteCanvasNode,
@@ -29,6 +31,7 @@ import {
   SetLoopRunning,
   SetModel,
   SetGate,
+  ReportFlowRun,
   SetRole,
   SetTrigger,
   StartPipeline,
@@ -177,6 +180,10 @@ export function useCanvas(connected: boolean) {
   const deletingRef = useRef(new Set<string>())
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Two lists, because they answer two questions. The active ones come free
+  // with every board load and drive the live strip; the history is read on
+  // demand and outlives the cards it is about.
+  const [activeRuns, setActiveRuns] = useState<domain.FlowRun[]>([])
   const [runs, setRuns] = useState<domain.FlowRun[]>([])
   const timers = useRef(new Map<string, number>())
 
@@ -204,7 +211,7 @@ export function useCanvas(connected: boolean) {
       // A run still in flight is work in progress: something on the board is
       // about to move even if no provider is mid-answer this instant.
       if ((canvas.runs ?? []).length > 0) working = true
-      setRuns(canvas.runs ?? [])
+      setActiveRuns(canvas.runs ?? [])
       const conversations = new Map<number, domain.Conversation>()
       for (const item of canvas.conversations ?? []) {
         conversations.set(item.id, item)
@@ -459,6 +466,38 @@ export function useCanvas(connected: boolean) {
         await CreateJoin(input)
       } catch (cause) {
         setError(`Birleştirici oluşturulamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  // The run history is read separately from the board: it outlives the cards
+  // it is about, and a finished run does not change when the canvas does.
+  const loadRuns = useCallback(async () => {
+    try {
+      setRuns(await FlowRuns(0))
+    } catch (cause) {
+      setError(`Akış geçmişi okunamadı: ${cause}`)
+    }
+  }, [])
+
+  const runDetail = useCallback(async (runID: number) => {
+    try {
+      return await FlowRun(runID)
+    } catch (cause) {
+      setError(`Akış okunamadı: ${cause}`)
+      return null
+    }
+  }, [])
+
+  const reportRun = useCallback(
+    async (runID: number) => {
+      try {
+        await ReportFlowRun(runID)
+      } catch (cause) {
+        setError(`Rapor yazılamadı: ${cause}`)
         return
       }
       await load()
@@ -870,15 +909,19 @@ export function useCanvas(connected: boolean) {
   return useMemo(
     () => ({
       nodes, setNodes, edges, error, clearError, deletingIds, loaded, load, patch,
-      runs, addJoin, stopRun, addTrigger, saveTrigger, fireTrigger, addGate, saveGate,
+      activeRuns, runs, addJoin, stopRun, addTrigger, saveTrigger, fireTrigger,
+      addGate, saveGate,
+      loadRuns, runDetail, reportRun,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
       addPipeline, savePipeline, runPipeline, pickPipelineProject,
       exportConversation, exportBoard, importBoard,
       saveRole, saveModel, resumeDialogue, cancelConversation, search, assignRoles, branch,
     }),
-    [nodes, edges, error, clearError, deletingIds, loaded, load, patch, runs, addJoin, stopRun,
+    [nodes, edges, error, clearError, deletingIds, loaded, load, patch,
+     activeRuns, runs, addJoin, stopRun,
      addTrigger, saveTrigger, fireTrigger, addGate, saveGate,
+     loadRuns, runDetail, reportRun,
      addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
      saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, cancelConversation, search,

@@ -18,6 +18,10 @@ export namespace domain {
 	    status: string;
 	    steps: number;
 	    started_at: string;
+	    finished_at?: string;
+	    origin_label?: string;
+	    origin_kind?: string;
+	    cards?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new FlowRun(source);
@@ -30,6 +34,10 @@ export namespace domain {
 	        this.status = source["status"];
 	        this.steps = source["steps"];
 	        this.started_at = source["started_at"];
+	        this.finished_at = source["finished_at"];
+	        this.origin_label = source["origin_label"];
+	        this.origin_kind = source["origin_kind"];
+	        this.cards = source["cards"];
 	    }
 	}
 	export class Gate {
@@ -567,6 +575,65 @@ export namespace domain {
 	
 	
 	
+	
+	export class FlowStep {
+	    turn_id: number;
+	    conversation_id: number;
+	    card: string;
+	    kind: string;
+	    prompt: string;
+	    answer: string;
+	    status: string;
+	    at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FlowStep(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.turn_id = source["turn_id"];
+	        this.conversation_id = source["conversation_id"];
+	        this.card = source["card"];
+	        this.kind = source["kind"];
+	        this.prompt = source["prompt"];
+	        this.answer = source["answer"];
+	        this.status = source["status"];
+	        this.at = source["at"];
+	    }
+	}
+	export class FlowRunDetail {
+	    run: FlowRun;
+	    steps: FlowStep[];
+	
+	    static createFrom(source: any = {}) {
+	        return new FlowRunDetail(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.run = this.convertValues(source["run"], FlowRun);
+	        this.steps = this.convertValues(source["steps"], FlowStep);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	
 	export class GateConfig {

@@ -222,7 +222,11 @@ WHERE t.id = ?`, id).Scan(&trigger.ID, &trigger.Title, &trigger.Prompt, &nodeID)
 	if err != nil {
 		return 0, err
 	}
-	runID, err := s.StartFlowRun(ctx, tx, 0)
+	title := trigger.Title
+	if strings.TrimSpace(title) == "" {
+		title = "Tetikleyici"
+	}
+	runID, err := s.StartTriggerRun(ctx, tx, title)
 	if err != nil {
 		tx.Rollback()
 		return 0, err
@@ -231,10 +235,6 @@ WHERE t.id = ?`, id).Scan(&trigger.ID, &trigger.Title, &trigger.Prompt, &nodeID)
 		return 0, err
 	}
 
-	title := trigger.Title
-	if title == "" {
-		title = "Tetikleyici"
-	}
 	delivered, err := s.relayFrom(ctx, relaySource{
 		runID:    runID,
 		nodeID:   nodeID.Int64,

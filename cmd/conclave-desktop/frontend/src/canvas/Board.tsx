@@ -26,6 +26,7 @@ import { LinkPanel } from './LinkPanel'
 import { NoteNode } from './NoteNode'
 import { PipelineNode } from './PipelineNode'
 import { ProviderEdge } from './ProviderEdge'
+import { RunPanel } from './RunPanel'
 import { SearchPanel } from './SearchPanel'
 import { TriggerNode } from './TriggerNode'
 import type { BoardNode, useCanvas } from './useCanvas'
@@ -56,9 +57,21 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
     saveRole, saveModel, resumeDialogue, cancelConversation, search,
     savePipeline, runPipeline, pickPipelineProject, exportConversation,
     assignRoles, branch, addNote, error, clearError, deletingIds,
-    runs, stopRun, saveTrigger, fireTrigger, saveGate } = canvas
+    activeRuns, runs, stopRun, saveTrigger, fireTrigger, saveGate,
+    loadRuns, runDetail, reportRun } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
   const [searching, setSearching] = useState(false)
+  // The run history is read on demand: it outlives the cards it is about, and
+  // fetching it on every board poll would be a request nobody asked for.
+  const [runsOpen, setRunsOpen] = useState(false)
+  // While the panel is open the history is refreshed, so a run that starts or
+  // ends behind it does not leave a stale list on screen.
+  useEffect(() => {
+    if (!runsOpen) return
+    void loadRuns()
+    const timer = window.setInterval(() => void loadRuns(), 2000)
+    return () => window.clearInterval(timer)
+  }, [runsOpen, loadRuns])
   // A deletion waiting for an answer. Held here rather than asked with
   // window.confirm: see ConfirmPanel for why.
   const [pending, setPending] = useState<PendingConfirm | null>(null)
@@ -471,14 +484,18 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
         deleteKeyCode={['Delete']}
         elevateNodesOnSelect
       >
-        {runs.length > 0 && (
+        {activeRuns.length > 0 && !runsOpen && (
           <Panel position="bottom-center" className="runpanel">
-            {runs.map((run) => (
+            {activeRuns.map((run) => (
               <div className="runpanel__run" key={run.id}>
                 <span className="runpanel__dot" aria-hidden="true" />
-                <span className="runpanel__text">
-                  akış #{run.id} · {run.steps} adım
-                </span>
+                <button
+                  className="runpanel__text"
+                  onClick={() => setRunsOpen(true)}
+                  title="Akış geçmişini aç"
+                >
+                  {run.origin_label || `akış #${run.id}`} · {run.steps} adım
+                </button>
                 <button
                   className="runpanel__stop"
                   onClick={() => void stopRun(run.id)}
@@ -589,6 +606,32 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
             >
               ara
             </button>
+            <button
+              className="boardpanel__action"
+              onClick={() => setRunsOpen((open) => !open)}
+              title="Panonun geçtiği akışlar"
+            >
+              {runsOpen ? 'akışlar ✕' : 'akışlar'}
+            </button>
+          </Panel>
+        )}
+        {runsOpen && (
+          <Panel position="bottom-center" className="runspanel">
+            <RunPanel
+              runs={runs}
+              onStop={stopRun}
+              onDetail={runDetail}
+              onReport={reportRun}
+              onJump={(conversationID) => {
+                const node = nodes.find(
+                  (item) =>
+                    item.data.kind === 'conversation' &&
+                    item.data.conversation.id === conversationID,
+                )
+                if (node) jumpTo(Number(node.id))
+              }}
+              onClose={() => setRunsOpen(false)}
+            />
           </Panel>
         )}
         <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="#232838" />

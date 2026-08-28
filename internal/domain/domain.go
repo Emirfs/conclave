@@ -355,8 +355,44 @@ type FlowRun struct {
 	OriginConversationID int64  `json:"origin_conversation_id,omitempty"`
 	Status               string `json:"status"`
 	// Steps is how many turns this run has produced so far, the first included.
-	Steps     int    `json:"steps"`
-	StartedAt string `json:"started_at"`
+	Steps      int    `json:"steps"`
+	StartedAt  string `json:"started_at"`
+	FinishedAt string `json:"finished_at,omitempty"`
+	// OriginLabel names what started the run — a card's title, or a trigger's.
+	// A number alone tells nobody which of last night's runs they are reading.
+	OriginLabel string `json:"origin_label,omitempty"`
+	// OriginKind is "user" or "trigger": whether a person started this or it
+	// happened on its own.
+	OriginKind string `json:"origin_kind,omitempty"`
+	// Cards is how many cards the run touched, which is its width the way
+	// Steps is its length.
+	Cards int `json:"cards,omitempty"`
+}
+
+// How a run began.
+const (
+	OriginUser    = "user"
+	OriginTrigger = "trigger"
+)
+
+// FlowStep is one thing that happened during a run: a card, what it was asked
+// and what it answered.
+type FlowStep struct {
+	TurnID       int64  `json:"turn_id"`
+	Conversation int64  `json:"conversation_id"`
+	Card         string `json:"card"`
+	Kind         string `json:"kind"`
+	Prompt       string `json:"prompt"`
+	Answer       string `json:"answer"`
+	Status       string `json:"status"`
+	At           string `json:"at"`
+}
+
+// FlowRunDetail is a run together with everything that happened in it, in
+// order. It is what a person reads when they were not there to watch.
+type FlowRunDetail struct {
+	Run   FlowRun    `json:"run"`
+	Steps []FlowStep `json:"steps"`
 }
 
 // JoinNode is a waiting point on the board. It has no provider and no

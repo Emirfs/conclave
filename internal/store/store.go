@@ -337,6 +337,15 @@ CREATE TABLE gates (
 ALTER TABLE canvas_nodes ADD COLUMN gate_id INTEGER REFERENCES gates(id) ON DELETE CASCADE;
 ALTER TABLE canvas_links ADD COLUMN source_handle TEXT NOT NULL DEFAULT '';
 `,
+	// 19: a run says what started it and is kept after it ends. A routine fires
+	// while nobody is watching, so "what happened last night" has to be a
+	// question the board can answer rather than one only a live panel could.
+	`
+ALTER TABLE flow_runs ADD COLUMN origin_label TEXT NOT NULL DEFAULT '';
+ALTER TABLE flow_runs ADD COLUMN origin_kind TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE flow_runs ADD COLUMN reported INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX flow_runs_recent_idx ON flow_runs(id DESC);
+`,
 }
 
 func (s *Store) init() error {

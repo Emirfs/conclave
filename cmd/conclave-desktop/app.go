@@ -156,6 +156,39 @@ func (a *App) FireTrigger(id int64) (int, error) {
 	return client.FireTrigger(ctx, id)
 }
 
+// FlowRuns lists recent journeys across the board, the ones still going first.
+func (a *App) FlowRuns(limit int) ([]domain.FlowRun, error) {
+	client, err := a.client()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.FlowRuns(ctx, limit)
+}
+
+// FlowRun reports everything that happened in one run, in order.
+func (a *App) FlowRun(runID int64) (domain.FlowRunDetail, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.FlowRunDetail{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+	return client.FlowRun(ctx, runID)
+}
+
+// ReportFlowRun writes a run up as a note on the board.
+func (a *App) ReportFlowRun(runID int64) (domain.CanvasNode, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.CanvasNode{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+	return client.ReportFlowRun(ctx, runID)
+}
+
 // StopFlowRun ends one journey across the board, stopping every card still
 // working on it.
 func (a *App) StopFlowRun(runID int64) (int, error) {
