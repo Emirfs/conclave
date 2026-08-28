@@ -51,6 +51,10 @@ nodes the daemon persists, so a layout survives a restart.
   ollama reports what is pulled. Only Claude Code, which cannot be asked, carries a list in this
   build. No list is a constraint — an unlisted name is still accepted, because a provider gains
   models between releases and a card must not be held back by this build's idea of what exists.
+- Search matches in Go, not in SQL. SQLite's LIKE folds ASCII only, and the board is written in
+  Turkish; the fold also flattens Turkish letters onto their plain forms, so a query typed without
+  diacritics still finds what is there. It maps one rune to one rune, which is what lets a match be
+  located back in the original text.
 - Stopping a turn is a client writing a request to SQLite, never a client reaching a process. The
   worker that owns the provider polls for it and kills the tree; a queued response, which no worker
   owns, is finished on the spot. A stop keeps the partial answer, is not a failure, and relays

@@ -13,6 +13,7 @@ import {
   PatchCanvasNode,
   PickProjectDirectory,
   ResumeDialogue,
+  Search,
   SetProject,
   SendTurn,
   SetLoop,
@@ -403,6 +404,18 @@ export function useCanvas(connected: boolean) {
     [nodes, load],
   )
 
+  // Searching is a read the daemon answers; the board only asks and renders.
+  // It deliberately does not touch canvas state: a search must not move, select
+  // or reload anything until the user picks a result.
+  const search = useCallback(async (query: string, limit: number) => {
+    try {
+      return (await Search(query, limit)) ?? []
+    } catch (cause) {
+      setError(String(cause))
+      return []
+    }
+  }, [])
+
   // Stopping is written to the daemon, which owns the provider process; the
   // board only asks. The reload right after is what turns the card's spinner
   // into a stopped reply without waiting for the next poll.
@@ -512,11 +525,11 @@ export function useCanvas(connected: boolean) {
       nodes, setNodes, edges, error, loaded, load, patch,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
-      saveRole, saveModel, resumeDialogue, cancelConversation, assignRoles, branch,
+      saveRole, saveModel, resumeDialogue, cancelConversation, search, assignRoles, branch,
     }),
     [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
-     saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, cancelConversation,
+     saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, cancelConversation, search,
      assignRoles, branch],
   )
 }

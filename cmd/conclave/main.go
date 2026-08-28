@@ -49,6 +49,8 @@ func run(arguments []string) error {
 		return submitRun(arguments)
 	case "chat":
 		return submitChat(arguments)
+	case "search":
+		return searchBoard(arguments)
 	case "version", "-v", "--version":
 		fmt.Println(version.Version)
 		return nil
@@ -140,6 +142,44 @@ func runDaemon(arguments []string) error {
 		return nil
 	}
 	return err
+}
+
+// searchBoard finds text on the canvas from a terminal. The daemon does the
+// looking; this only prints what came back.
+func searchBoard(arguments []string) error {
+	flags := flag.NewFlagSet("search", flag.ContinueOnError)
+	jsonOutput := flags.Bool("json", false, "emit JSON")
+	limit := flags.Int("limit", 20, "maximum results")
+	address := flags.String("address", defaultAddress, "daemon address")
+	tokenFile := flags.String("token-file", statedir.TokenPath(), "daemon token file")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	query := strings.TrimSpace(strings.Join(flags.Args(), " "))
+	if query == "" {
+		return errors.New("search needs something to look for")
+	}
+	token, err := statedir.ReadToken(*tokenFile)
+	if err != nil {
+		return err
+	}
+	hits, err := api.NewClient("http://"+*address, token).Search(context.Background(), query, *limit)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(hits)
+	}
+	if len(hits) == 0 {
+		fmt.Printf("no match for %q\n", query)
+		return nil
+	}
+	for _, hit := range hits {
+		fmt.Printf("%s [%s] %s\n", hit.Title, hit.Where, hit.Snippet)
+	}
+	return nil
 }
 
 func runStatus(arguments []string) error {
@@ -320,5 +360,5 @@ func isLoopbackAddress(address string) bool {
 }
 
 func usage() {
-	fmt.Println("conclave [status|daemon|run|chat|update|version] [options]")
+	fmt.Println("conclave [status|daemon|run|chat|search|update|version] [options]")
 }

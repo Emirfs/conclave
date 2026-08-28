@@ -22,6 +22,7 @@ import { ConversationNode } from './ConversationNode'
 import { LinkPanel } from './LinkPanel'
 import { NoteNode } from './NoteNode'
 import { ProviderEdge } from './ProviderEdge'
+import { SearchPanel } from './SearchPanel'
 import type { BoardNode, useCanvas } from './useCanvas'
 
 const nodeTypes = { conversation: ConversationNode, note: NoteNode }
@@ -40,8 +41,10 @@ export function Board({ canvas, providers }: { canvas: BoardHandle; providers: s
 function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: string[] }) {
   const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink,
     pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
-    saveRole, saveModel, resumeDialogue, cancelConversation, assignRoles, branch, addNote } = canvas
+    saveRole, saveModel, resumeDialogue, cancelConversation, search,
+    assignRoles, branch, addNote } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
+  const [searching, setSearching] = useState(false)
   // The answer a branch would start from, held while the user picks providers.
   const [branching, setBranching] = useState<{ conversationID: number; answer: string } | null>(null)
   // The minimap earns its corner on a large board and wastes it on a small one,
@@ -218,11 +221,42 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
     )
   }, [flow])
 
+  // Bringing a result into view is the whole point of searching: the card is
+  // centred and selected, so it is obvious which one was found.
+  const jumpTo = useCallback(
+    (nodeID: number) => {
+      const node = nodes.find((item) => item.id === String(nodeID))
+      if (!node) return
+      const width = node.width ?? 420
+      const height = node.height ?? 320
+      void flow.setCenter(node.position.x + width / 2, node.position.y + height / 2, {
+        zoom: 1,
+        duration: 400,
+      })
+      setNodes((current) =>
+        current.map((item) => ({ ...item, selected: item.id === String(nodeID) })),
+      )
+    },
+    [flow, nodes, setNodes],
+  )
+
+  // Ctrl+F opens the search box, the way every board and document does.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'f') return
+      event.preventDefault()
+      setSearching(true)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   // Escape closes whatever is open, which is the first thing anyone tries.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       setBranching(null)
+      setSearching(false)
       closeLinkPanel()
     }
     window.addEventListener('keydown', onKeyDown)
@@ -317,6 +351,16 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
         elevateNodesOnSelect
       >
         <Panel position="top-left" className="boardpanel">
+          {searching && (
+            <SearchPanel
+              onSearch={search}
+              onJump={(nodeID) => {
+                jumpTo(nodeID)
+                setSearching(false)
+              }}
+              onClose={() => setSearching(false)}
+            />
+          )}
           {selected.length > 1 && (
             <div className="selectionbar">
               <span className="selectionbar__count">{selected.length} seçili</span>
@@ -373,6 +417,19 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
             />
           )}
         </Panel>
+        {/* Ctrl+F is the shortcut, but a board is a pointing surface: the
+            search has to be visible to someone who never learns one. */}
+        {!searching && (
+          <Panel position="top-right" className="boardpanel">
+            <button
+              className="boardpanel__action"
+              onClick={() => setSearching(true)}
+              title="Panoda ara (Ctrl+F)"
+            >
+              ara
+            </button>
+          </Panel>
+        )}
         <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="#232838" />
         <Controls showInteractive={false} position="bottom-right" />
         {/* MiniMap positions itself; wrapping it in a Panel only fights that.

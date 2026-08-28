@@ -17,6 +17,7 @@ Yapay zekâ kodlama CLI'ları tek başlarına kullanışlıdır; ancak birkaçı
 - çalışan veya sırada bekleyen bir turu tek düğmeyle durdurur; yarım kalan cevap kartta kalır;
 - her karta bağımsız proje dizini ve `read` veya `edit` erişimi atar;
 - her kartın sağlayıcılarını kart başına seçilen bir modelle ya da CLI'ın kendi varsayılanıyla çalıştırır;
+- Ctrl+F ile pano genelinde arar: başlık, rol, mesaj, cevap ve notlar; sonuca tıklayınca kartı ortalar;
 - proje kartı içinde Git çalışma ağacı değişikliklerini ve unified diff'i gösterir;
 - tamamlanan yanıtları yapılandırılabilir canvas bağlantılarıyla aktarır, tartıştırır veya inceletir;
 - iki kartı sınırlı konuşma veya açıkça seçilen iş-bitene-kadar akışı için eşleştirir;

@@ -45,6 +45,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/runs", s.createRun)
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/turns", s.createTurn)
 	mux.HandleFunc("GET /v1/canvas", s.canvas)
+	mux.HandleFunc("GET /v1/search", s.search)
 	mux.HandleFunc("POST /v1/canvas/conversations", s.createConversation)
 	mux.HandleFunc("POST /v1/canvas/notes", s.createNote)
 	mux.HandleFunc("PATCH /v1/canvas/nodes", s.patchCanvasNode)
@@ -483,6 +484,27 @@ func (s *Server) providerModels(response http.ResponseWriter, request *http.Requ
 
 // resumeDialogue clears the parked state so a stalled exchange can be pushed on
 // without the user having to remember what it was waiting for.
+// search looks for text anywhere on the board. It is a read, so it takes its
+// query from the URL and answers with whatever it found, including nothing.
+func (s *Server) search(response http.ResponseWriter, request *http.Request) {
+	query := strings.TrimSpace(request.URL.Query().Get("q"))
+	limit := 50
+	if raw := request.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			writeError(response, http.StatusBadRequest, errors.New("limit must be a positive integer"))
+			return
+		}
+		limit = parsed
+	}
+	hits, err := s.store.Search(request.Context(), query, limit)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, hits)
+}
+
 // cancelConversation stops whatever a card is doing. The request is recorded
 // and answered immediately; the worker that owns a running provider process
 // ends it on its next poll, so this never blocks on a provider.
@@ -860,6 +882,13 @@ func (c *Client) ProviderModels(ctx context.Context, name string) (domain.Provid
 		return domain.ProviderModels{}, err
 	}
 	return models, nil
+}
+
+func (c *Client) Search(ctx context.Context, query string, limit int) ([]domain.SearchHit, error) {
+	path := "/v1/search?q=" + url.QueryEscape(query) + "&limit=" + strconv.Itoa(limit)
+	var hits []domain.SearchHit
+	err := c.do(ctx, http.MethodGet, path, nil, &hits, http.StatusOK)
+	return hits, err
 }
 
 func (c *Client) CancelConversation(ctx context.Context, conversationID int64) (domain.CancelResult, error) {

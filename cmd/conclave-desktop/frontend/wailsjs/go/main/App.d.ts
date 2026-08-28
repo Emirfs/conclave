@@ -40,6 +40,8 @@ export function ProviderModels(arg1:string):Promise<domain.ProviderModels>;
 
 export function ResumeDialogue(arg1:number):Promise<void>;
 
+export function Search(arg1:string,arg2:number):Promise<Array<domain.SearchHit>>;
+
 export function SendTurn(arg1:number,arg2:string):Promise<void>;
 
 export function SetLoop(arg1:number,arg2:domain.LoopConfig):Promise<void>;

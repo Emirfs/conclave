@@ -243,6 +243,17 @@ func (a *App) Branch(conversationID int64, answer string, providers []string) ([
 }
 
 // ResumeDialogue clears a parked exchange so the next message starts it again.
+// Search looks for text across every card and note on the board.
+func (a *App) Search(query string, limit int) ([]domain.SearchHit, error) {
+	client, err := a.client()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+	return client.Search(ctx, query, limit)
+}
+
 // CancelConversation stops a card's running or queued turns.
 func (a *App) CancelConversation(conversationID int64) (domain.CancelResult, error) {
 	client, err := a.client()

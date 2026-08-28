@@ -549,6 +549,32 @@ export namespace domain {
 		    return a;
 		}
 	}
+	export class SearchHit {
+	    node_id: number;
+	    conversation_id?: number;
+	    turn_id?: number;
+	    kind: string;
+	    title: string;
+	    provider?: string;
+	    where: string;
+	    snippet: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SearchHit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.node_id = source["node_id"];
+	        this.conversation_id = source["conversation_id"];
+	        this.turn_id = source["turn_id"];
+	        this.kind = source["kind"];
+	        this.title = source["title"];
+	        this.provider = source["provider"];
+	        this.where = source["where"];
+	        this.snippet = source["snippet"];
+	    }
+	}
 	export class Snapshot {
 	    healthy: boolean;
 	    version: string;

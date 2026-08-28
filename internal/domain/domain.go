@@ -18,6 +18,23 @@ const (
 	StatusCanceled Status = "canceled"
 )
 
+// SearchHit is one place on the board where a query was found. NodeID is what
+// the canvas needs to bring it into view; everything else is what the result
+// list shows, so a person can tell one hit from another without jumping to it.
+type SearchHit struct {
+	NodeID         int64  `json:"node_id"`
+	ConversationID int64  `json:"conversation_id,omitempty"`
+	TurnID         int64  `json:"turn_id,omitempty"`
+	Kind           string `json:"kind"`
+	Title          string `json:"title"`
+	// Provider is set only on an answer, where which provider said it matters.
+	Provider string `json:"provider,omitempty"`
+	// Where is which part of the board matched: title, role, prompt, answer or
+	// note. The wording of it belongs to the UI.
+	Where   string `json:"where"`
+	Snippet string `json:"snippet"`
+}
+
 // CancelResult reports how many of a card's responses a stop request reached.
 // Zero means the card was already idle, which the UI treats as nothing to say.
 type CancelResult struct {
