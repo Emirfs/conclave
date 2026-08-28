@@ -32,8 +32,13 @@ jobs:
           if ($version -notmatch '^\d+\.\d+\.\d+') {
             throw "Etiket vMAJOR.MINOR.PATCH olmali, gelen: $tag"
           }
-          "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          # Bir on surum (0.2.0-beta.1) on surum olarak yayimlanir. Guncelleme
+          # kontrolu /releases/latest okur ve GitHub on surumleri oraya
+          # koymaz; boylece beta yalnizca isteyene gider.
+          $pre = if ($version -match '-') { 'true' } else { 'false' }
+          "tag=$tag"           | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$version"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "prerelease=$pre"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - uses: actions/setup-go@v5
         with:
@@ -119,6 +124,7 @@ jobs:
         with:
           tag_name: ${{ steps.release.outputs.tag }}
           name: Conclave ${{ steps.release.outputs.tag }}
+          prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
           generate_release_notes: true
           files: |
             dist/conclave-windows-amd64.zip
@@ -145,8 +151,15 @@ jobs:
             [0-9]*.[0-9]*.[0-9]*) ;;
             *) echo "Etiket vMAJOR.MINOR.PATCH olmali, gelen: $tag" >&2; exit 1 ;;
           esac
+          # Bir on surum (0.2.0-beta.1) on surum olarak yayimlanir; bkz.
+          # windows isindeki ayni adim.
+          case "$version" in
+            *-*) pre=true ;;
+            *) pre=false ;;
+          esac
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$pre" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@v5
         with:
@@ -181,6 +194,7 @@ jobs:
         with:
           tag_name: ${{ steps.release.outputs.tag }}
           name: Conclave ${{ steps.release.outputs.tag }}
+          prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
           generate_release_notes: true
           files: |
             dist/conclave-*.tar.gz
