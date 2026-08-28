@@ -14,6 +14,7 @@ Yapay zekâ kodlama CLI'ları tek başlarına kullanışlıdır; ancak birkaçı
 - görsel canvas üzerinde tek sağlayıcılı veya çok sağlayıcılı konuşmalar açar;
 - sağlayıcı yanıtını ve anlık etkinliğini konuşma kartına canlı aktarır;
 - sağlayıcı oturumunu saklayarak sonraki mesajı aynı uzak konuşmada sürdürür;
+- çalışan veya sırada bekleyen bir turu tek düğmeyle durdurur; yarım kalan cevap kartta kalır;
 - her karta bağımsız proje dizini ve `read` veya `edit` erişimi atar;
 - her kartın sağlayıcılarını kart başına seçilen bir modelle ya da CLI'ın kendi varsayılanıyla çalıştırır;
 - proje kartı içinde Git çalışma ağacı değişikliklerini ve unified diff'i gösterir;

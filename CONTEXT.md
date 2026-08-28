@@ -51,6 +51,10 @@ nodes the daemon persists, so a layout survives a restart.
   ollama reports what is pulled. Only Claude Code, which cannot be asked, carries a list in this
   build. No list is a constraint — an unlisted name is still accepted, because a provider gains
   models between releases and a card must not be held back by this build's idea of what exists.
+- Stopping a turn is a client writing a request to SQLite, never a client reaching a process. The
+  worker that owns the provider polls for it and kills the tree; a queued response, which no worker
+  owns, is finished on the spot. A stop keeps the partial answer, is not a failure, and relays
+  nothing onwards: an interrupted answer is not a result.
 - A provider runs at most one chat job at a time.
 - Each card carries its own project directory and access level; providers run there, as they would in
   a terminal. `edit` access auto-approves file changes and commands, because `--print` runs cannot ask.

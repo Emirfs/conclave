@@ -228,6 +228,12 @@ CREATE TABLE conversation_models (
     PRIMARY KEY (conversation_id, provider)
 );
 `,
+	// 13: a person can stop a turn that is already under way. The request is
+	// written here rather than handed to the worker directly, because the
+	// daemon owns runtime state and a client only ever writes to the database.
+	`
+ALTER TABLE chat_responses ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 func (s *Store) init() error {
@@ -374,6 +380,7 @@ LEFT JOIN provider_sessions ps
 LEFT JOIN conversation_models cm
        ON cm.conversation_id = t.conversation_id AND cm.provider = r.provider
 WHERE r.status = ?
+  AND r.cancel_requested = 0
   AND NOT EXISTS (
     SELECT 1 FROM chat_responses active
     WHERE active.provider = r.provider AND active.status = ?
@@ -495,6 +502,70 @@ func (s *Store) RequeueChatResponse(ctx context.Context, id int64) error {
 		"UPDATE chat_responses SET status = ?, updated_at = ? WHERE id = ?",
 		domain.StatusQueued, time.Now().UTC().Format(time.RFC3339Nano), id)
 	return err
+}
+
+// RequestConversationCancel stops what a card is doing. A response that has not
+// been claimed yet is finished on the spot; one already running is only flagged,
+// because the process belongs to a daemon worker and only that worker can end
+// it. The card's cycle is disarmed too: stopping a card should not leave a timer
+// about to start the next round.
+//
+// It returns how many responses were affected, which is zero for an idle card.
+func (s *Store) RequestConversationCancel(ctx context.Context, conversationID int64) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := tx.ExecContext(ctx, `
+UPDATE chat_responses SET cancel_requested = 1, updated_at = ?
+WHERE status IN (?, ?)
+  AND turn_id IN (SELECT id FROM chat_turns WHERE conversation_id = ?)`,
+		now, domain.StatusQueued, domain.StatusRunning, conversationID)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	// Nothing owns a queued response, so it can be finished here and now.
+	if _, err := tx.ExecContext(ctx, `
+UPDATE chat_responses SET status = ?, activity = '', updated_at = ?
+WHERE status = ? AND cancel_requested = 1
+  AND turn_id IN (SELECT id FROM chat_turns WHERE conversation_id = ?)`,
+		domain.StatusCanceled, now, domain.StatusQueued, conversationID); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE conversations SET loop_running = 0 WHERE id = ?", conversationID); err != nil {
+		return 0, err
+	}
+	return int(affected), tx.Commit()
+}
+
+// CancelChatResponse finishes a stopped response. It deliberately leaves
+// content alone: whatever the provider managed to say was already streamed into
+// the row, and a stop should not erase it.
+func (s *Store) CancelChatResponse(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `
+UPDATE chat_responses SET status = ?, error = '', activity = '', updated_at = ? WHERE id = ?`,
+		domain.StatusCanceled, time.Now().UTC().Format(time.RFC3339Nano), id)
+	return err
+}
+
+// ChatCancelRequested reports whether a person asked for this response to stop.
+// The worker running it polls this: it is the only channel a client has into a
+// process the daemon already started.
+func (s *Store) ChatCancelRequested(ctx context.Context, id int64) (bool, error) {
+	var requested int
+	err := s.db.QueryRowContext(ctx,
+		"SELECT cancel_requested FROM chat_responses WHERE id = ?", id).Scan(&requested)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return requested != 0, err
 }
 
 // conversationTurns returns the most recent turns of one conversation in
@@ -1348,6 +1419,12 @@ func (s *Store) RelayPayload(ctx context.Context, turnID int64) (string, bool, e
 			return "", false, err
 		}
 		if status == string(domain.StatusQueued) || status == string(domain.StatusRunning) {
+			return "", false, nil
+		}
+		// A stopped turn is not an answer. Relaying what a provider had
+		// managed to say before a person cut it off would carry the
+		// interruption on to the next card.
+		if status == string(domain.StatusCanceled) {
 			return "", false, nil
 		}
 		multiple++

@@ -554,6 +554,15 @@
   overflow-wrap: anywhere;
 }
 
+/* A stopped answer is neither a failure nor a result, so it is drawn as a
+   quiet note rather than in the error colour. */
+.reply__stopped {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .reply__working {
   display: flex;
   align-items: center;
@@ -600,9 +609,34 @@
 
 .node__composer {
   flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding: 8px;
   border-top: 1px solid var(--line-subtle);
   background: var(--surface-overlay);
+}
+
+/* Only rendered while a turn is actually running, so it never competes with
+   the composer for attention on an idle card. */
+.node__stop {
+  align-self: flex-start;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--negative) 55%, transparent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--negative);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.node__stop:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--negative) 14%, transparent);
+}
+
+.node__stop:disabled {
+  opacity: 0.6;
 }
 
 /* How a dialogue ended. "Done" is quiet; "waiting" asks for the user and gives

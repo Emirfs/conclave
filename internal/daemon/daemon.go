@@ -105,10 +105,22 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 	if err != nil {
 		return d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", err.Error())
 	}
-	outcome := d.executeChat(ctx, job.ProjectPath, invocation, d.chatProgress(persist, job.ResponseID))
+	// A person can ask for this run to stop while it is under way. The request
+	// is written to the database by whichever client received it, so the worker
+	// that owns the process watches for it and kills the tree.
+	runCtx, stopRun := context.WithCancel(ctx)
+	stopWatcher := d.watchCancel(runCtx, job.ResponseID, stopRun)
+	outcome := d.executeChat(runCtx, job.ProjectPath, invocation, d.chatProgress(persist, job.ResponseID))
+	stopWatcher()
+	stopRun()
 	if ctx.Err() != nil {
 		_ = d.store.RequeueChatResponse(persist, job.ResponseID)
 		return ctx.Err()
+	}
+	// Stopping is a decision, not a failure: the partial answer stays on the
+	// card and nothing is relayed onwards.
+	if canceled, err := d.store.ChatCancelRequested(persist, job.ResponseID); err == nil && canceled {
+		return d.store.CancelChatResponse(persist, job.ResponseID)
 	}
 	if outcome.quota != nil {
 		_ = d.store.RecordProviderQuota(persist, job.Provider, *outcome.quota)
@@ -136,6 +148,38 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 	return nil
 }
 
+
+// cancelPollInterval is how often a running provider is checked against a stop
+// request. A client writes the request to SQLite; this is the only way a worker
+// hears about it.
+const cancelPollInterval = 400 * time.Millisecond
+
+// watchCancel polls for a stop request against one running response and cancels
+// the run when it finds one. The returned function stops the watcher; it is safe
+// to call more than once.
+func (d *Daemon) watchCancel(ctx context.Context, responseID int64, cancel context.CancelFunc) func() {
+	done := make(chan struct{})
+	var once sync.Once
+	go func() {
+		ticker := time.NewTicker(cancelPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+			requested, err := d.store.ChatCancelRequested(ctx, responseID)
+			if err == nil && requested {
+				cancel()
+				return
+			}
+		}
+	}()
+	return func() { once.Do(func() { close(done) }) }
+}
 
 // chatProgress persists partial provider output so the answer appears while it
 // is still being produced. Writes are throttled: a token-by-token provider

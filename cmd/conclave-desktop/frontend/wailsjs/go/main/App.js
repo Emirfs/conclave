@@ -10,6 +10,10 @@ export function Branch(arg1, arg2, arg3) {
   return window['go']['main']['App']['Branch'](arg1, arg2, arg3);
 }
 
+export function CancelConversation(arg1) {
+  return window['go']['main']['App']['CancelConversation'](arg1);
+}
+
 export function Canvas() {
   return window['go']['main']['App']['Canvas']();
 }

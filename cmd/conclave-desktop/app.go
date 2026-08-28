@@ -243,6 +243,17 @@ func (a *App) Branch(conversationID int64, answer string, providers []string) ([
 }
 
 // ResumeDialogue clears a parked exchange so the next message starts it again.
+// CancelConversation stops a card's running or queued turns.
+func (a *App) CancelConversation(conversationID int64) (domain.CancelResult, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.CancelResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CancelConversation(ctx, conversationID)
+}
+
 func (a *App) ResumeDialogue(conversationID int64) error {
 	client, err := a.client()
 	if err != nil {

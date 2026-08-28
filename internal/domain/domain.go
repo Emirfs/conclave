@@ -13,7 +13,16 @@ const (
 	StatusPassed  Status = "passed"
 	StatusFailed  Status = "failed"
 	StatusBlocked Status = "blocked"
+	// StatusCanceled is a run a person stopped. It is a finished state like
+	// any other, so a canceled turn never blocks a relay waiting for it.
+	StatusCanceled Status = "canceled"
 )
+
+// CancelResult reports how many of a card's responses a stop request reached.
+// Zero means the card was already idle, which the UI treats as nothing to say.
+type CancelResult struct {
+	Stopped int `json:"stopped"`
+}
 
 type Provider struct {
 	Name      string `json:"name"`

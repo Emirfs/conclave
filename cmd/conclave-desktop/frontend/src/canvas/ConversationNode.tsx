@@ -23,6 +23,7 @@ type Props = NodeProps & {
     onSaveRole: (conversationID: number, role: string) => Promise<void>
     onSaveModel: (conversationID: number, provider: string, model: string) => Promise<void>
     onResumeDialogue: (conversationID: number) => Promise<void>
+    onCancel: (conversationID: number) => Promise<void>
     onBranch: (conversationID: number, answer: string) => void
     /** Puts text on the board as its own note card, next to this one. */
     onPinNote: (body: string) => void
@@ -34,7 +35,7 @@ type Tab = 'chat' | 'changes' | 'tests'
 
 export const ConversationNode = memo(function ConversationNode({ id, data, selected }: Props) {
   const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop,
-    onSaveRole, onSaveModel, onResumeDialogue, onBranch, onPinNote, onResize } = data
+    onSaveRole, onSaveModel, onResumeDialogue, onCancel, onBranch, onPinNote, onResize } = data
   const project = conversation.project_path ?? ''
   const access = conversation.access ?? 'edit'
   const [tab, setTab] = useState<Tab>('chat')
@@ -50,6 +51,19 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  // A card is working while any provider on any turn is still queued or
+  // running. That is what a stop applies to, so the button follows it exactly.
+  const working = turns.some((turn) =>
+    (turn.responses ?? []).some(
+      (response) => response.status === 'queued' || response.status === 'running',
+    ),
+  )
+  const [stopping, setStopping] = useState(false)
+  // The flag clears itself when the card really stops, so a stop that the
+  // provider takes a moment to honour still shows as pending.
+  useEffect(() => {
+    if (!working) setStopping(false)
+  }, [working])
   const dialogueState = conversation.dialogue_state ?? ''
   // The role is edited locally and written on blur, so the poll that refreshes
   // the board cannot overwrite a half-typed line.
@@ -321,6 +335,21 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
           spellCheck={false}
           disabled={sending}
         />
+        {/* Stopping is only offered while there is something to stop; a card
+            with no running turn has nothing to say about it. */}
+        {working && (
+          <button
+            className="node__stop nodrag"
+            onClick={() => {
+              setStopping(true)
+              void onCancel(conversation.id)
+            }}
+            disabled={stopping}
+            title="Bu kartın çalışan ve sıradaki turlarını durdur"
+          >
+            {stopping ? 'durduruluyor…' : '■ durdur'}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -439,6 +468,7 @@ function Response({
 }) {
   const style = providerStyle(response.provider)
   const working = response.status === 'queued' || response.status === 'running'
+  const canceled = response.status === 'canceled'
   const partial = response.content ?? ''
   const [open, setOpen] = useState(false)
   // Folding a streaming answer would hide the part being written.
@@ -453,6 +483,7 @@ function Response({
       ) : (
         <>
           {working && <Activity status={response.status} activity={response.activity} />}
+          {canceled && <p className="reply__stopped">durduruldu</p>}
           {partial !== '' && (
             working ? (
               <p className="reply__text reply__text--streaming">{partial}</p>

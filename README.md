@@ -14,6 +14,7 @@ AI coding CLIs are useful in isolation, but coordinating them usually means jugg
 - opens solo or multi-provider conversations on a visual canvas;
 - streams provider output and current activity into conversation cards;
 - preserves provider sessions so later turns continue the same upstream conversation;
+- stops a running or queued turn on one click, keeping whatever the provider had already said;
 - assigns a project directory and `read` or `edit` access independently to each card;
 - runs each card's providers on a model chosen per card, or on the CLI's own default;
 - shows Git working-tree changes and unified diffs inside project cards;

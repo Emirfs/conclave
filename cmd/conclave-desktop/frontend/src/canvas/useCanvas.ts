@@ -3,6 +3,7 @@ import type { Edge, Node } from '@xyflow/react'
 
 import {
   Branch,
+  CancelConversation,
   Canvas as LoadCanvas,
   CreateConversation,
   CreateNote,
@@ -402,6 +403,21 @@ export function useCanvas(connected: boolean) {
     [nodes, load],
   )
 
+  // Stopping is written to the daemon, which owns the provider process; the
+  // board only asks. The reload right after is what turns the card's spinner
+  // into a stopped reply without waiting for the next poll.
+  const cancelConversation = useCallback(
+    async (conversationID: number) => {
+      try {
+        await CancelConversation(conversationID)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
   // Clearing the parked state is what lets a stalled pair be pushed on: the
   // next message starts the exchange again instead of being swallowed.
   const resumeDialogue = useCallback(
@@ -496,10 +512,11 @@ export function useCanvas(connected: boolean) {
       nodes, setNodes, edges, error, loaded, load, patch,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
-      saveRole, saveModel, resumeDialogue, assignRoles, branch,
+      saveRole, saveModel, resumeDialogue, cancelConversation, assignRoles, branch,
     }),
     [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
-     saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, assignRoles, branch],
+     saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, cancelConversation,
+     assignRoles, branch],
   )
 }

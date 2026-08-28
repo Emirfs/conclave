@@ -60,6 +60,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/role", s.setRole)
 	mux.HandleFunc("PUT /v1/canvas/conversations/{id}/model", s.setModel)
 	mux.HandleFunc("GET /v1/providers/{name}/models", s.providerModels)
+	mux.HandleFunc("POST /v1/canvas/conversations/{id}/cancel", s.cancelConversation)
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/resume", s.resumeDialogue)
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/branch", s.branch)
 	mux.HandleFunc("GET /v1/update", s.updateStatus)
@@ -482,6 +483,23 @@ func (s *Server) providerModels(response http.ResponseWriter, request *http.Requ
 
 // resumeDialogue clears the parked state so a stalled exchange can be pushed on
 // without the user having to remember what it was waiting for.
+// cancelConversation stops whatever a card is doing. The request is recorded
+// and answered immediately; the worker that owns a running provider process
+// ends it on its next poll, so this never blocks on a provider.
+func (s *Server) cancelConversation(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("conversation id must be a positive integer"))
+		return
+	}
+	stopped, err := s.store.RequestConversationCancel(request.Context(), id)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, domain.CancelResult{Stopped: stopped})
+}
+
 func (s *Server) resumeDialogue(response http.ResponseWriter, request *http.Request) {
 	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -842,6 +860,13 @@ func (c *Client) ProviderModels(ctx context.Context, name string) (domain.Provid
 		return domain.ProviderModels{}, err
 	}
 	return models, nil
+}
+
+func (c *Client) CancelConversation(ctx context.Context, conversationID int64) (domain.CancelResult, error) {
+	path := "/v1/canvas/conversations/" + strconv.FormatInt(conversationID, 10) + "/cancel"
+	var result domain.CancelResult
+	err := c.do(ctx, http.MethodPost, path, nil, &result, http.StatusOK)
+	return result, err
 }
 
 func (c *Client) ResumeDialogue(ctx context.Context, conversationID int64) error {

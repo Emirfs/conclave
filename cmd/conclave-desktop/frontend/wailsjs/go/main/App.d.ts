@@ -8,6 +8,8 @@ export function ApplyUpdate():Promise<void>;
 
 export function Branch(arg1:number,arg2:string,arg3:Array<string>):Promise<Array<domain.Conversation>>;
 
+export function CancelConversation(arg1:number):Promise<domain.CancelResult>;
+
 export function Canvas():Promise<domain.Canvas>;
 
 export function CheckUpdate():Promise<update.Status>;

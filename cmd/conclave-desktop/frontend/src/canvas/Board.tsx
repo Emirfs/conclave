@@ -40,7 +40,7 @@ export function Board({ canvas, providers }: { canvas: BoardHandle; providers: s
 function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: string[] }) {
   const { nodes, setNodes, edges, patch, remove, setNoteBody, send, link, unlink,
     pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
-    saveRole, saveModel, resumeDialogue, assignRoles, branch, addNote } = canvas
+    saveRole, saveModel, resumeDialogue, cancelConversation, assignRoles, branch, addNote } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
   // The answer a branch would start from, held while the user picks providers.
   const [branching, setBranching] = useState<{ conversationID: number; answer: string } | null>(null)
@@ -140,6 +140,7 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
                 onSaveRole: saveRole,
                 onSaveModel: saveModel,
                 onResumeDialogue: resumeDialogue,
+                onCancel: cancelConversation,
                 onBranch: (conversationID: number, answer: string) =>
                   setBranching({ conversationID, answer }),
                 onPinNote: (body: string) => void pinNote(node.id, body),
@@ -148,7 +149,7 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
             },
       ),
     [nodes, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop,
-     saveRole, saveModel, resumeDialogue, pinNote, resize, setHeight],
+     saveRole, saveModel, resumeDialogue, cancelConversation, pinNote, resize, setHeight],
   )
 
   const onNodesChange = useCallback(
