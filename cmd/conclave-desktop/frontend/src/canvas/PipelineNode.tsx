@@ -67,8 +67,7 @@ export const PipelineNode = memo(function PipelineNode({ id, data, selected }: P
         lineClassName="node__resize-line"
         handleClassName="node__resize-handle node__resize-handle--large"
       />
-      <div className="node__grip">
-        <span className="node__grip-dots" aria-hidden="true" />
+      <header className="node__header node__grip">
         <input
           className="node__pipeline-title nodrag"
           value={title}
@@ -84,7 +83,7 @@ export const PipelineNode = memo(function PipelineNode({ id, data, selected }: P
           onGrow={() => onResize(id, 1)}
         />
         <CloseButton onClose={() => onClose(id)} label="Pipeline'ı sil" />
-      </div>
+      </header>
 
       <div className="node__toolbar">
         <button

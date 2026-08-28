@@ -1360,6 +1360,11 @@
 .node__toolbar {
   display: flex;
   align-items: center;
+  /* A card is resizable and this row carries a project chip, an access
+     toggle, a model picker, an export button and the tabs. Without wrapping,
+     a narrow card stacks them on top of each other instead of on to a second
+     line. */
+  flex-wrap: wrap;
   gap: 6px;
   flex: none;
   padding: 6px 8px;
