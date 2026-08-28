@@ -95,6 +95,12 @@ export function App() {
     void canvas.addJoin({ body: 'Birleştirici', color: '', ...scatter() } as domain.NewNote)
   }, [canvas])
 
+  // A trigger starts a flow by itself. What it runs is whatever the board
+  // links to it, so it is created bare and wired up on the canvas.
+  const addTrigger = useCallback(() => {
+    void canvas.addTrigger({ title: 'Tetikleyici', ...scatter() } as domain.NewTrigger)
+  }, [canvas])
+
   const addGroup = useCallback(() => {
     if (ready.length === 0) return
     void canvas.addConversation({
@@ -125,6 +131,9 @@ export function App() {
             </button>
             <button className="button button--block" onClick={addJoin}>
               Birleştirici
+            </button>
+            <button className="button button--block" onClick={addTrigger}>
+              Tetikleyici
             </button>
           </section>
           <section className="rail__group">

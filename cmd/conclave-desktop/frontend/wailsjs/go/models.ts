@@ -32,6 +32,40 @@ export namespace domain {
 	        this.started_at = source["started_at"];
 	    }
 	}
+	export class Trigger {
+	    id: number;
+	    node_id: number;
+	    title: string;
+	    prompt: string;
+	    mode: string;
+	    interval_seconds: number;
+	    at_time: string;
+	    enabled: boolean;
+	    due_at?: string;
+	    last_fired_at?: string;
+	    last_run_id?: number;
+	    working: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Trigger(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.node_id = source["node_id"];
+	        this.title = source["title"];
+	        this.prompt = source["prompt"];
+	        this.mode = source["mode"];
+	        this.interval_seconds = source["interval_seconds"];
+	        this.at_time = source["at_time"];
+	        this.enabled = source["enabled"];
+	        this.due_at = source["due_at"];
+	        this.last_fired_at = source["last_fired_at"];
+	        this.last_run_id = source["last_run_id"];
+	        this.working = source["working"];
+	    }
+	}
 	export class JoinNode {
 	    node_id: number;
 	    title: string;
@@ -81,6 +115,7 @@ export namespace domain {
 	    kind: string;
 	    conversation_id?: number;
 	    pipeline_id?: number;
+	    trigger_id?: number;
 	    x: number;
 	    y: number;
 	    width: number;
@@ -99,6 +134,7 @@ export namespace domain {
 	        this.kind = source["kind"];
 	        this.conversation_id = source["conversation_id"];
 	        this.pipeline_id = source["pipeline_id"];
+	        this.trigger_id = source["trigger_id"];
 	        this.x = source["x"];
 	        this.y = source["y"];
 	        this.width = source["width"];
@@ -430,6 +466,7 @@ export namespace domain {
 	    nodes: CanvasNode[];
 	    links: CanvasLink[];
 	    joins: JoinNode[];
+	    triggers: Trigger[];
 	    runs: FlowRun[];
 	
 	    static createFrom(source: any = {}) {
@@ -443,6 +480,7 @@ export namespace domain {
 	        this.nodes = this.convertValues(source["nodes"], CanvasNode);
 	        this.links = this.convertValues(source["links"], CanvasLink);
 	        this.joins = this.convertValues(source["joins"], JoinNode);
+	        this.triggers = this.convertValues(source["triggers"], Trigger);
 	        this.runs = this.convertValues(source["runs"], FlowRun);
 	    }
 	
@@ -577,6 +615,22 @@ export namespace domain {
 	
 	    static createFrom(source: any = {}) {
 	        return new NewPipeline(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.x = source["x"];
+	        this.y = source["y"];
+	    }
+	}
+	export class NewTrigger {
+	    title: string;
+	    x: number;
+	    y: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new NewTrigger(source);
 	    }
 	
 	    constructor(source: any = {}) {
@@ -821,6 +875,29 @@ export namespace domain {
 		}
 	}
 	
+	
+	export class TriggerConfig {
+	    title: string;
+	    prompt: string;
+	    mode: string;
+	    interval_seconds: number;
+	    at_time: string;
+	    enabled: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new TriggerConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.prompt = source["prompt"];
+	        this.mode = source["mode"];
+	        this.interval_seconds = source["interval_seconds"];
+	        this.at_time = source["at_time"];
+	        this.enabled = source["enabled"];
+	    }
+	}
 	export class UsageReport {
 	    days: number;
 	    providers: ProviderUsage[];

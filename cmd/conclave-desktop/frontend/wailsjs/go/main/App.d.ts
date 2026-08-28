@@ -22,6 +22,8 @@ export function CreateNote(arg1:domain.NewNote):Promise<domain.CanvasNode>;
 
 export function CreatePipeline(arg1:domain.NewPipeline):Promise<domain.Pipeline>;
 
+export function CreateTrigger(arg1:domain.NewTrigger):Promise<domain.Trigger>;
+
 export function DeleteCanvasNode(arg1:number):Promise<void>;
 
 export function EnsureDaemon():Promise<void>;
@@ -31,6 +33,8 @@ export function ExportBoard():Promise<string>;
 export function ExportConversation(arg1:number,arg2:string):Promise<string>;
 
 export function FileDiff(arg1:number,arg2:string):Promise<vcs.Diff>;
+
+export function FireTrigger(arg1:number):Promise<number>;
 
 export function ImportBoard():Promise<domain.ImportResult>;
 
@@ -65,6 +69,8 @@ export function SetPipeline(arg1:number,arg2:domain.PipelineConfig):Promise<void
 export function SetProject(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function SetRole(arg1:number,arg2:string):Promise<void>;
+
+export function SetTrigger(arg1:number,arg2:domain.TriggerConfig):Promise<void>;
 
 export function Snapshot():Promise<domain.Snapshot>;
 

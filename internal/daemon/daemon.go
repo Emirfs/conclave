@@ -66,6 +66,13 @@ func (d *Daemon) Run(ctx context.Context) {
 		defer workers.Done()
 		d.loopWorker(ctx)
 	}()
+	// Triggers are cheap to check and must not wait behind a card cycle that
+	// is holding a step open, so they get a worker of their own too.
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		d.triggerWorker(ctx)
+	}()
 	<-ctx.Done()
 	workers.Wait()
 }

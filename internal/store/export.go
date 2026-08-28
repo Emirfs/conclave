@@ -156,6 +156,10 @@ func (s *Store) ExportBoard(ctx context.Context) (domain.BoardExport, error) {
 	for _, item := range canvas.Pipelines {
 		pipelines[item.ID] = item
 	}
+	triggers := make(map[int64]domain.Trigger, len(canvas.Triggers))
+	for _, item := range canvas.Triggers {
+		triggers[item.ID] = item
+	}
 
 	for _, node := range canvas.Nodes {
 		exported := domain.ExportedNode{
@@ -181,6 +185,17 @@ func (s *Store) ExportBoard(ctx context.Context) (domain.BoardExport, error) {
 			exported.Role = conversation.Role
 			exported.Models = conversation.Models
 			exported.Turns = exportTurns(turns)
+		case node.Kind == domain.NodeTrigger && node.TriggerID != nil:
+			trigger, known := triggers[*node.TriggerID]
+			if !known {
+				continue
+			}
+			exported.Title = trigger.Title
+			exported.Prompt = trigger.Prompt
+			exported.TriggerMode = trigger.Mode
+			exported.IntervalSeconds = trigger.IntervalSeconds
+			exported.AtTime = trigger.AtTime
+			exported.Enabled = trigger.Enabled
 		case node.Kind == domain.NodePipeline && node.PipelineID != nil:
 			pipeline, known := pipelines[*node.PipelineID]
 			if !known {
@@ -292,6 +307,47 @@ func importNode(ctx context.Context, tx *sql.Tx, node domain.ExportedNode, offse
 INSERT INTO canvas_nodes(kind, x, y, width, height, z, color, body, updated_at)
 VALUES(?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), ?, ?, ?)`,
 			domain.NodeNote, x, y, width, height, node.Color, node.Body, now)
+		if err != nil {
+			return 0, err
+		}
+		return result.LastInsertId()
+
+	case domain.NodeJoin:
+		if width == 0 || height == 0 {
+			width, height = joinWidth, joinHeight
+		}
+		result, err := tx.ExecContext(ctx, `
+INSERT INTO canvas_nodes(kind, x, y, width, height, z, color, body, updated_at)
+VALUES(?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), '', ?, ?)`,
+			domain.NodeJoin, x, y, width, height, node.Body, now)
+		if err != nil {
+			return 0, err
+		}
+		return result.LastInsertId()
+
+	case domain.NodeTrigger:
+		if width == 0 || height == 0 {
+			width, height = triggerWidth, triggerHeight
+		}
+		// An imported trigger arrives disarmed whatever the file said. A board
+		// someone is looking through should not start doing work on its own the
+		// moment it lands.
+		result, err := tx.ExecContext(ctx, `
+INSERT INTO triggers(title, prompt, mode, interval_seconds, at_time, enabled, created_at)
+VALUES(?, ?, ?, ?, ?, 0, ?)`,
+			node.Title, node.Prompt, triggerMode(node.TriggerMode),
+			triggerInterval(node.IntervalSeconds), node.AtTime, now)
+		if err != nil {
+			return 0, err
+		}
+		triggerID, err := result.LastInsertId()
+		if err != nil {
+			return 0, err
+		}
+		result, err = tx.ExecContext(ctx, `
+INSERT INTO canvas_nodes(kind, trigger_id, x, y, width, height, z, updated_at)
+VALUES(?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(z), 0) + 1 FROM canvas_nodes), ?)`,
+			domain.NodeTrigger, triggerID, x, y, width, height, now)
 		if err != nil {
 			return 0, err
 		}
@@ -420,4 +476,22 @@ VALUES(?, ?, ?, ?, ?, ?)`,
 		}
 	}
 	return nil
+}
+
+// triggerMode falls back to manual for a file written by a newer version, or a
+// hand-edited one. An unrecognised schedule must not become a trigger that
+// fires on terms nobody can see.
+func triggerMode(mode string) string {
+	switch mode {
+	case domain.TriggerInterval, domain.TriggerDaily, domain.TriggerManual:
+		return mode
+	}
+	return domain.TriggerManual
+}
+
+func triggerInterval(seconds int) int {
+	if seconds < minInterval {
+		return minInterval
+	}
+	return seconds
 }

@@ -299,6 +299,27 @@ CREATE TABLE join_inputs (
 );
 CREATE INDEX join_inputs_node_idx ON join_inputs(node_id, flow_run_id);
 `,
+	// 17: a trigger starts a flow by itself — on a timer, at a time of day, or
+	// when someone presses it. What it runs is whatever the board links to it,
+	// so there is no separate description of a flow to keep in step with the
+	// canvas: the flow is the subgraph reachable from the trigger.
+	`
+CREATE TABLE triggers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL DEFAULT '',
+    prompt TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT 'manual',
+    interval_seconds INTEGER NOT NULL DEFAULT 3600,
+    at_time TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 0,
+    due_at TEXT NOT NULL DEFAULT '',
+    last_fired_at TEXT NOT NULL DEFAULT '',
+    last_run_id INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+ALTER TABLE canvas_nodes ADD COLUMN trigger_id INTEGER REFERENCES triggers(id) ON DELETE CASCADE;
+CREATE INDEX triggers_due_idx ON triggers(enabled, due_at);
+`,
 }
 
 func (s *Store) init() error {
@@ -903,6 +924,8 @@ func (s *Store) stages(ctx context.Context, runID int64) ([]domain.Stage, error)
 const transcriptLimit = 24
 
 const (
+	triggerWidth       = 320
+	triggerHeight      = 300
 	conversationWidth  = 420
 	conversationHeight = 340
 	noteWidth          = 240
@@ -1074,6 +1097,7 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 		Nodes:         []domain.CanvasNode{},
 		Links:         []domain.CanvasLink{},
 		Joins:         []domain.JoinNode{},
+		Triggers:      []domain.Trigger{},
 		Runs:          []domain.FlowRun{},
 	}
 	conversations, err := s.listConversations(ctx)
@@ -1118,6 +1142,11 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 		return canvas, err
 	}
 	canvas.Joins = joins
+	triggers, err := s.listTriggers(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Triggers = triggers
 	runs, err := s.ActiveFlowRuns(ctx)
 	if err != nil {
 		return canvas, err
@@ -1195,7 +1224,7 @@ func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, e
 
 func (s *Store) listCanvasNodes(ctx context.Context) ([]domain.CanvasNode, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, kind, conversation_id, pipeline_id, x, y, width, height, z, color, body
+SELECT id, kind, conversation_id, pipeline_id, trigger_id, x, y, width, height, z, color, body
 FROM canvas_nodes ORDER BY z, id`)
 	if err != nil {
 		return nil, err
@@ -1204,9 +1233,9 @@ FROM canvas_nodes ORDER BY z, id`)
 	nodes := []domain.CanvasNode{}
 	for rows.Next() {
 		var node domain.CanvasNode
-		var conversationID, pipelineID sql.NullInt64
-		if err := rows.Scan(&node.ID, &node.Kind, &conversationID, &pipelineID, &node.X, &node.Y,
-			&node.Width, &node.Height, &node.Z, &node.Color, &node.Body); err != nil {
+		var conversationID, pipelineID, triggerID sql.NullInt64
+		if err := rows.Scan(&node.ID, &node.Kind, &conversationID, &pipelineID, &triggerID,
+			&node.X, &node.Y, &node.Width, &node.Height, &node.Z, &node.Color, &node.Body); err != nil {
 			return nil, err
 		}
 		if conversationID.Valid {
@@ -1216,6 +1245,10 @@ FROM canvas_nodes ORDER BY z, id`)
 		if pipelineID.Valid {
 			value := pipelineID.Int64
 			node.PipelineID = &value
+		}
+		if triggerID.Valid {
+			value := triggerID.Int64
+			node.TriggerID = &value
 		}
 		nodes = append(nodes, node)
 	}
@@ -1278,10 +1311,10 @@ func (s *Store) DeleteCanvasNode(ctx context.Context, id int64) error {
 	}
 	defer tx.Rollback()
 	var kind string
-	var conversationID, pipelineID sql.NullInt64
+	var conversationID, pipelineID, triggerID sql.NullInt64
 	err = tx.QueryRowContext(ctx,
-		"SELECT kind, conversation_id, pipeline_id FROM canvas_nodes WHERE id = ?", id).
-		Scan(&kind, &conversationID, &pipelineID)
+		"SELECT kind, conversation_id, pipeline_id, trigger_id FROM canvas_nodes WHERE id = ?", id).
+		Scan(&kind, &conversationID, &pipelineID, &triggerID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return sql.ErrNoRows
 	}
@@ -1302,6 +1335,14 @@ func (s *Store) DeleteCanvasNode(ctx context.Context, id int64) error {
 	if kind == domain.NodePipeline && pipelineID.Valid {
 		if _, err := tx.ExecContext(ctx,
 			"DELETE FROM pipelines WHERE id = ?", pipelineID.Int64); err != nil {
+			return err
+		}
+	}
+	// Same for a trigger: closing the card is how a routine is switched off for
+	// good, and a trigger left behind would keep firing into nothing.
+	if kind == domain.NodeTrigger && triggerID.Valid {
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM triggers WHERE id = ?", triggerID.Int64); err != nil {
 			return err
 		}
 	}
@@ -1380,13 +1421,24 @@ func (s *Store) CreateLink(ctx context.Context, sourceID, targetID int64, option
 	err := s.db.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM canvas_nodes
 WHERE id IN (?, ?)
-  AND ((kind = ? AND conversation_id IS NOT NULL) OR kind = ?)`,
-		sourceID, targetID, domain.NodeConversation, domain.NodeJoin).Scan(&linkable)
+  AND ((kind = ? AND conversation_id IS NOT NULL) OR kind IN (?, ?))`,
+		sourceID, targetID, domain.NodeConversation, domain.NodeJoin, domain.NodeTrigger).Scan(&linkable)
 	if err != nil {
 		return domain.CanvasLink{}, err
 	}
 	if linkable != 2 {
-		return domain.CanvasLink{}, errors.New("only conversation cards and joins can be linked")
+		return domain.CanvasLink{}, errors.New("only conversation cards, joins and triggers can be linked")
+	}
+	// A trigger starts a flow; nothing flows back into one. Accepting such a
+	// link would draw a line on the board that never carries anything.
+	var intoTrigger int
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM canvas_nodes WHERE id = ? AND kind = ?",
+		targetID, domain.NodeTrigger).Scan(&intoTrigger); err != nil {
+		return domain.CanvasLink{}, err
+	}
+	if intoTrigger > 0 {
+		return domain.CanvasLink{}, errors.New("a trigger starts a flow; nothing links into one")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := s.db.ExecContext(ctx, `
@@ -1416,12 +1468,13 @@ ON CONFLICT(source_id, target_id) DO UPDATE SET
 	}
 	// "Dialogue" only means anything if the other card can answer back, so the
 	// return link is created with it rather than left for the user to notice.
-	// A join has nothing to answer with, so a link through one stays one-way.
-	joined, err := s.linkTouchesJoin(ctx, sourceID, targetID)
+	// A join has nothing to answer with and a trigger only starts things, so a
+	// link through either of them stays one-way.
+	oneWay, err := s.linkMustBeOneWay(ctx, sourceID, targetID)
 	if err != nil {
 		return domain.CanvasLink{}, err
 	}
-	if options.Mode == domain.LinkDialogue && !joined {
+	if options.Mode == domain.LinkDialogue && !oneWay {
 		if err := s.ensureReverseLink(ctx, sourceID, targetID, options); err != nil {
 			return domain.CanvasLink{}, err
 		}
@@ -1695,6 +1748,11 @@ func (s *Store) relayFrom(ctx context.Context, src relaySource) (int, error) {
 		}
 
 		kind := domain.TurnRelay
+		if src.turnKind == domain.TurnTrigger {
+			// A message a trigger sent is not an answer being passed along, and
+			// the card's transcript should say which it was.
+			kind = domain.TurnTrigger
+		}
 		nudge := false
 		// An exchange that runs until it is done is a property of two talking
 		// cards. A message arriving from a join came from several at once, so

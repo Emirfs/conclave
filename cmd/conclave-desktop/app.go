@@ -99,6 +99,40 @@ func (a *App) CreateJoin(input domain.NewNote) (domain.CanvasNode, error) {
 	return client.CreateJoin(ctx, input)
 }
 
+// CreateTrigger puts a starting point on the board: a card that fires on a
+// timer, at a time of day, or when someone presses it.
+func (a *App) CreateTrigger(input domain.NewTrigger) (domain.Trigger, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.Trigger{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CreateTrigger(ctx, input)
+}
+
+// SetTrigger replaces a trigger's message and schedule, arming or disarming it.
+func (a *App) SetTrigger(id int64, config domain.TriggerConfig) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.SetTrigger(ctx, id, config)
+}
+
+// FireTrigger runs a trigger now, whatever its schedule says.
+func (a *App) FireTrigger(id int64) (int, error) {
+	client, err := a.client()
+	if err != nil {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+	return client.FireTrigger(ctx, id)
+}
+
 // StopFlowRun ends one journey across the board, stopping every card still
 // working on it.
 func (a *App) StopFlowRun(runID int64) (int, error) {

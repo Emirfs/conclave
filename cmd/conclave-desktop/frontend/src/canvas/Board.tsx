@@ -26,6 +26,7 @@ import { NoteNode } from './NoteNode'
 import { PipelineNode } from './PipelineNode'
 import { ProviderEdge } from './ProviderEdge'
 import { SearchPanel } from './SearchPanel'
+import { TriggerNode } from './TriggerNode'
 import type { BoardNode, useCanvas } from './useCanvas'
 
 const nodeTypes = {
@@ -33,6 +34,7 @@ const nodeTypes = {
   note: NoteNode,
   pipeline: PipelineNode,
   join: JoinNode,
+  trigger: TriggerNode,
 }
 const edgeTypes = { provider: ProviderEdge }
 
@@ -52,7 +54,7 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
     saveRole, saveModel, resumeDialogue, cancelConversation, search,
     savePipeline, runPipeline, pickPipelineProject, exportConversation,
     assignRoles, branch, addNote, error, clearError, deletingIds,
-    runs, stopRun } = canvas
+    runs, stopRun, saveTrigger, fireTrigger } = canvas
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
   const [searching, setSearching] = useState(false)
   // A deletion waiting for an answer. Held here rather than asked with
@@ -194,6 +196,19 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
             },
           }
         }
+        if (node.data.kind === 'trigger') {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              onSave: saveTrigger,
+              onFire: fireTrigger,
+              onClose: close,
+              onResize: resize,
+              deleting,
+            },
+          }
+        }
         if (node.data.kind === 'join') {
           return {
             ...node,
@@ -236,6 +251,7 @@ function BoardSurface({ canvas, providers }: { canvas: BoardHandle; providers: s
             }
       }),
     [nodes, deletingIds, setNoteBody, send, close, pickProject, setAccess, saveLoop, toggleLoop,
+     saveTrigger, fireTrigger,
      saveRole, saveModel, resumeDialogue, cancelConversation, savePipeline, runPipeline,
      pickPipelineProject, exportConversation, pinNote, resize, setHeight],
   )

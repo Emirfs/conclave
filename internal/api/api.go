@@ -53,6 +53,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/canvas/conversations", s.createConversation)
 	mux.HandleFunc("POST /v1/canvas/notes", s.createNote)
 	mux.HandleFunc("POST /v1/canvas/joins", s.createJoin)
+	mux.HandleFunc("POST /v1/canvas/triggers", s.createTrigger)
+	mux.HandleFunc("PUT /v1/canvas/triggers/{id}", s.setTrigger)
+	mux.HandleFunc("POST /v1/canvas/triggers/{id}/fire", s.fireTrigger)
 	mux.HandleFunc("POST /v1/canvas/runs/{id}/stop", s.stopFlowRun)
 	mux.HandleFunc("POST /v1/canvas/pipelines", s.createPipeline)
 	mux.HandleFunc("PUT /v1/canvas/pipelines/{id}", s.setPipeline)
@@ -312,6 +315,69 @@ func (s *Server) createJoin(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	writeJSON(response, http.StatusCreated, join)
+}
+
+// createTrigger puts a starting point on the board. It arrives switched off
+// and empty; what it sends and when is set on the card itself.
+func (s *Server) createTrigger(response http.ResponseWriter, request *http.Request) {
+	var input domain.NewTrigger
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	trigger, err := s.store.CreateTrigger(request.Context(), input)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, trigger)
+}
+
+// setTrigger replaces a trigger's message and schedule in one write, arming or
+// disarming it at the same time.
+func (s *Server) setTrigger(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("trigger id must be a positive integer"))
+		return
+	}
+	var input domain.TriggerConfig
+	if !decodeJSON(response, request, 64<<10, &input) {
+		return
+	}
+	if utf8.RuneCountInString(input.Prompt) > 20_000 {
+		writeError(response, http.StatusBadRequest,
+			errors.New("a trigger message is limited to 20000 characters"))
+		return
+	}
+	if err := s.store.SetTrigger(request.Context(), id, input); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("trigger not found"))
+			return
+		}
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// fireTrigger runs a trigger now, whatever its schedule says. A routine nobody
+// can start by hand is a routine nobody can test.
+func (s *Server) fireTrigger(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("trigger id must be a positive integer"))
+		return
+	}
+	delivered, err := s.store.FireTrigger(request.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, errors.New("trigger not found"))
+			return
+		}
+		writeError(response, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]int{"delivered": delivered})
 }
 
 // stopFlowRun ends one journey across the board and stops every card still
@@ -1069,6 +1135,26 @@ func (c *Client) CreateJoin(ctx context.Context, input domain.NewNote) (domain.C
 	var node domain.CanvasNode
 	err := c.do(ctx, http.MethodPost, "/v1/canvas/joins", input, &node, http.StatusCreated)
 	return node, err
+}
+
+func (c *Client) CreateTrigger(ctx context.Context, input domain.NewTrigger) (domain.Trigger, error) {
+	var trigger domain.Trigger
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/triggers", input, &trigger, http.StatusCreated)
+	return trigger, err
+}
+
+func (c *Client) SetTrigger(ctx context.Context, id int64, config domain.TriggerConfig) error {
+	path := "/v1/canvas/triggers/" + strconv.FormatInt(id, 10)
+	return c.do(ctx, http.MethodPut, path, config, nil, http.StatusNoContent)
+}
+
+func (c *Client) FireTrigger(ctx context.Context, id int64) (int, error) {
+	var result struct {
+		Delivered int `json:"delivered"`
+	}
+	path := "/v1/canvas/triggers/" + strconv.FormatInt(id, 10) + "/fire"
+	err := c.do(ctx, http.MethodPost, path, nil, &result, http.StatusOK)
+	return result.Delivered, err
 }
 
 func (c *Client) StopFlowRun(ctx context.Context, runID int64) (int, error) {

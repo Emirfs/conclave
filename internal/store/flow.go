@@ -382,13 +382,13 @@ WHERE t.flow_run_id = ? AND r.status IN (?, ?)`,
 	return s.FinishFlowRun(ctx, runID)
 }
 
-// linkTouchesJoin reports whether either end of a link is a waiting point.
-// Several arrangements only make sense between two speaking cards, and this is
-// how they tell.
-func (s *Store) linkTouchesJoin(ctx context.Context, sourceID, targetID int64) (bool, error) {
+// linkMustBeOneWay reports whether a link can only ever run one way. A return
+// link, and an exchange that runs until it is done, need two cards that can
+// answer; a join waits and a trigger only ever starts things.
+func (s *Store) linkMustBeOneWay(ctx context.Context, sourceID, targetID int64) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM canvas_nodes WHERE id IN (?, ?) AND kind = ?",
-		sourceID, targetID, domain.NodeJoin).Scan(&count)
+		"SELECT COUNT(*) FROM canvas_nodes WHERE id IN (?, ?) AND kind IN (?, ?)",
+		sourceID, targetID, domain.NodeJoin, domain.NodeTrigger).Scan(&count)
 	return count > 0, err
 }

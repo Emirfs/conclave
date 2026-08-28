@@ -77,6 +77,14 @@ type ExportedNode struct {
 	Turns            []ExportedTurn    `json:"turns,omitempty"`
 
 	Stages []PipelineStage `json:"stages,omitempty"`
+
+	// A trigger's schedule. Carried so a routine survives an export: without
+	// it a board comes back with the wiring but nothing to start it.
+	Prompt          string `json:"prompt,omitempty"`
+	TriggerMode     string `json:"trigger_mode,omitempty"`
+	IntervalSeconds int    `json:"interval_seconds,omitempty"`
+	AtTime          string `json:"at_time,omitempty"`
+	Enabled         bool   `json:"enabled,omitempty"`
 }
 
 type ExportedTurn struct {
@@ -282,6 +290,21 @@ const (
 	// as one message. Without it two paths reaching the same card arrive as two
 	// separate turns, and the card answers each in ignorance of the other.
 	NodeJoin = "join"
+	// NodeTrigger starts a flow on its own: on a timer, at a time of day, or
+	// when a person presses it. Everything reachable from it is what it runs,
+	// which is what turns a board of cards into recurring work.
+	NodeTrigger = "trigger"
+)
+
+// How a trigger decides it is due.
+const (
+	// TriggerManual only ever fires when someone presses it.
+	TriggerManual = "manual"
+	// TriggerInterval fires every so often, measured from the last firing.
+	TriggerInterval = "interval"
+	// TriggerDaily fires once a day at a wall-clock time, in local time: a
+	// routine is something a person schedules against their own day.
+	TriggerDaily = "daily"
 )
 
 // A flow run is one journey of a message across the board: what a person sent,
@@ -402,7 +425,49 @@ const (
 	TurnUser  = "user"
 	TurnRelay = "relay"
 	TurnNudge = "nudge"
+	// TurnTrigger is a message a trigger sent. It reads like a user turn but
+	// nobody typed it, and a card's transcript should not pretend otherwise.
+	TurnTrigger = "trigger"
 )
+
+// Trigger is a node that starts work by itself. The flow it runs is whatever
+// the board links to it, so a trigger is a starting point rather than a
+// separate description of a pipeline.
+type Trigger struct {
+	ID     int64  `json:"id"`
+	NodeID int64  `json:"node_id"`
+	Title  string `json:"title"`
+	// Prompt is what the cards linked to it receive when it fires.
+	Prompt          string `json:"prompt"`
+	Mode            string `json:"mode"`
+	IntervalSeconds int    `json:"interval_seconds"`
+	// AtTime is "HH:MM" in local time, used by the daily mode.
+	AtTime      string `json:"at_time"`
+	Enabled     bool   `json:"enabled"`
+	DueAt       string `json:"due_at,omitempty"`
+	LastFiredAt string `json:"last_fired_at,omitempty"`
+	LastRunID   int64  `json:"last_run_id,omitempty"`
+	// Working reports that the run this trigger last started is still going.
+	// A routine that overruns its own interval must not start again on top of
+	// itself.
+	Working bool `json:"working"`
+}
+
+type NewTrigger struct {
+	Title string  `json:"title"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+}
+
+// TriggerConfig replaces everything about a trigger in one write.
+type TriggerConfig struct {
+	Title           string `json:"title"`
+	Prompt          string `json:"prompt"`
+	Mode            string `json:"mode"`
+	IntervalSeconds int    `json:"interval_seconds"`
+	AtTime          string `json:"at_time"`
+	Enabled         bool   `json:"enabled"`
+}
 
 // CanvasNode is presentation state the daemon owns so a layout survives a
 // restart and is identical for every client.
@@ -411,6 +476,7 @@ type CanvasNode struct {
 	Kind           string  `json:"kind"`
 	ConversationID *int64  `json:"conversation_id,omitempty"`
 	PipelineID     *int64  `json:"pipeline_id,omitempty"`
+	TriggerID      *int64  `json:"trigger_id,omitempty"`
 	X              float64 `json:"x"`
 	Y              float64 `json:"y"`
 	Width          float64 `json:"width"`
@@ -594,6 +660,8 @@ type Canvas struct {
 	Links         []CanvasLink   `json:"links"`
 	// Joins are the waiting points on the board, with what each is holding.
 	Joins []JoinNode `json:"joins"`
+	// Triggers are the starting points that fire on their own.
+	Triggers []Trigger `json:"triggers"`
 	// Runs are the journeys still in flight: what the board is busy with, as
 	// one thing per message someone sent rather than one per card.
 	Runs []FlowRun `json:"runs"`

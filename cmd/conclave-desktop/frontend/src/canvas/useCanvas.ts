@@ -9,7 +9,9 @@ import {
   CreateJoin,
   CreateNote,
   CreatePipeline,
+  CreateTrigger,
   ExportBoard,
+  FireTrigger,
   ExportConversation,
   ImportBoard,
   DeleteCanvasNode,
@@ -26,6 +28,7 @@ import {
   SetLoopRunning,
   SetModel,
   SetRole,
+  SetTrigger,
   StartPipeline,
   StopFlowRun,
   UnlinkNodes,
@@ -50,6 +53,11 @@ export type PipelineNodeData = {
   pipeline: domain.Pipeline
 }
 
+export type TriggerNodeData = {
+  kind: 'trigger'
+  trigger: domain.Trigger
+}
+
 export type JoinNodeData = {
   kind: 'join'
   /** The join's name, which is also the node's body text. */
@@ -60,7 +68,7 @@ export type JoinNodeData = {
 }
 
 export type BoardNode = Node<
-  ConversationNodeData | NoteNodeData | PipelineNodeData | JoinNodeData
+  ConversationNodeData | NoteNodeData | PipelineNodeData | JoinNodeData | TriggerNodeData
 >
 
 /** How long a drag or keystroke settles before it is written to the daemon. */
@@ -77,6 +85,7 @@ function toBoardNode(
   conversations: Map<number, domain.Conversation>,
   pipelines: Map<number, domain.Pipeline>,
   joins: Map<number, domain.JoinNode>,
+  triggers: Map<number, domain.Trigger>,
 ): BoardNode | null {
   const shared = {
     id: String(node.id),
@@ -94,6 +103,13 @@ function toBoardNode(
       type: 'note',
       data: { kind: 'note', body: node.body ?? '', color: node.color ?? '' },
     }
+  }
+  if (node.kind === 'trigger') {
+    const trigger = node.trigger_id ? triggers.get(node.trigger_id) : undefined
+    // Same rule as a conversation node: a card with no record behind it is
+    // corrupt state, not something to draw an empty frame for.
+    if (!trigger) return null
+    return { ...shared, type: 'trigger', data: { kind: 'trigger', trigger } }
   }
   if (node.kind === 'join') {
     return {
@@ -155,6 +171,8 @@ export function useCanvas(connected: boolean) {
           if (run.status === 'queued' || run.status === 'running') working = true
         }
       }
+      const triggers = new Map<number, domain.Trigger>()
+      for (const item of canvas.triggers ?? []) triggers.set(item.id, item)
       const joins = new Map<number, domain.JoinNode>()
       for (const item of canvas.joins ?? []) joins.set(item.node_id, item)
       // A run still in flight is work in progress: something on the board is
@@ -240,7 +258,7 @@ export function useCanvas(connected: boolean) {
         return mappedEdges.map((edge) => ({ ...edge, selected: local.get(edge.id)?.selected }))
       })
       const mapped = (canvas.nodes ?? [])
-        .map((node) => toBoardNode(node, conversations, pipelines, joins))
+        .map((node) => toBoardNode(node, conversations, pipelines, joins, triggers))
         .filter((node): node is BoardNode => node !== null)
       setNodes((current) => {
         const local = new Map(current.map((node) => [node.id, node]))
@@ -329,6 +347,50 @@ export function useCanvas(connected: boolean) {
         await CreateNote(input)
       } catch (cause) {
         setError(`Not oluşturulamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  // A trigger is created switched off and empty: what it sends and when is
+  // set on the card, and nothing fires until someone says so.
+  const addTrigger = useCallback(
+    async (input: domain.NewTrigger) => {
+      try {
+        await CreateTrigger(input)
+      } catch (cause) {
+        setError(`Tetikleyici oluşturulamadı: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  const saveTrigger = useCallback(
+    async (triggerID: number, config: domain.TriggerConfig) => {
+      try {
+        await SetTrigger(triggerID, config)
+      } catch (cause) {
+        setError(`Tetikleyici kaydedilemedi: ${cause}`)
+        return
+      }
+      await load()
+    },
+    [load],
+  )
+
+  const fireTrigger = useCallback(
+    async (triggerID: number) => {
+      try {
+        const delivered = await FireTrigger(triggerID)
+        // A trigger nobody has wired anywhere fails silently otherwise: it
+        // starts a run that ends before anything happens.
+        if (delivered === 0) setError('Tetikleyici hiçbir karta bağlı değil.')
+      } catch (cause) {
+        setError(`Tetikleyici çalıştırılamadı: ${cause}`)
         return
       }
       await load()
@@ -754,7 +816,7 @@ export function useCanvas(connected: boolean) {
   return useMemo(
     () => ({
       nodes, setNodes, edges, error, clearError, deletingIds, loaded, load, patch,
-      runs, addJoin, stopRun,
+      runs, addJoin, stopRun, addTrigger, saveTrigger, fireTrigger,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
       addPipeline, savePipeline, runPipeline, pickPipelineProject,
@@ -762,6 +824,7 @@ export function useCanvas(connected: boolean) {
       saveRole, saveModel, resumeDialogue, cancelConversation, search, assignRoles, branch,
     }),
     [nodes, edges, error, clearError, deletingIds, loaded, load, patch, runs, addJoin, stopRun,
+     addTrigger, saveTrigger, fireTrigger,
      addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
      saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, cancelConversation, search,

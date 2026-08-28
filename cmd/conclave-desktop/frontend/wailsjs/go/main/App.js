@@ -38,6 +38,10 @@ export function CreatePipeline(arg1) {
   return window['go']['main']['App']['CreatePipeline'](arg1);
 }
 
+export function CreateTrigger(arg1) {
+  return window['go']['main']['App']['CreateTrigger'](arg1);
+}
+
 export function DeleteCanvasNode(arg1) {
   return window['go']['main']['App']['DeleteCanvasNode'](arg1);
 }
@@ -56,6 +60,10 @@ export function ExportConversation(arg1, arg2) {
 
 export function FileDiff(arg1, arg2) {
   return window['go']['main']['App']['FileDiff'](arg1, arg2);
+}
+
+export function FireTrigger(arg1) {
+  return window['go']['main']['App']['FireTrigger'](arg1);
 }
 
 export function ImportBoard() {
@@ -124,6 +132,10 @@ export function SetProject(arg1, arg2, arg3) {
 
 export function SetRole(arg1, arg2) {
   return window['go']['main']['App']['SetRole'](arg1, arg2);
+}
+
+export function SetTrigger(arg1, arg2) {
+  return window['go']['main']['App']['SetTrigger'](arg1, arg2);
 }
 
 export function Snapshot() {
