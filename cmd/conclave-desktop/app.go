@@ -205,6 +205,31 @@ func (a *App) SetRole(conversationID int64, role string) error {
 	return client.SetRole(ctx, conversationID, domain.RoleRequest{Role: role})
 }
 
+// SetModel picks the model one provider of a card runs on. An empty model hands
+// the choice back to the provider's own default.
+func (a *App) SetModel(conversationID int64, providerName, model string) error {
+	client, err := a.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.SetModel(ctx, conversationID, domain.ModelRequest{Provider: providerName, Model: model})
+}
+
+// ProviderModels lists what a provider can be asked for. Most of them are asked
+// directly, and one of those answers over the network, so this is slower than
+// the rest of the canvas calls and is only made when a list is opened.
+func (a *App) ProviderModels(providerName string) (domain.ProviderModels, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.ProviderModels{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 12*time.Second)
+	defer cancel()
+	return client.ProviderModels(ctx, providerName)
+}
+
 // Branch forks an answer into a new card per provider, each starting from that
 // answer, so one line of work can be carried in several directions at once.
 func (a *App) Branch(conversationID int64, answer string, providers []string) ([]domain.Conversation, error) {

@@ -15,6 +15,7 @@ Yapay zekâ kodlama CLI'ları tek başlarına kullanışlıdır; ancak birkaçı
 - sağlayıcı yanıtını ve anlık etkinliğini konuşma kartına canlı aktarır;
 - sağlayıcı oturumunu saklayarak sonraki mesajı aynı uzak konuşmada sürdürür;
 - her karta bağımsız proje dizini ve `read` veya `edit` erişimi atar;
+- her kartın sağlayıcılarını kart başına seçilen bir modelle ya da CLI'ın kendi varsayılanıyla çalıştırır;
 - proje kartı içinde Git çalışma ağacı değişikliklerini ve unified diff'i gösterir;
 - tamamlanan yanıtları yapılandırılabilir canvas bağlantılarıyla aktarır, tartıştırır veya inceletir;
 - iki kartı sınırlı konuşma veya açıkça seçilen iş-bitene-kadar akışı için eşleştirir;
@@ -51,6 +52,7 @@ Wails masaüstü istemcisi React Flow tabanlı kalıcı bir sonsuz pano sunar.
 - Uzun cevaplar ve belgeler için kartı büyütün, küçültün veya tam ekran açın.
 - Sağlayıcı cevaplarını GitHub Flavored Markdown olarak okuyun; not kartlarında yerel `.md` dosyası açıp düzenleme ve önizleme arasında geçiş yapın.
 - Her kart için proje dizini seçin, ardından `read` ile `edit` erişimi arasında geçiş yapın.
+- Kartın her sağlayıcısı için modeli o sağlayıcının kendi listesinden seçin; listede olmayan bir model adını elle de yazabilirsiniz. Model değişince o sağlayıcının oturumu yenilenir ve konuşma yeni modele taşınır.
 - **Değişiklikler** sekmesinden Git durumunu ve dosyanın unified diff'ini inceleyin.
 - Tamamlanan yanıtları aktarmak için bir konuşma kartının sağ portunu diğerinin sol portuna bağlayın.
 - Tam olarak iki konuşma kartını seçerek iki yönlü eşleştirin.

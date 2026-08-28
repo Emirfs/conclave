@@ -207,6 +207,7 @@ export namespace domain {
 	    loop_running: boolean;
 	    runs?: CardRun[];
 	    role?: string;
+	    models?: Record<string, string>;
 	    dialogue_state?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -227,6 +228,7 @@ export namespace domain {
 	        this.loop_running = source["loop_running"];
 	        this.runs = this.convertValues(source["runs"], CardRun);
 	        this.role = source["role"];
+	        this.models = source["models"];
 	        this.dialogue_state = source["dialogue_state"];
 	    }
 	
@@ -316,6 +318,20 @@ export namespace domain {
 	
 	
 	
+	export class Model {
+	    id: string;
+	    label?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Model(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
+	    }
+	}
 	export class NewConversation {
 	    title: string;
 	    kind: string;
@@ -398,6 +414,40 @@ export namespace domain {
 	        this.available = source["available"];
 	        this.command = source["command"];
 	        this.quota = this.convertValues(source["quota"], Quota);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ProviderModels {
+	    provider: string;
+	    models: Model[];
+	    default?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderModels(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.models = this.convertValues(source["models"], Model);
+	        this.default = source["default"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

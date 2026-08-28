@@ -16,6 +16,7 @@ import {
   SendTurn,
   SetLoop,
   SetLoopRunning,
+  SetModel,
   SetRole,
   UnlinkNodes,
   UpdateLink,
@@ -338,6 +339,20 @@ export function useCanvas(connected: boolean) {
     [load],
   )
 
+  // Changing the model drops that provider's session, so the answer to the next
+  // message comes from the model the card now says it runs on.
+  const saveModel = useCallback(
+    async (conversationID: number, providerName: string, model: string) => {
+      try {
+        await SetModel(conversationID, providerName, model)
+        await load()
+      } catch (cause) {
+        setError(String(cause))
+      }
+    },
+    [load],
+  )
+
   const saveRole = useCallback(
     async (conversationID: number, role: string) => {
       try {
@@ -481,10 +496,10 @@ export function useCanvas(connected: boolean) {
       nodes, setNodes, edges, error, loaded, load, patch,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
-      saveRole, resumeDialogue, assignRoles, branch,
+      saveRole, saveModel, resumeDialogue, assignRoles, branch,
     }),
     [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
-     saveLoop, toggleLoop, saveRole, resumeDialogue, assignRoles, branch],
+     saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, assignRoles, branch],
   )
 }

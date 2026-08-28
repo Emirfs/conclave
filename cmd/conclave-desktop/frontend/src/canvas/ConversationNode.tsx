@@ -7,6 +7,7 @@ import { CloseButton } from './CloseButton'
 import { Changes } from './Changes'
 import { LoopPanel } from './LoopPanel'
 import { Markdown } from './Markdown'
+import { ModelPicker } from './ModelPicker'
 import { domain } from '../../wailsjs/go/models'
 import { ROLES, roleName } from './roles'
 import type { ConversationNodeData } from './useCanvas'
@@ -20,6 +21,7 @@ type Props = NodeProps & {
     onSaveLoop: (conversationID: number, config: domain.LoopConfig) => Promise<void>
     onToggleLoop: (conversationID: number, running: boolean) => Promise<void>
     onSaveRole: (conversationID: number, role: string) => Promise<void>
+    onSaveModel: (conversationID: number, provider: string, model: string) => Promise<void>
     onResumeDialogue: (conversationID: number) => Promise<void>
     onBranch: (conversationID: number, answer: string) => void
     /** Puts text on the board as its own note card, next to this one. */
@@ -32,7 +34,7 @@ type Tab = 'chat' | 'changes' | 'tests'
 
 export const ConversationNode = memo(function ConversationNode({ id, data, selected }: Props) {
   const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop,
-    onSaveRole, onResumeDialogue, onBranch, onPinNote, onResize } = data
+    onSaveRole, onSaveModel, onResumeDialogue, onBranch, onPinNote, onResize } = data
   const project = conversation.project_path ?? ''
   const access = conversation.access ?? 'edit'
   const [tab, setTab] = useState<Tab>('chat')
@@ -42,6 +44,9 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
   const turns = conversation.turns ?? []
   const lead = providerStyle(providers[0] ?? conversation.title)
   const group = conversation.kind === 'group'
+  // A group card has one model per provider and shows them on its chips, so
+  // only a solo card can carry its model in the title.
+  const soloModel = group ? '' : (conversation.models?.[providers[0]] ?? '')
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -114,7 +119,13 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
             )
           })}
         </span>
-        <span className="node__title">{conversation.title}</span>
+        {/* A solo card is named after what it actually is: the provider and the
+            model it runs on. Which of several cards to read is decided by that
+            far more often than by the title the card was created with. */}
+        <span className="node__title">
+          {group ? conversation.title : lead.label}
+          {soloModel !== '' && <span className="node__title-model">{soloModel}</span>}
+        </span>
         {/* The role belongs in the title bar: which card does what is the first
             thing you need from a board of several. */}
         {savedRole !== '' && (
@@ -152,6 +163,13 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
         >
           {access === 'edit' ? 'düzenleyebilir' : 'salt okunur'}
         </button>
+        {/* Which model each provider runs on. Changing it drops that provider's
+            session, so the next answer really comes from the model named here. */}
+        <ModelPicker
+          providers={providers}
+          chosen={conversation.models ?? {}}
+          onSave={(name, model) => onSaveModel(conversation.id, name, model)}
+        />
         <span className="node__tabs">
           <button
             className={`node__tab${tab === 'chat' ? ' node__tab--active' : ''}`}
