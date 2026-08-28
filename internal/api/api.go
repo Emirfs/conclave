@@ -52,6 +52,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/canvas/import", s.importBoard)
 	mux.HandleFunc("POST /v1/canvas/conversations", s.createConversation)
 	mux.HandleFunc("POST /v1/canvas/notes", s.createNote)
+	mux.HandleFunc("POST /v1/canvas/joins", s.createJoin)
+	mux.HandleFunc("POST /v1/canvas/runs/{id}/stop", s.stopFlowRun)
 	mux.HandleFunc("POST /v1/canvas/pipelines", s.createPipeline)
 	mux.HandleFunc("PUT /v1/canvas/pipelines/{id}", s.setPipeline)
 	mux.HandleFunc("POST /v1/canvas/pipelines/{id}/runs", s.startPipeline)
@@ -291,6 +293,42 @@ func (s *Server) createNote(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	writeJSON(response, http.StatusCreated, note)
+}
+
+// createJoin puts a waiting point on the board. It carries no text of its own
+// beyond a name, so it takes the same body a note does.
+func (s *Server) createJoin(response http.ResponseWriter, request *http.Request) {
+	var input domain.NewNote
+	if !decodeJSON(response, request, 8<<10, &input) {
+		return
+	}
+	if utf8.RuneCountInString(input.Body) > 200 {
+		writeError(response, http.StatusBadRequest, errors.New("join name is limited to 200 characters"))
+		return
+	}
+	join, err := s.store.CreateJoin(request.Context(), input)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, join)
+}
+
+// stopFlowRun ends one journey across the board and stops every card still
+// working on it. Stopping cards one at a time is the thing this exists to
+// replace.
+func (s *Server) stopFlowRun(response http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(response, http.StatusBadRequest, errors.New("run id must be a positive integer"))
+		return
+	}
+	stopped, err := s.store.StopFlowRun(request.Context(), id)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, domain.CancelResult{Stopped: stopped})
 }
 
 func (s *Server) patchCanvasNode(response http.ResponseWriter, request *http.Request) {
@@ -1025,6 +1063,19 @@ func (c *Client) CreateNote(ctx context.Context, input domain.NewNote) (domain.C
 	var node domain.CanvasNode
 	err := c.do(ctx, http.MethodPost, "/v1/canvas/notes", input, &node, http.StatusCreated)
 	return node, err
+}
+
+func (c *Client) CreateJoin(ctx context.Context, input domain.NewNote) (domain.CanvasNode, error) {
+	var node domain.CanvasNode
+	err := c.do(ctx, http.MethodPost, "/v1/canvas/joins", input, &node, http.StatusCreated)
+	return node, err
+}
+
+func (c *Client) StopFlowRun(ctx context.Context, runID int64) (int, error) {
+	var result domain.CancelResult
+	path := "/v1/canvas/runs/" + strconv.FormatInt(runID, 10) + "/stop"
+	err := c.do(ctx, http.MethodPost, path, nil, &result, http.StatusOK)
+	return result.Stopped, err
 }
 
 func (c *Client) PatchCanvasNode(ctx context.Context, patch domain.CanvasNodePatch) error {

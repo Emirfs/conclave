@@ -87,6 +87,30 @@ func (a *App) CreateNote(input domain.NewNote) (domain.CanvasNode, error) {
 	return client.CreateNote(ctx, input)
 }
 
+// CreateJoin puts a waiting point on the board: a node that holds what each
+// line feeding it said and passes them on together, once.
+func (a *App) CreateJoin(input domain.NewNote) (domain.CanvasNode, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.CanvasNode{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	return client.CreateJoin(ctx, input)
+}
+
+// StopFlowRun ends one journey across the board, stopping every card still
+// working on it.
+func (a *App) StopFlowRun(runID int64) (int, error) {
+	client, err := a.client()
+	if err != nil {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+	return client.StopFlowRun(ctx, runID)
+}
+
 // SendTurn posts a message into a conversation. Every provider the
 // conversation targets answers it.
 func (a *App) SendTurn(conversationID int64, prompt string) error {

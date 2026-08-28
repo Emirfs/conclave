@@ -278,7 +278,45 @@ const (
 	// and keeps its results. It has no provider and no transcript: a pipeline
 	// is deterministic work, which is exactly what a conversation is not.
 	NodePipeline = "pipeline"
+	// NodeJoin waits for every line feeding it and hands on what they all said
+	// as one message. Without it two paths reaching the same card arrive as two
+	// separate turns, and the card answers each in ignorance of the other.
+	NodeJoin = "join"
 )
+
+// A flow run is one journey of a message across the board: what a person sent,
+// and everything that followed from it. Turns carry the run they belong to, so
+// a spreading exchange can be counted, followed and stopped as one thing.
+const (
+	RunRunning = "running"
+	RunDone    = "done"
+)
+
+// FlowRun is one such journey.
+type FlowRun struct {
+	ID int64 `json:"id"`
+	// OriginConversationID is the card a person spoke to. Zero once that card
+	// is gone: a run outlives the card it started from.
+	OriginConversationID int64  `json:"origin_conversation_id,omitempty"`
+	Status               string `json:"status"`
+	// Steps is how many turns this run has produced so far, the first included.
+	Steps     int    `json:"steps"`
+	StartedAt string `json:"started_at"`
+}
+
+// JoinNode is a waiting point on the board. It has no provider and no
+// transcript of its own; it exists to hold a run until every line reaching it
+// has spoken.
+type JoinNode struct {
+	NodeID int64  `json:"node_id"`
+	Title  string `json:"title"`
+	// Waiting is how many inputs the current run has delivered so far, and
+	// Expected how many lines feed this node. Shown so a stalled join says
+	// which side has not answered rather than merely looking idle.
+	Waiting  int      `json:"waiting"`
+	Expected int      `json:"expected"`
+	Sources  []string `json:"sources,omitempty"`
+}
 
 // PipelineStage is one step of a pipeline as the user typed it. The command is
 // a line rather than an argument array because that is what a person writes;
@@ -554,6 +592,11 @@ type Canvas struct {
 	Pipelines     []Pipeline     `json:"pipelines"`
 	Nodes         []CanvasNode   `json:"nodes"`
 	Links         []CanvasLink   `json:"links"`
+	// Joins are the waiting points on the board, with what each is holding.
+	Joins []JoinNode `json:"joins"`
+	// Runs are the journeys still in flight: what the board is busy with, as
+	// one thing per message someone sent rather than one per card.
+	Runs []FlowRun `json:"runs"`
 }
 
 // Loop modes for a card's step list.

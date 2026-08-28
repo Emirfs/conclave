@@ -265,6 +265,40 @@ CREATE INDEX runs_pipeline_idx ON runs(pipeline_id, id DESC);
 ALTER TABLE chat_responses ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE chat_responses ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0;
 `,
+	// 16: a message and everything that follows from it are one run. Turns
+	// carry the run they belong to, which is what lets a spreading exchange be
+	// counted and followed as one thing rather than as unrelated turns.
+	//
+	// A join node is a waiting point in that run: it holds what each incoming
+	// line said until they have all spoken, then hands the lot on as one
+	// message. Its inputs are per-run, because two runs may sit at the same
+	// join at once and must not be mixed.
+	`
+CREATE TABLE flow_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    origin_conversation_id INTEGER REFERENCES conversations(id) ON DELETE SET NULL,
+    status TEXT NOT NULL,
+    steps INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL DEFAULT ''
+);
+ALTER TABLE chat_turns ADD COLUMN flow_run_id INTEGER REFERENCES flow_runs(id) ON DELETE SET NULL;
+CREATE INDEX chat_turns_flow_idx ON chat_turns(flow_run_id, id);
+CREATE TABLE join_inputs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Not a foreign key: a turn from before runs existed carries no run, and
+    -- an answer relayed from one must still be able to reach a join. Runs clear
+    -- their own parked inputs when they end.
+    flow_run_id INTEGER NOT NULL,
+    node_id INTEGER NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+    source_node_id INTEGER NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+    source_title TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL,
+    arrived_at TEXT NOT NULL,
+    UNIQUE(flow_run_id, node_id, source_node_id)
+);
+CREATE INDEX join_inputs_node_idx ON join_inputs(node_id, flow_run_id);
+`,
 }
 
 func (s *Store) init() error {
@@ -334,6 +368,17 @@ func (s *Store) CreateConversationTurn(ctx context.Context, conversationID int64
 	}
 	turnID, err := insertTurn(ctx, tx, conversationID, prompt, providers, domain.TurnUser)
 	if err != nil {
+		return 0, err
+	}
+	// A person speaking starts a run: this message and everything that follows
+	// from it across the board are one thing, which is what makes the spread
+	// something you can watch and stop as a whole.
+	runID, err := s.StartFlowRun(ctx, tx, conversationID)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE chat_turns SET flow_run_id = ? WHERE id = ?", runID, turnID); err != nil {
 		return 0, err
 	}
 	// A person speaking is the answer a parked exchange was waiting for.
@@ -864,6 +909,8 @@ const (
 	noteHeight         = 180
 	pipelineWidth      = 360
 	pipelineHeight     = 300
+	joinWidth          = 220
+	joinHeight         = 150
 )
 
 // CreateConversation stores a conversation together with the canvas node that
@@ -1026,6 +1073,8 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 		Pipelines:     []domain.Pipeline{},
 		Nodes:         []domain.CanvasNode{},
 		Links:         []domain.CanvasLink{},
+		Joins:         []domain.JoinNode{},
+		Runs:          []domain.FlowRun{},
 	}
 	conversations, err := s.listConversations(ctx)
 	if err != nil {
@@ -1064,6 +1113,16 @@ func (s *Store) Canvas(ctx context.Context) (domain.Canvas, error) {
 		return canvas, err
 	}
 	canvas.Links = links
+	joins, err := s.listJoins(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Joins = joins
+	runs, err := s.ActiveFlowRuns(ctx)
+	if err != nil {
+		return canvas, err
+	}
+	canvas.Runs = runs
 	return canvas, nil
 }
 
@@ -1315,16 +1374,19 @@ func (s *Store) CreateLink(ctx context.Context, sourceID, targetID int64, option
 		return domain.CanvasLink{}, errors.New("a card cannot be linked to itself")
 	}
 	options = options.Normalised()
-	var conversations int
+	// A link carries an answer, so both ends must be something an answer can
+	// travel through: a card that speaks, or a join that waits for several.
+	var linkable int
 	err := s.db.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM canvas_nodes
-WHERE id IN (?, ?) AND kind = ? AND conversation_id IS NOT NULL`,
-		sourceID, targetID, domain.NodeConversation).Scan(&conversations)
+WHERE id IN (?, ?)
+  AND ((kind = ? AND conversation_id IS NOT NULL) OR kind = ?)`,
+		sourceID, targetID, domain.NodeConversation, domain.NodeJoin).Scan(&linkable)
 	if err != nil {
 		return domain.CanvasLink{}, err
 	}
-	if conversations != 2 {
-		return domain.CanvasLink{}, errors.New("only conversation cards can be linked")
+	if linkable != 2 {
+		return domain.CanvasLink{}, errors.New("only conversation cards and joins can be linked")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := s.db.ExecContext(ctx, `
@@ -1354,7 +1416,12 @@ ON CONFLICT(source_id, target_id) DO UPDATE SET
 	}
 	// "Dialogue" only means anything if the other card can answer back, so the
 	// return link is created with it rather than left for the user to notice.
-	if options.Mode == domain.LinkDialogue {
+	// A join has nothing to answer with, so a link through one stays one-way.
+	joined, err := s.linkTouchesJoin(ctx, sourceID, targetID)
+	if err != nil {
+		return domain.CanvasLink{}, err
+	}
+	if options.Mode == domain.LinkDialogue && !joined {
 		if err := s.ensureReverseLink(ctx, sourceID, targetID, options); err != nil {
 			return domain.CanvasLink{}, err
 		}
@@ -1527,46 +1594,113 @@ WHERE t.id = ?`, turnID).Scan(&conversationID, &depth, &sourceTitle, &sourceKind
 	if conversationID == 0 {
 		return 0, nil
 	}
-	payload, ready, err := s.RelayPayload(ctx, turnID)
-	if err != nil || !ready {
-		return 0, err
-	}
-
-	rows, err := s.db.QueryContext(ctx, `
-SELECT target.conversation_id, link.mode, link.max_rounds, link.until_done, link.briefing
-FROM canvas_links link
-JOIN canvas_nodes source ON source.id = link.source_id
-JOIN canvas_nodes target ON target.id = link.target_id
-WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conversationID)
+	runID, err := s.runOfTurn(ctx, turnID)
 	if err != nil {
 		return 0, err
 	}
-	type destination struct {
-		conversation int64
-		mode         string
-		maxRounds    int
-		untilDone    bool
-		briefing     string
+	payload, ready, err := s.RelayPayload(ctx, turnID)
+	if err != nil {
+		return 0, err
 	}
-	var targets []destination
-	for rows.Next() {
-		var item destination
-		if err := rows.Scan(&item.conversation, &item.mode, &item.maxRounds, &item.untilDone, &item.briefing); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		targets = append(targets, item)
+	if !ready {
+		// A turn that was stopped, or one still waiting on a sibling provider,
+		// hands nothing on. The first of those can be the last thing a run
+		// does, so the run still gets a chance to close.
+		return 0, s.maybeFinishRun(ctx, runID)
 	}
-	if err := rows.Close(); err != nil {
+	sourceNodeID, err := s.nodeOfConversation(ctx, conversationID)
+	if err != nil {
+		return 0, err
+	}
+
+	delivered, err := s.relayFrom(ctx, relaySource{
+		runID:          runID,
+		nodeID:         sourceNodeID,
+		conversationID: conversationID,
+		title:          sourceTitle,
+		turnKind:       sourceKind,
+		payload:        payload,
+		depth:          depth,
+	})
+	if err != nil {
+		return delivered, err
+	}
+	// The run ends when the board falls quiet, not when one card stops: a
+	// branch that finishes early must not close a run its sibling is still in.
+	if err := s.maybeFinishRun(ctx, runID); err != nil {
+		return delivered, err
+	}
+	return delivered, nil
+}
+
+// relaySource is one card's finished answer, on its way to whatever the board
+// links it to. It carries the run so everything downstream stays part of the
+// same journey, and the node rather than the conversation because a join has no
+// conversation of its own.
+type relaySource struct {
+	runID          int64
+	nodeID         int64
+	conversationID int64
+	title          string
+	turnKind       string
+	payload        string
+	depth          int
+	hop            int
+}
+
+// maxJoinHops bounds a chain of waiting points. Joins produce no turns, so the
+// run budget never sees them; a board wired join to join in a circle would
+// otherwise recurse without ever spending a step.
+const maxJoinHops = 8
+
+// relayFrom hands one answer to everything a node links to. A conversation
+// receives it as a turn; a join parks it until every line feeding that join has
+// spoken, and only then does the combined message travel on.
+func (s *Store) relayFrom(ctx context.Context, src relaySource) (int, error) {
+	if src.nodeID == 0 || src.hop > maxJoinHops {
+		return 0, nil
+	}
+	targets, err := s.relayTargets(ctx, src.nodeID)
+	if err != nil {
 		return 0, err
 	}
 
 	delivered := 0
 	for _, target := range targets {
+		if target.kind == domain.NodeJoin {
+			combined, ready, err := s.deliverToJoin(
+				ctx, src.runID, target.nodeID, src.nodeID, src.title, src.payload)
+			if err != nil {
+				return delivered, err
+			}
+			if !ready {
+				continue
+			}
+			count, err := s.relayFrom(ctx, relaySource{
+				runID:   src.runID,
+				nodeID:  target.nodeID,
+				title:   target.title,
+				payload: combined,
+				depth:   src.depth + 1,
+				hop:     src.hop + 1,
+			})
+			delivered += count
+			if err != nil {
+				return delivered, err
+			}
+			continue
+		}
+		if target.conversation == 0 {
+			continue
+		}
+
 		kind := domain.TurnRelay
 		nudge := false
-		if target.untilDone {
-			outcome, err := s.dialogueOutcome(ctx, conversationID, target.conversation, payload, sourceKind)
+		// An exchange that runs until it is done is a property of two talking
+		// cards. A message arriving from a join came from several at once, so
+		// there is no exchange to read an outcome from.
+		if target.untilDone && src.conversationID != 0 {
+			outcome, err := s.dialogueOutcome(ctx, src.conversationID, target.conversation, src.payload, src.turnKind)
 			if err != nil {
 				return delivered, err
 			}
@@ -1579,13 +1713,13 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 				if outcome == dialogueOutcomeParked {
 					state = domain.DialogueWaiting
 				}
-				if err := s.setDialogueState(ctx, conversationID, target.conversation, state); err != nil {
+				if err := s.setDialogueState(ctx, src.conversationID, target.conversation, state); err != nil {
 					return delivered, err
 				}
 				// The result of an exchange is buried at the bottom of a card
 				// nobody scrolled to. It goes on the board instead, next to the
 				// two cards that produced it.
-				if err := s.createOutcomeNote(ctx, conversationID, target.conversation, sourceTitle, payload, state); err != nil {
+				if err := s.createOutcomeNote(ctx, src.conversationID, target.conversation, src.title, src.payload, state); err != nil {
 					return delivered, err
 				}
 				continue
@@ -1598,15 +1732,25 @@ WHERE source.conversation_id = ? AND target.conversation_id IS NOT NULL`, conver
 			}
 		}
 		// Each link decides for itself when the exchange has gone far enough.
-		if !target.untilDone && depth >= target.maxRounds {
+		if !target.untilDone && src.depth >= target.maxRounds {
 			continue
 		}
-		briefing, err := s.takeBriefing(ctx, target.conversation, target.briefing, sourceTitle, target.mode, target.untilDone)
+		// The run budget is the width limit the per-link round count cannot be:
+		// it counts every turn the whole spread produces, not the length of one
+		// path through it.
+		allowed, err := s.countRunStep(ctx, src.runID)
 		if err != nil {
 			return delivered, err
 		}
-		prompt := framePayload(target.mode, sourceTitle, payload, briefing, nudge)
-		if err := s.createRelayTurn(ctx, target.conversation, prompt, depth+1, kind); err != nil {
+		if !allowed {
+			return delivered, nil
+		}
+		briefing, err := s.takeBriefing(ctx, target.conversation, target.briefing, src.title, target.mode, target.untilDone)
+		if err != nil {
+			return delivered, err
+		}
+		prompt := framePayload(target.mode, src.title, src.payload, briefing, nudge)
+		if err := s.createRelayTurn(ctx, target.conversation, prompt, src.depth+1, kind, src.runID); err != nil {
 			return delivered, err
 		}
 		delivered++
@@ -1922,7 +2066,7 @@ func (s *Store) setDialogueState(ctx context.Context, sourceID, targetID int64, 
 	return err
 }
 
-func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, prompt string, depth int, kind string) error {
+func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, prompt string, depth int, kind string, runID int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -1940,7 +2084,8 @@ func (s *Store) createRelayTurn(ctx context.Context, conversationID int64, promp
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		"UPDATE chat_turns SET relay_depth = ? WHERE id = ?", depth, turnID); err != nil {
+		"UPDATE chat_turns SET relay_depth = ?, flow_run_id = ? WHERE id = ?",
+		depth, sql.NullInt64{Int64: runID, Valid: runID != 0}, turnID); err != nil {
 		return err
 	}
 	return tx.Commit()
