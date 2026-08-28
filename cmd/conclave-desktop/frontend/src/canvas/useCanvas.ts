@@ -112,9 +112,13 @@ export function useCanvas(connected: boolean) {
   const [nodes, setNodes] = useState<BoardNode[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set())
+  const deletingRef = useRef(new Set<string>())
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const timers = useRef(new Map<string, number>())
+
+  const clearError = useCallback(() => setError(null), [])
 
   const load = useCallback(async () => {
     try {
@@ -243,10 +247,9 @@ export function useCanvas(connected: boolean) {
           ? current
           : next
       })
-      setError(null)
       setLoaded(true)
     } catch (cause) {
-      setError(String(cause))
+      setError(`Pano yüklenemedi: ${cause}`)
     }
   }, [])
 
@@ -274,7 +277,7 @@ export function useCanvas(connected: boolean) {
       key,
       window.setTimeout(() => {
         timers.current.delete(key)
-        PatchCanvasNode(patchInput).catch((cause) => setError(String(cause)))
+        PatchCanvasNode(patchInput).catch((cause) => setError(`Düğüm güncellenemedi: ${cause}`))
       }, PATCH_DEBOUNCE),
     )
   }, [])
@@ -283,10 +286,11 @@ export function useCanvas(connected: boolean) {
     async (input: domain.NewConversation) => {
       try {
         await CreateConversation(input)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Konuşma oluşturulamadı: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -295,18 +299,20 @@ export function useCanvas(connected: boolean) {
     async (input: domain.NewNote) => {
       try {
         await CreateNote(input)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Not oluşturulamadı: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
 
   const remove = useCallback(async (id: string) => {
+    if (deletingRef.current.has(id)) return
+    deletingRef.current.add(id)
+    setDeletingIds(new Set(deletingRef.current))
     const numeric = Number(id)
-    // Drop it locally first so the board feels immediate, then confirm.
-    setNodes((current) => current.filter((node) => node.id !== id))
     const pending = timers.current.get(id)
     if (pending) {
       window.clearTimeout(pending)
@@ -314,8 +320,12 @@ export function useCanvas(connected: boolean) {
     }
     try {
       await DeleteCanvasNode(numeric)
+      setNodes((current) => current.filter((node) => node.id !== id))
     } catch (cause) {
-      setError(String(cause))
+      setError(`Kart silinemedi: ${cause}`)
+    } finally {
+      deletingRef.current.delete(id)
+      setDeletingIds(new Set(deletingRef.current))
     }
   }, [])
 
@@ -337,10 +347,11 @@ export function useCanvas(connected: boolean) {
     async (sourceID: string, targetID: string) => {
       try {
         await LinkNodes(Number(sourceID), Number(targetID))
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Kartlar bağlanamadı: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -349,10 +360,11 @@ export function useCanvas(connected: boolean) {
     async (firstID: string, secondID: string, mode: string, rounds: number, briefing: string) => {
       try {
         await PairNodes(Number(firstID), Number(secondID), mode, rounds, briefing)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Kartlar eşleştirilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -361,10 +373,11 @@ export function useCanvas(connected: boolean) {
     async (id: string, mode: string, rounds: number, untilDone: boolean, briefing: string) => {
       try {
         await UpdateLink(Number(id), mode, rounds, untilDone, briefing)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Bağlantı güncellenemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -375,10 +388,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, providerName: string, model: string) => {
       try {
         await SetModel(conversationID, providerName, model)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Model kaydedilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -387,10 +401,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, role: string) => {
       try {
         await SetRole(conversationID, role)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Rol kaydedilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -401,10 +416,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, answer: string, providers: string[]) => {
       try {
         await Branch(conversationID, answer, providers)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Dallanma oluşturulamadı: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -424,10 +440,11 @@ export function useCanvas(connected: boolean) {
       try {
         await SetRole(source, sourceRole)
         await SetRole(target, targetRole)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Roller atanamadı: ${cause}`)
+        return
       }
+      await load()
     },
     [nodes, load],
   )
@@ -438,10 +455,11 @@ export function useCanvas(connected: boolean) {
     async (input: domain.NewPipeline) => {
       try {
         await CreatePipeline(input)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Pipeline oluşturulamadı: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -450,10 +468,11 @@ export function useCanvas(connected: boolean) {
     async (pipelineID: number, config: domain.PipelineConfig) => {
       try {
         await SetPipeline(pipelineID, config)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Pipeline kaydedilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -464,34 +483,48 @@ export function useCanvas(connected: boolean) {
     async (pipelineID: number) => {
       try {
         await StartPipeline(pipelineID)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Pipeline başlatılamadı: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
 
   const pickPipelineProject = useCallback(
-    async (pipelineID: number, current: string) => {
+    async (
+      pipelineID: number,
+      current: string,
+      draft?: { title: string; stages: domain.PipelineStage[] },
+    ) => {
+      let chosen = ''
       try {
-        const chosen = await PickProjectDirectory(current)
-        if (!chosen) return
-        // The project is one field of a whole-pipeline write, so the rest of
-        // the definition has to be carried over from what is on the board.
-        const node = nodes.find(
-          (item) => item.data.kind === 'pipeline' && item.data.pipeline.id === pipelineID,
-        )
-        const pipeline = node?.data.kind === 'pipeline' ? node.data.pipeline : undefined
-        await SetPipeline(pipelineID, {
-          title: pipeline?.title ?? 'Pipeline',
-          project_path: chosen,
-          stages: pipeline?.stages ?? [],
-        } as domain.PipelineConfig)
-        await load()
+        chosen = await PickProjectDirectory(current)
       } catch (cause) {
-        setError(String(cause))
+        setError(`Dizin seçilemedi: ${cause}`)
+        return
       }
+      if (!chosen) return
+      // The project is one field of a whole-pipeline write, so the rest of
+      // the definition has to be carried over from what is on the board or in the local draft.
+      const node = nodes.find(
+        (item) => item.data.kind === 'pipeline' && item.data.pipeline.id === pipelineID,
+      )
+      const pipeline = node?.data.kind === 'pipeline' ? node.data.pipeline : undefined
+      const title = draft?.title ?? pipeline?.title ?? 'Pipeline'
+      const stages = draft?.stages ?? pipeline?.stages ?? []
+      try {
+        await SetPipeline(pipelineID, {
+          title,
+          project_path: chosen,
+          stages,
+        } as domain.PipelineConfig)
+      } catch (cause) {
+        setError(`Pipeline projesi seçilemedi: ${cause}`)
+        return
+      }
+      await load()
     },
     [load, nodes],
   )
@@ -503,7 +536,7 @@ export function useCanvas(connected: boolean) {
       try {
         return await ExportConversation(conversationID, title)
       } catch (cause) {
-        setError(String(cause))
+        setError(`Konuşma dışa aktarılamadı: ${cause}`)
         return ''
       }
     },
@@ -514,7 +547,7 @@ export function useCanvas(connected: boolean) {
     try {
       return await ExportBoard()
     } catch (cause) {
-      setError(String(cause))
+      setError(`Pano dışa aktarılamadı: ${cause}`)
       return ''
     }
   }, [])
@@ -527,8 +560,8 @@ export function useCanvas(connected: boolean) {
       await load()
       return result
     } catch (cause) {
-      setError(String(cause))
-      return null
+      setError(`Pano içe aktarılamadı: ${cause}`)
+      return undefined
     }
   }, [load])
 
@@ -539,7 +572,7 @@ export function useCanvas(connected: boolean) {
     try {
       return (await Search(query, limit)) ?? []
     } catch (cause) {
-      setError(String(cause))
+      setError(`Arama yapılamadı: ${cause}`)
       return []
     }
   }, [])
@@ -551,10 +584,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number) => {
       try {
         await CancelConversation(conversationID)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Konuşma durdurulamadı: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -565,10 +599,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number) => {
       try {
         await ResumeDialogue(conversationID)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Konuşma devam ettirilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -577,10 +612,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, config: domain.LoopConfig) => {
       try {
         await SetLoop(conversationID, config)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Döngü kaydedilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -589,10 +625,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, running: boolean) => {
       try {
         await SetLoopRunning(conversationID, running)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Döngü durumu değiştirilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -603,7 +640,7 @@ export function useCanvas(connected: boolean) {
       try {
         await UnlinkNodes(Number(id))
       } catch (cause) {
-        setError(String(cause))
+        setError(`Bağlantı kaldırılamadı: ${cause}`)
       }
     },
     [],
@@ -611,15 +648,22 @@ export function useCanvas(connected: boolean) {
 
   const pickProject = useCallback(
     async (conversationID: number, current: string) => {
+      let chosen = ''
       try {
-        const chosen = await PickProjectDirectory(current)
-        // An empty result means the dialog was cancelled; leave the card alone.
-        if (!chosen) return
-        await SetProject(conversationID, chosen, 'edit')
-        await load()
+        chosen = await PickProjectDirectory(current)
       } catch (cause) {
-        setError(String(cause))
+        setError(`Dizin seçilemedi: ${cause}`)
+        return
       }
+      // An empty result means the dialog was cancelled; leave the card alone.
+      if (!chosen) return
+      try {
+        await SetProject(conversationID, chosen, 'edit')
+      } catch (cause) {
+        setError(`Proje seçilemedi: ${cause}`)
+        return
+      }
+      await load()
     },
     [load],
   )
@@ -628,10 +672,11 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, project: string, access: string) => {
       try {
         await SetProject(conversationID, project, access)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Proje erişimi değiştirilemedi: ${cause}`)
+        return
       }
+      await load()
     },
     [load],
   )
@@ -640,24 +685,25 @@ export function useCanvas(connected: boolean) {
     async (conversationID: number, prompt: string) => {
       try {
         await SendTurn(conversationID, prompt)
-        await load()
       } catch (cause) {
-        setError(String(cause))
+        setError(`Mesaj gönderilemedi: ${cause}`)
+        throw cause
       }
+      await load()
     },
     [load],
   )
 
   return useMemo(
     () => ({
-      nodes, setNodes, edges, error, loaded, load, patch,
+      nodes, setNodes, edges, error, clearError, deletingIds, loaded, load, patch,
       addConversation, addNote, remove, setNoteBody, send, link, unlink,
       pickProject, setAccess, pair, configureLink, saveLoop, toggleLoop,
       addPipeline, savePipeline, runPipeline, pickPipelineProject,
       exportConversation, exportBoard, importBoard,
       saveRole, saveModel, resumeDialogue, cancelConversation, search, assignRoles, branch,
     }),
-    [nodes, edges, error, loaded, load, patch, addConversation, addNote, remove,
+    [nodes, edges, error, clearError, deletingIds, loaded, load, patch, addConversation, addNote, remove,
      setNoteBody, send, link, unlink, pickProject, setAccess, pair, configureLink,
      saveLoop, toggleLoop, saveRole, saveModel, resumeDialogue, cancelConversation, search,
      addPipeline, savePipeline, runPipeline, pickPipelineProject,

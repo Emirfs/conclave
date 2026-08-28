@@ -10,9 +10,14 @@ type Props = NodeProps & {
   data: PipelineNodeData & {
     onSave: (pipelineID: number, config: domain.PipelineConfig) => Promise<void>
     onRun: (pipelineID: number) => Promise<void>
-    onPickProject: (pipelineID: number, current: string) => Promise<void>
+    onPickProject: (
+      pipelineID: number,
+      current: string,
+      draft?: { title: string; stages: domain.PipelineStage[] },
+    ) => Promise<void>
     onClose: (id: string) => void
     onResize: (id: string, direction: -1 | 1) => void
+    deleting?: boolean
   }
 }
 
@@ -25,11 +30,15 @@ const STATUS_LABELS: Record<string, string> = {
   canceled: 'durduruldu',
 }
 
+export function normalizeStages(stagesToFilter: domain.PipelineStage[]): domain.PipelineStage[] {
+  return stagesToFilter.filter((stage) => stage.command.trim() !== '')
+}
+
 /** A pipeline card: an ordered list of commands run in a project, stopping at
  *  the first failure. It has no provider and no transcript — deterministic work
  *  is exactly what a conversation card is not. */
 export const PipelineNode = memo(function PipelineNode({ id, data, selected }: Props) {
-  const { pipeline, onSave, onRun, onPickProject, onClose, onResize } = data
+  const { pipeline, onSave, onRun, onPickProject, onClose, onResize, deleting } = data
   const card = useRef<HTMLDivElement>(null)
   const saved = pipeline.stages ?? []
   const [stages, setStages] = useState<domain.PipelineStage[]>(saved)
@@ -52,13 +61,13 @@ export const PipelineNode = memo(function PipelineNode({ id, data, selected }: P
     void onSave(pipeline.id, {
       title,
       project_path: project,
-      stages: stages.filter((stage) => stage.command.trim() !== ''),
+      stages: normalizeStages(stages),
     } as domain.PipelineConfig)
 
   return (
     <div
       ref={card}
-      className={`node node--pipeline${selected ? ' node--selected' : ''}`}
+      className={`node node--pipeline${selected ? ' node--selected' : ''}${deleting ? ' node--deleting' : ''}`}
     >
       <NodeResizer
         minWidth={320}
@@ -88,7 +97,12 @@ export const PipelineNode = memo(function PipelineNode({ id, data, selected }: P
       <div className="node__toolbar">
         <button
           className="node__chip nodrag"
-          onClick={() => void onPickProject(pipeline.id, project)}
+          onClick={() =>
+            void onPickProject(pipeline.id, project, {
+              title,
+              stages: normalizeStages(stages),
+            })
+          }
           title={project || 'Komutların çalışacağı dizini seç'}
         >
           {project ? project.split(/[\\/]/).pop() : 'proje seç'}

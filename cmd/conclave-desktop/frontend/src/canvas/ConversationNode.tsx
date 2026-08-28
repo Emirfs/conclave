@@ -29,6 +29,7 @@ type Props = NodeProps & {
     /** Puts text on the board as its own note card, next to this one. */
     onPinNote: (body: string) => void
     onResize: (id: string, direction: -1 | 1) => void
+    deleting?: boolean
   }
 }
 
@@ -37,7 +38,7 @@ type Tab = 'chat' | 'changes' | 'tests'
 export const ConversationNode = memo(function ConversationNode({ id, data, selected }: Props) {
   const { conversation, onSend, onClose, onPickProject, onToggleAccess, onSaveLoop, onToggleLoop,
     onSaveRole, onSaveModel, onResumeDialogue, onCancel, onExport, onBranch,
-    onPinNote, onResize } = data
+    onPinNote, onResize, deleting } = data
   const project = conversation.project_path ?? ''
   const access = conversation.access ?? 'edit'
   const [tab, setTab] = useState<Tab>('chat')
@@ -83,15 +84,17 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
 
   const send = useCallback(async () => {
     const prompt = draft.trim()
-    if (!prompt || sending) return
+    if (!prompt || sending || deleting) return
     setSending(true)
     try {
       await onSend(conversation.id, prompt)
       setDraft('')
+    } catch {
+      // Keep draft on send failure
     } finally {
       setSending(false)
     }
-  }, [conversation.id, draft, onSend, sending])
+  }, [conversation.id, draft, onSend, sending, deleting])
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -109,7 +112,7 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
   return (
     <div
       ref={card}
-      className={`node node--conversation${selected ? ' node--selected' : ''}`}
+      className={`node node--conversation${selected ? ' node--selected' : ''}${deleting ? ' node--deleting' : ''}`}
       style={{ ['--node-accent' as string]: group ? 'var(--accent)' : lead.accent }}
     >
       <NodeResizer

@@ -102,8 +102,68 @@
   box-shadow: var(--shadow-float);
 }
 
-.node:hover:not(.node--selected) {
+.node--deleting {
+  opacity: 0.45;
+  pointer-events: none;
+  filter: grayscale(0.5);
+}
+
+.node:hover:not(.node--selected):not(.node--deleting) {
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.62);
+}
+
+/* ---------- board error banner ---------- */
+
+.board-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 600px;
+  margin-top: 12px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--negative) 16%, var(--surface-raised));
+  border: 1px solid color-mix(in srgb, var(--negative) 45%, var(--line));
+  box-shadow: var(--shadow-float);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  z-index: 10;
+  animation: node-enter 180ms var(--ease-out) both;
+}
+
+.board-error__icon {
+  flex: none;
+  color: var(--negative);
+  font-weight: 700;
+}
+
+.board-error__text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.board-error__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  cursor: default;
+  transition: background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease), border-color var(--duration-fast) var(--ease);
+}
+
+.board-error__close:hover {
+  background: var(--surface-overlay);
+  border-color: var(--line);
+  color: var(--text-primary);
 }
 
 @keyframes node-enter {
@@ -1203,21 +1263,29 @@
   cursor: grabbing;
 }
 
-/* A note is one big textarea, so it needs a strip of its own to be grabbed. */
+/* A note is one big textarea, so it needs a strip of its own to be grabbed.
+   A note is only 240px wide and this strip carries three text buttons plus the
+   size and close controls, so it has to be allowed to wrap instead of running
+   off the edge. The height follows the content for the same reason. */
 .node__grip--note {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
   flex: none;
-  height: 22px;
-  padding: 0 6px;
+  min-height: 22px;
+  padding: 2px 6px;
   border-bottom: 1px solid color-mix(in srgb, var(--note-accent) 22%, transparent);
 }
 
 .node__grip-dots {
-  flex: 1;
-  height: 100%;
+  /* The dots are the grab target and give way first: they shrink to nothing
+     before a button is pushed off the strip. */
+  flex: 1 1 24px;
+  min-width: 12px;
+  align-self: stretch;
+  min-height: 18px;
   /* Two rows of faint dots read as "grab here" without adding an icon. */
   background-image: radial-gradient(
     circle,
@@ -2586,4 +2654,67 @@
   flex: none;
   text-align: right;
   font-family: var(--font-mono);
+}
+
+/* ---------- deletion confirmation ---------- */
+
+/* The panel wrapper only positions; the look lives on .confirm so the panel
+   keeps no padding of its own to fight with. */
+.confirmpanel {
+  margin-top: 12px;
+}
+
+.confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 560px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--negative) 45%, var(--line));
+  background: color-mix(in srgb, var(--negative) 14%, var(--surface-raised));
+  box-shadow: var(--shadow-float);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  animation: node-enter 140ms var(--ease-out) both;
+}
+
+.confirm__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.confirm__accept,
+.confirm__cancel {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+/* The destructive choice is the one named after the act, and it is the one
+   Enter reaches, so it says plainly what it will do. */
+.confirm__accept {
+  border: 1px solid color-mix(in srgb, var(--negative) 60%, transparent);
+  background: color-mix(in srgb, var(--negative) 22%, transparent);
+  color: var(--text-primary);
+}
+
+.confirm__accept:hover,
+.confirm__accept:focus-visible {
+  background: color-mix(in srgb, var(--negative) 34%, transparent);
+  outline: none;
+}
+
+.confirm__cancel {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.confirm__cancel:hover {
+  color: var(--text-primary);
+  border-color: var(--line-strong);
 }
