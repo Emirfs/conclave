@@ -48,6 +48,11 @@ type StreamUpdate struct {
 	// everything on the input side, cached or not. It grows with the session,
 	// which is what makes it a usable measure of how full the window is.
 	ContextTokens int
+	// InputTokens and OutputTokens are what this one turn cost. Unlike
+	// ContextTokens they do not grow with the session, which is what makes them
+	// addable: a week of turns sums to a week of usage.
+	InputTokens  int
+	OutputTokens int
 }
 
 // DecodeStreamLine interprets a single line of provider output. Unrecognised
@@ -102,6 +107,8 @@ func decodeClaude(payload map[string]any) StreamUpdate {
 		update.ContextTokens = int(number(usage, "input_tokens") +
 			number(usage, "cache_read_input_tokens") +
 			number(usage, "cache_creation_input_tokens"))
+		update.InputTokens = update.ContextTokens
+		update.OutputTokens = int(number(usage, "output_tokens"))
 		if failed, _ := payload["is_error"].(bool); failed {
 			update.Failure = update.Final
 			update.Final = ""
@@ -157,7 +164,12 @@ func decodeCodex(payload map[string]any) StreamUpdate {
 		// Codex counts cached input inside input_tokens, so this is already the
 		// whole input side of the turn.
 		usage, _ := payload["usage"].(map[string]any)
-		return StreamUpdate{ContextTokens: int(number(usage, "input_tokens"))}
+		input := int(number(usage, "input_tokens"))
+		return StreamUpdate{
+			ContextTokens: input,
+			InputTokens:   input,
+			OutputTokens:  int(number(usage, "output_tokens")),
+		}
 	case "error":
 		return StreamUpdate{Failure: text(payload, "message")}
 	}
@@ -189,6 +201,8 @@ func decodeAntigravity(payload map[string]any) StreamUpdate {
 		// only adds up with both.
 		usage, _ := result["usage"].(map[string]any)
 		update.ContextTokens = int(number(usage, "input_tokens") + number(usage, "cache_read_tokens"))
+		update.InputTokens = update.ContextTokens
+		update.OutputTokens = int(number(usage, "output_tokens"))
 		if status := text(result, "status"); status != "" && status != "SUCCESS" {
 			update.Failure = "provider reported status " + status
 			update.Final = ""

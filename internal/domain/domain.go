@@ -18,6 +18,28 @@ const (
 	StatusCanceled Status = "canceled"
 )
 
+// UsageReport is what the board has spent, per provider, over a window. It is
+// the addable counterpart to Quota: a provider's own allowance report says how
+// full a window is right now, while this says what was actually done.
+type UsageReport struct {
+	// Days is the window the totals cover, counted back from now.
+	Days      int             `json:"days"`
+	Providers []ProviderUsage `json:"providers"`
+}
+
+type ProviderUsage struct {
+	Provider string `json:"provider"`
+	// Turns is how many responses this provider produced in the window,
+	// finished or failed.
+	Turns        int `json:"turns"`
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	// Cards is how many different cards the provider worked on.
+	Cards int `json:"cards"`
+	// Quota is the provider's own last allowance report, when it offers one.
+	Quota *Quota `json:"quota,omitempty"`
+}
+
 // BoardExportVersion is the shape of an exported board. It is written into
 // every export and checked on import: a file from a newer build describes
 // things this one has no place to put.

@@ -43,6 +43,11 @@ nodes the daemon persists, so a layout survives a restart.
   decide and go on. Two such requests in a row park the dialogue for the user.
 - A role is only text in the briefing. It never changes a card's access or what it may decide, so any
   provider can take any position in a workflow.
+- What a turn cost and how full a window is are different numbers off the same event. Per-response
+  input and output tokens are addable across turns and are the basis of the usage report; the
+  session's context size grows with the session and is last-value-wins. Never sum the second.
+  Usage is recorded even for a failed run: a turn that burned a window and then errored still
+  burned it.
 - Context size is read from each provider's own usage report. A large window restates the card's role;
   a full one drops the provider session and lets the transcript carry the conversation into a new one.
 - A finished exchange leaves its result on the board as its own card. The conclusion of a dialogue is

@@ -125,6 +125,11 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 	if outcome.quota != nil {
 		_ = d.store.RecordProviderQuota(persist, job.Provider, *outcome.quota)
 	}
+	// What this turn cost, as the provider reported it. Recorded even for a
+	// failed run: a turn that burned a window and then errored still burned it.
+	if outcome.inputTokens > 0 || outcome.outputTokens > 0 {
+		_ = d.store.RecordChatUsage(persist, job.ResponseID, outcome.inputTokens, outcome.outputTokens)
+	}
 	if outcome.sessionID != "" {
 		_ = d.store.RecordProviderSession(persist, job.ConversationID, job.Provider, outcome.sessionID, job.Model)
 	}
@@ -213,6 +218,9 @@ type chatResult struct {
 	quota     *provider.Quota
 	// contextTokens is how full the provider's context window was on this turn.
 	contextTokens int
+	// inputTokens and outputTokens are what this one turn cost.
+	inputTokens  int
+	outputTokens int
 }
 
 // executeChat runs a provider and reads its stdout line by line so a streaming
@@ -268,7 +276,11 @@ func (d *Daemon) executeChat(parent context.Context, project string, invocation 
 		if failure == "" {
 			failure = err.Error()
 		}
-		return chatResult{failure: failure, sessionID: result.sessionID, quota: result.quota}
+		// The answer is gone but what the turn cost is not: a run that burned a
+		// window and then failed still burned it.
+		result.content = ""
+		result.failure = failure
+		return result
 	}
 	if result.failure != "" {
 		return result
@@ -311,6 +323,12 @@ func (d *Daemon) consumeStream(stdout io.Reader, format provider.StreamFormat, p
 		}
 		if update.ContextTokens > 0 {
 			result.contextTokens = update.ContextTokens
+		}
+		if update.InputTokens > 0 {
+			result.inputTokens = update.InputTokens
+		}
+		if update.OutputTokens > 0 {
+			result.outputTokens = update.OutputTokens
 		}
 		if update.Delta != "" && !capped {
 			if accumulated.Len()+len(update.Delta) > maxOutputBytes {

@@ -46,6 +46,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/turns", s.createTurn)
 	mux.HandleFunc("GET /v1/canvas", s.canvas)
 	mux.HandleFunc("GET /v1/search", s.search)
+	mux.HandleFunc("GET /v1/usage", s.usage)
 	mux.HandleFunc("GET /v1/canvas/conversations/{id}/export", s.exportConversation)
 	mux.HandleFunc("GET /v1/canvas/export", s.exportBoard)
 	mux.HandleFunc("POST /v1/canvas/import", s.importBoard)
@@ -492,6 +493,26 @@ func (s *Server) providerModels(response http.ResponseWriter, request *http.Requ
 // without the user having to remember what it was waiting for.
 // exportConversation renders one card's whole transcript as Markdown. It is
 // text, not JSON: what comes out is meant to be read and kept.
+// usage reports what each provider spent over a window, together with its own
+// allowance report. It is a read and answers from SQLite, so a panel may poll.
+func (s *Server) usage(response http.ResponseWriter, request *http.Request) {
+	days := 7
+	if raw := request.URL.Query().Get("days"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			writeError(response, http.StatusBadRequest, errors.New("days must be a positive integer"))
+			return
+		}
+		days = parsed
+	}
+	report, err := s.store.Usage(request.Context(), days)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, report)
+}
+
 // boardImportOffset is how far an imported board lands from the origin, so it
 // does not arrive on top of what is already on the canvas.
 const boardImportOffset = 120
@@ -1031,6 +1052,12 @@ func (c *Client) ProviderModels(ctx context.Context, name string) (domain.Provid
 		return domain.ProviderModels{}, err
 	}
 	return models, nil
+}
+
+func (c *Client) Usage(ctx context.Context, days int) (domain.UsageReport, error) {
+	var report domain.UsageReport
+	err := c.do(ctx, http.MethodGet, "/v1/usage?days="+strconv.Itoa(days), nil, &report, http.StatusOK)
+	return report, err
 }
 
 func (c *Client) ExportConversation(ctx context.Context, conversationID int64) (string, error) {

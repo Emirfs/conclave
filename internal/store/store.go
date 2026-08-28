@@ -257,6 +257,14 @@ ALTER TABLE runs ADD COLUMN pipeline_id INTEGER REFERENCES pipelines(id) ON DELE
 CREATE INDEX canvas_nodes_pipeline_idx ON canvas_nodes(pipeline_id);
 CREATE INDEX runs_pipeline_idx ON runs(pipeline_id, id DESC);
 `,
+	// 15: what one turn cost, as the provider reported it. Unlike
+	// provider_sessions.context_tokens, which grows with a session and is
+	// last-value-wins, these are per-response and therefore addable: a week of
+	// turns sums to a week of usage.
+	`
+ALTER TABLE chat_responses ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE chat_responses ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 func (s *Store) init() error {
@@ -511,6 +519,16 @@ ORDER BY t.id DESC LIMIT 8`, turnID, provider, conversationID, turnID, turnID, d
 		}
 	}
 	return prompt.String(), nil
+}
+
+// RecordChatUsage stores what one turn cost. It is written apart from the
+// answer because a provider reports usage on its own event, which may arrive
+// before the run is finished — or, on a failure, instead of a finished answer.
+func (s *Store) RecordChatUsage(ctx context.Context, id int64, input, output int) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE chat_responses SET input_tokens = ?, output_tokens = ? WHERE id = ?",
+		input, output, id)
+	return err
 }
 
 func (s *Store) FinishChatResponse(ctx context.Context, id int64, status domain.Status, content, failure string) error {

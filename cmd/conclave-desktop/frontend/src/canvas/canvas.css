@@ -2424,3 +2424,161 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* What the board spent, next to what each provider says is left. It lives in
+   the rail rather than over the canvas: it is a thing you glance at between
+   turns, not something to work on top of. */
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 8px;
+  padding: 9px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-overlay);
+}
+
+.usage__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage__title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.usage__windows {
+  display: flex;
+  gap: 3px;
+}
+
+.usage__window {
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.usage__window--active {
+  border-color: var(--line-strong);
+  color: var(--text-primary);
+}
+
+.usage__close {
+  padding: 2px 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.usage__close:hover {
+  color: var(--text-primary);
+}
+
+.usage__empty,
+.usage__error {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.usage__error {
+  color: var(--negative);
+}
+
+.usage__row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.usage__row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.usage__provider {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.usage__tokens {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.usage__bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface-void);
+  overflow: hidden;
+}
+
+.usage__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--usage-accent, var(--accent));
+}
+
+.usage__detail {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.usage__quota {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.usage__quota-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.usage__quota-label {
+  width: 42px;
+  flex: none;
+}
+
+.usage__quota-bar {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface-void);
+  overflow: hidden;
+}
+
+.usage__quota-fill {
+  display: block;
+  height: 100%;
+  background: var(--warning);
+}
+
+.usage__quota-value {
+  width: 32px;
+  flex: none;
+  text-align: right;
+  font-family: var(--font-mono);
+}

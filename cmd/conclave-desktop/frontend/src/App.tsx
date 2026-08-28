@@ -7,6 +7,7 @@ import { providerStyle } from './providers'
 import { Board } from './canvas/Board'
 import { useCanvas } from './canvas/useCanvas'
 import { UpdateBanner } from './UpdateBanner'
+import { UsagePanel } from './UsagePanel'
 import './canvas/canvas.css'
 
 type Connection = 'connecting' | 'online' | 'offline'
@@ -18,6 +19,7 @@ export function App() {
   const [connection, setConnection] = useState<Connection>('connecting')
   const [error, setError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
+  const [usageOpen, setUsageOpen] = useState(false)
   // Guards against a slow response from a previous poll overwriting a newer one.
   const generation = useRef(0)
 
@@ -124,6 +126,9 @@ export function App() {
             <button className="button button--block" onClick={() => void canvas.importBoard()}>
               İçe aktar
             </button>
+            <button className="button button--block" onClick={() => setUsageOpen((open) => !open)}>
+              {usageOpen ? 'Kullanımı gizle' : 'Kullanım'}
+            </button>
             <p className="rail__hint">
               İçe aktarma hiçbir şeyin yerine geçmez: dosyadaki kartlar panoda
               duranların yanına eklenir.
@@ -134,6 +139,9 @@ export function App() {
               İki kart seç, bağlama düğmeleri çıksın.
             </p>
           </section>
+          {usageOpen && (
+            <UsagePanel online={connection === 'online'} onClose={() => setUsageOpen(false)} />
+          )}
           {memory.length > 0 && <ProviderGroup heading="Bellek" providers={memory} />}
         </aside>
         <main className={connection === 'online' ? 'stage stage--board' : 'stage'}>

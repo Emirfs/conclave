@@ -141,3 +141,7 @@ export function UpdateLink(arg1, arg2, arg3, arg4, arg5) {
 export function UpdateStatus() {
   return window['go']['main']['App']['UpdateStatus']();
 }
+
+export function Usage(arg1) {
+  return window['go']['main']['App']['Usage'](arg1);
+}

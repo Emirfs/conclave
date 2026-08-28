@@ -73,3 +73,5 @@ export function UnlinkNodes(arg1:number):Promise<void>;
 export function UpdateLink(arg1:number,arg2:string,arg3:number,arg4:boolean,arg5:string):Promise<void>;
 
 export function UpdateStatus():Promise<update.Status>;
+
+export function Usage(arg1:number):Promise<domain.UsageReport>;

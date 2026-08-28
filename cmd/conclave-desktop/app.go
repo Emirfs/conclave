@@ -244,6 +244,17 @@ func (a *App) Branch(conversationID int64, answer string, providers []string) ([
 }
 
 // ResumeDialogue clears a parked exchange so the next message starts it again.
+// Usage reports what each provider spent over the last few days.
+func (a *App) Usage(days int) (domain.UsageReport, error) {
+	client, err := a.client()
+	if err != nil {
+		return domain.UsageReport{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+	return client.Usage(ctx, days)
+}
+
 // ExportConversation writes a card's transcript to a Markdown file the user
 // picks. It returns the chosen path, or an empty string when the dialog was
 // cancelled — a cancel is not an error.

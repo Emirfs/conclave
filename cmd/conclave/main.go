@@ -53,6 +53,8 @@ func run(arguments []string) error {
 		return searchBoard(arguments)
 	case "export":
 		return exportBoard(arguments)
+	case "usage":
+		return reportUsage(arguments)
 	case "version", "-v", "--version":
 		fmt.Println(version.Version)
 		return nil
@@ -144,6 +146,41 @@ func runDaemon(arguments []string) error {
 		return nil
 	}
 	return err
+}
+
+// reportUsage prints what each provider spent over a window, next to whatever
+// allowance it reports about itself.
+func reportUsage(arguments []string) error {
+	flags := flag.NewFlagSet("usage", flag.ContinueOnError)
+	jsonOutput := flags.Bool("json", false, "emit JSON")
+	days := flags.Int("days", 7, "how many days back to total")
+	address := flags.String("address", defaultAddress, "daemon address")
+	tokenFile := flags.String("token-file", statedir.TokenPath(), "daemon token file")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	token, err := statedir.ReadToken(*tokenFile)
+	if err != nil {
+		return err
+	}
+	report, err := api.NewClient("http://"+*address, token).Usage(context.Background(), *days)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	if len(report.Providers) == 0 {
+		fmt.Printf("no turns in the last %d days\n", report.Days)
+		return nil
+	}
+	for _, item := range report.Providers {
+		fmt.Printf("%-12s %4d turns  %9d in  %9d out  %d cards\n",
+			item.Provider, item.Turns, item.InputTokens, item.OutputTokens, item.Cards)
+	}
+	return nil
 }
 
 // exportBoard writes the board, or one card's transcript, to stdout. Redirecting
@@ -394,5 +431,5 @@ func isLoopbackAddress(address string) bool {
 }
 
 func usage() {
-	fmt.Println("conclave [status|daemon|run|chat|search|export|update|version] [options]")
+	fmt.Println("conclave [status|daemon|run|chat|search|export|usage|update|version] [options]")
 }
