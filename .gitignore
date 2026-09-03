@@ -18,3 +18,7 @@ config.local.*
 !/cmd/conclave-desktop/frontend/dist/.gitkeep
 /cmd/conclave-desktop/frontend/tsconfig.tsbuildinfo
 /cmd/conclave-desktop/frontend/package.json.md5
+desktop.ini
+Thumbs.db
+.tmp.driveupload/
+.tmp.drivedownload/
