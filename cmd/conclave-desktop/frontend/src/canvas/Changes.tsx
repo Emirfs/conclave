@@ -125,27 +125,107 @@ function codeClass(change: vcs.Change): string {
   return 'dirty'
 }
 
-/** Renders a unified diff. Line prefixes carry all the meaning, so colouring
- *  them is enough to read a patch. */
-function Patch({ patch, truncated }: { patch: string; truncated: boolean }) {
-  const lines = patch.split('\n')
-  return (
-    <pre className="patch nowheel">
-      {lines.map((line, index) => (
-        <span key={index} className={`patch__line patch__line--${lineClass(line)}`}>
-          {line || ' '}
-        </span>
-      ))}
-      {truncated && <span className="patch__line patch__line--meta">[kısaltıldı]</span>}
-    </pre>
-  )
+interface ParsedDiffLine {
+  type: 'meta' | 'hunk' | 'add' | 'remove' | 'context'
+  oldLine: number | null
+  newLine: number | null
+  text: string
 }
 
-function lineClass(line: string): string {
-  if (line.startsWith('+++') || line.startsWith('---')) return 'meta'
-  if (line.startsWith('@@')) return 'hunk'
-  if (line.startsWith('diff ') || line.startsWith('index ')) return 'meta'
-  if (line.startsWith('+')) return 'add'
-  if (line.startsWith('-')) return 'remove'
-  return 'context'
+function parseUnifiedDiff(patch: string): {
+  lines: ParsedDiffLine[]
+  additions: number
+  deletions: number
+} {
+  const rawLines = patch.split('\n')
+  const lines: ParsedDiffLine[] = []
+  let additions = 0
+  let deletions = 0
+
+  let curOld = 0
+  let curNew = 0
+
+  for (const line of rawLines) {
+    if (line.startsWith('@@')) {
+      const match = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
+      if (match) {
+        curOld = parseInt(match[1], 10)
+        curNew = parseInt(match[2], 10)
+      }
+      lines.push({ type: 'hunk', oldLine: null, newLine: null, text: line })
+    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      additions++
+      lines.push({ type: 'add', oldLine: null, newLine: curNew++, text: line.slice(1) })
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      deletions++
+      lines.push({ type: 'remove', oldLine: curOld++, newLine: null, text: line.slice(1) })
+    } else if (line.startsWith(' ') || line === '') {
+      lines.push({
+        type: 'context',
+        oldLine: curOld++,
+        newLine: curNew++,
+        text: line.startsWith(' ') ? line.slice(1) : line,
+      })
+    } else {
+      lines.push({ type: 'meta', oldLine: null, newLine: null, text: line })
+    }
+  }
+
+  return { lines, additions, deletions }
+}
+
+/** Renders a syntax-highlighted unified diff with line number gutters. */
+function Patch({ patch, truncated }: { patch: string; truncated: boolean }) {
+  const { lines, additions, deletions } = parseUnifiedDiff(patch)
+
+  return (
+    <div className="diff-viewer nowheel">
+      <div className="diff-viewer__stats">
+        <span className="diff-viewer__pill diff-viewer__pill--add">+{additions} satır</span>
+        <span className="diff-viewer__pill diff-viewer__pill--del">-{deletions} satır</span>
+      </div>
+      <div className="diff-viewer__table">
+        {lines.map((item, index) => {
+          if (item.type === 'meta') {
+            return (
+              <div key={index} className="diff-row diff-row--meta">
+                <span className="diff-row__gutter" />
+                <span className="diff-row__gutter" />
+                <span className="diff-row__marker"> </span>
+                <span className="diff-row__content">{item.text}</span>
+              </div>
+            )
+          }
+          if (item.type === 'hunk') {
+            return (
+              <div key={index} className="diff-row diff-row--hunk">
+                <span className="diff-row__gutter">…</span>
+                <span className="diff-row__gutter">…</span>
+                <span className="diff-row__marker">@</span>
+                <span className="diff-row__content">{item.text}</span>
+              </div>
+            )
+          }
+          return (
+            <div key={index} className={`diff-row diff-row--${item.type}`}>
+              <span className="diff-row__gutter">{item.oldLine ?? ''}</span>
+              <span className="diff-row__gutter">{item.newLine ?? ''}</span>
+              <span className="diff-row__marker">
+                {item.type === 'add' ? '+' : item.type === 'remove' ? '-' : ' '}
+              </span>
+              <span className="diff-row__content">{item.text || ' '}</span>
+            </div>
+          )
+        })}
+        {truncated && (
+          <div className="diff-row diff-row--meta">
+            <span className="diff-row__gutter" />
+            <span className="diff-row__gutter" />
+            <span className="diff-row__marker"> </span>
+            <span className="diff-row__content">[kalan değişiklikler kısaltıldı]</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
