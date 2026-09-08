@@ -3525,3 +3525,154 @@
   font-size: var(--text-xs);
   line-height: 1.5;
 }
+
+/* ---------- thinking block (reasoning stream) ---------- */
+
+.thinking-block {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line-subtle));
+  background: color-mix(in srgb, var(--surface-void) 65%, transparent);
+  overflow: hidden;
+  transition: border-color var(--duration-fast) var(--ease);
+}
+
+.thinking-block:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.thinking-block--open {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+
+.thinking-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease), background var(--duration-fast) var(--ease);
+}
+
+.thinking-block__header:hover {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.thinking-block__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.thinking-block__sparkle {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.thinking-block__pulse {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 8px;
+  height: 8px;
+  margin-left: 4px;
+}
+
+.thinking-block__pulse-ping {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.6;
+  animation: activity-pulse 1.4s ease-in-out infinite;
+}
+
+.thinking-block__pulse-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.thinking-block__toggle {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.thinking-block__body {
+  padding: 8px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--line-subtle) 80%, transparent);
+  background: rgba(0, 0, 0, 0.2);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.thinking-block__text {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-style: italic;
+  line-height: 1.6;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------- mermaid diagram block ---------- */
+
+.mermaid-block {
+  display: flex;
+  justify-content: center;
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface-void) 85%, transparent);
+  border: 1px solid var(--line-subtle);
+  overflow-x: auto;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  transition: border-color var(--duration-fast) var(--ease);
+}
+
+.mermaid-block:hover {
+  border-color: var(--line);
+}
+
+.mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-fallback {
+  margin: 8px 0;
+}
+
+.mermaid-fallback__hint {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  font-style: italic;
+}
+
+.mermaid-fallback__raw {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-void);
+  border: 1px solid var(--line-subtle);
+  font-size: var(--text-xs);
+  overflow-x: auto;
+}

@@ -10,6 +10,7 @@ import { Markdown } from './Markdown'
 import { ModelPicker } from './ModelPicker'
 import { domain } from '../../wailsjs/go/models'
 import { ROLES, roleName } from './roles'
+import { ThinkingBlock, extractThinking } from './ThinkingBlock'
 import type { ConversationNodeData } from './useCanvas'
 
 type Props = NodeProps & {
@@ -543,10 +544,12 @@ function Response({
   const working = response.status === 'queued' || response.status === 'running'
   const canceled = response.status === 'canceled'
   const partial = response.content ?? ''
+  const { thinking, answer } = extractThinking(partial)
+  const textToDisplay = answer !== '' ? answer : (!thinking ? partial : '')
   const [open, setOpen] = useState(false)
   // Folding a streaming answer would hide the part being written.
-  const foldable = !working && partial.length > FOLD_AFTER
-  const shown = foldable && !open ? partial.slice(0, FOLD_AFTER).trimEnd() + '…' : partial
+  const foldable = !working && textToDisplay.length > FOLD_AFTER
+  const shown = foldable && !open ? textToDisplay.slice(0, FOLD_AFTER).trimEnd() + '…' : textToDisplay
 
   return (
     <div className="reply" style={{ ['--reply-accent' as string]: style.accent }}>
@@ -557,26 +560,32 @@ function Response({
         <>
           {working && <Activity status={response.status} activity={response.activity} />}
           {canceled && <p className="reply__stopped">durduruldu</p>}
-          {partial !== '' && (
+          {thinking && (
+            <ThinkingBlock
+              content={thinking}
+              working={working && textToDisplay === ''}
+            />
+          )}
+          {textToDisplay !== '' && (
             working ? (
-              <p className="reply__text reply__text--streaming">{partial}</p>
+              <p className="reply__text reply__text--streaming">{textToDisplay}</p>
             ) : (
               <div className="reply__text">
                 <Markdown>{shown}</Markdown>
               </div>
             )
           )}
-          {(foldable || (!working && partial !== '')) && (
+          {(foldable || (!working && textToDisplay !== '')) && (
             <div className="reply__actions nodrag">
               {foldable && (
                 <button className="reply__action" onClick={() => setOpen(!open)}>
-                  {open ? 'katla' : `devamı (${Math.round(partial.length / 100) / 10}k)`}
+                  {open ? 'katla' : `devamı (${Math.round(textToDisplay.length / 100) / 10}k)`}
                 </button>
               )}
-              {!working && partial !== '' && (
+              {!working && textToDisplay !== '' && (
                 <button
                   className="reply__action"
-                  onClick={() => onBranch(partial)}
+                  onClick={() => onBranch(answer || partial)}
                   title="Bu cevaptan yeni bir kart başlat"
                 >
                   ↗ dallan
