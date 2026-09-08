@@ -67,7 +67,7 @@ export const PipelineNode = memo(function PipelineNode({ id, data, selected }: P
   return (
     <div
       ref={card}
-      className={`node node--pipeline${selected ? ' node--selected' : ''}${deleting ? ' node--deleting' : ''}`}
+      className={`node node--pipeline${selected ? ' node--selected' : ''}${working ? ' node--working' : ''}${deleting ? ' node--deleting' : ''}`}
     >
       <NodeResizer
         minWidth={320}
