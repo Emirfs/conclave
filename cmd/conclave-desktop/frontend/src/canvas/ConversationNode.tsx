@@ -112,7 +112,7 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
   return (
     <div
       ref={card}
-      className={`node node--conversation${selected ? ' node--selected' : ''}${deleting ? ' node--deleting' : ''}`}
+      className={`node node--conversation${selected ? ' node--selected' : ''}${working ? ' node--working' : ''}${deleting ? ' node--deleting' : ''}`}
       style={{ ['--node-accent' as string]: group ? 'var(--accent)' : lead.accent }}
     >
       <NodeResizer
@@ -150,6 +150,12 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
         {savedRole !== '' && (
           <span className="node__badge" title={savedRole}>
             {roleName(savedRole)}
+          </span>
+        )}
+        {working && (
+          <span className="node__working-indicator" title="Ajan çalışıyor">
+            <span className="node__working-ping" />
+            <span className="node__working-dot" />
           </span>
         )}
         <span className="node__kind">{group ? 'grup' : 'tekil'}</span>
@@ -406,6 +412,10 @@ function Prompt({ prompt, kind }: { prompt: string; kind: string }) {
   const foldable = text.length > PROMPT_FOLD_AFTER
   const shown = foldable && !open ? text.slice(0, PROMPT_FOLD_AFTER).trimEnd() + '…' : text
 
+  if (kind === 'relay') {
+    return <HandoffCard speaker={speaker} context={context} text={text} />
+  }
+
   return (
     <div className={`prompt prompt--${kind}`}>
       <span className="prompt__from">{label(kind, speaker)}</span>
@@ -417,6 +427,55 @@ function Prompt({ prompt, kind }: { prompt: string; kind: string }) {
           <Markdown>{shown}</Markdown>
         </div>
       )}
+      {foldable && (
+        <button className="prompt__more nodrag" onClick={() => setOpen(!open)}>
+          {open ? 'katla' : 'devamı'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Structured visual card for an answer relayed from another agent card. */
+function HandoffCard({
+  speaker,
+  context,
+  text,
+}: {
+  speaker: string | null
+  context: string
+  text: string
+}) {
+  const [open, setOpen] = useState(false)
+  const foldable = text.length > PROMPT_FOLD_AFTER
+  const shown = foldable && !open ? text.slice(0, PROMPT_FOLD_AFTER).trimEnd() + '…' : text
+  const sourceStyle = speaker ? providerStyle(speaker) : null
+
+  return (
+    <div className="handoff-card">
+      <div className="handoff-card__header">
+        <span className="handoff-card__route">
+          {sourceStyle && (
+            <span
+              className="handoff-card__badge"
+              style={{ ['--badge-accent' as string]: sourceStyle.accent }}
+              title={sourceStyle.label}
+            >
+              {sourceStyle.glyph}
+            </span>
+          )}
+          <span className="handoff-card__speaker">{speaker ?? 'bağlı kart'}</span>
+          <span className="handoff-card__arrow" aria-hidden="true">
+            →
+          </span>
+          <span className="handoff-card__target">bu karta</span>
+        </span>
+        <span className="handoff-card__tag">aktarım</span>
+      </div>
+      {context !== '' && <Folded label="bağlam" body={context} />}
+      <div className="handoff-card__text">
+        <Markdown>{shown}</Markdown>
+      </div>
       {foldable && (
         <button className="prompt__more nodrag" onClick={() => setOpen(!open)}>
           {open ? 'katla' : 'devamı'}
@@ -531,36 +590,43 @@ function Response({
   )
 }
 
-/** What the provider is doing right now. The daemon stores a machine token; the
- *  wording lives here. */
+/** What the provider is doing right now, drawn as an active status pill. */
 function Activity({ status, activity }: { status: string; activity?: string }) {
+  const isTool = activity?.startsWith('tool:')
+  const isThinking = activity === 'thinking'
+  const isWaiting = status === 'queued'
+
   return (
-    <p className="reply__working">
-      <span className="reply__pips">
-        <i />
-        <i />
-        <i />
+    <div
+      className={`activity-pill${isTool ? ' activity-pill--tool' : ''}${isThinking ? ' activity-pill--thinking' : ''}${isWaiting ? ' activity-pill--waiting' : ''}`}
+    >
+      <span className="activity-pill__indicator">
+        <span className="activity-pill__ping" />
+        <span className="activity-pill__dot" />
       </span>
-      {activityLabel(status, activity)}
-    </p>
+      <span className="activity-pill__icon" aria-hidden="true">
+        {isTool ? <ToolIcon /> : isThinking ? <SparkleIcon /> : <ActivityIcon />}
+      </span>
+      <span className="activity-pill__label">{activityLabel(status, activity)}</span>
+    </div>
   )
 }
 
 function activityLabel(status: string, activity?: string): string {
-  if (status === 'queued') return 'sırada'
+  if (status === 'queued') return 'Sırada bekliyor'
   if (activity?.startsWith('tool:')) {
     const tool = activity.slice(5)
-    return `araç çalıştırıyor: ${toolLabel(tool)}`
+    return `Araç: ${toolLabel(tool)}`
   }
   switch (activity) {
     case 'requesting':
-      return 'modele soruyor'
+      return 'Modele soruyor'
     case 'thinking':
-      return 'düşünüyor'
+      return 'Düşünüyor'
     case 'writing':
-      return 'yazıyor'
+      return 'Yazıyor'
     default:
-      return 'çalışıyor'
+      return 'Çalışıyor'
   }
 }
 
@@ -607,6 +673,30 @@ function FolderIcon() {
         strokeWidth="1"
         strokeLinejoin="round"
       />
+    </svg>
+  )
+}
+function ToolIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M14.7 1.3a2 2 0 0 0-2.8 0L9.4 3.8l2.8 2.8 2.5-2.5a2 2 0 0 0 0-2.8zM2.5 10.7l2.8 2.8L11 7.8 8.2 5zM1 15l2.2-.4L1.4 12.8z" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function SparkleIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8 0a.75.75 0 0 1 .7.49l1.6 4.3 4.3 1.6a.75.75 0 0 1 0 1.42l-4.3 1.6-1.6 4.3a.75.75 0 0 1-1.4 0l-1.6-4.3-4.3-1.6a.75.75 0 0 1 0-1.42l4.3-1.6L7.3.49A.75.75 0 0 1 8 0z" />
+    </svg>
+  )
+}
+
+function ActivityIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <circle cx="8" cy="8" r="6" strokeDasharray="3 3" />
+      <circle cx="8" cy="8" r="2" fill="currentColor" />
     </svg>
   )
 }
