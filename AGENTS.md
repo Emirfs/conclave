@@ -1,9 +1,5 @@
 # AGENTS.md
 
-<!-- ghd:core:start -->
-<!-- Emirfs/ghd tarafindan uretildi. Elle duzenleme; kaynak: rules/GITHUB-RULES.md -->
-GitHub islemlerinde `Emirfs/ghd` reposundaki `rules/GITHUB-RULES.md` kurallari gecerlidir.
-<!-- ghd:core:end -->
 
 ## Repository
 
