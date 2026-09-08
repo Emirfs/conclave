@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { Handle, NodeResizer, Position, useConnection, type NodeProps } from '@xyflow/react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Handle, NodeResizer, Position, useConnection, useNodes, type NodeProps } from '@xyflow/react'
 
 import { providerStyle } from '../providers'
 import { CardControls } from './CardControls'
@@ -11,6 +11,7 @@ import { ModelPicker } from './ModelPicker'
 import { domain } from '../../wailsjs/go/models'
 import { ROLES, roleName } from './roles'
 import { ThinkingBlock, extractThinking } from './ThinkingBlock'
+import { MentionPopup, type MentionCandidate } from './MentionPopup'
 import type { ConversationNodeData } from './useCanvas'
 
 type Props = NodeProps & {
@@ -33,6 +34,11 @@ type Props = NodeProps & {
     deleting?: boolean
   }
 }
+function isConversationNode(node: { id: string; data?: unknown }): node is { id: string; data: ConversationNodeData } {
+  const d = node.data
+  return typeof d === 'object' && d !== null && 'kind' in d && d.kind === 'conversation' && 'conversation' in d
+}
+
 
 type Tab = 'chat' | 'changes' | 'tests'
 
@@ -55,6 +61,60 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const allNodes = useNodes()
+
+  const mentionCandidates = useMemo<MentionCandidate[]>(() => {
+    return allNodes
+      .filter((n): n is typeof n & { data: ConversationNodeData } => n.id !== id && isConversationNode(n))
+      .map((n) => {
+        const conv = n.data.conversation
+        const provs = conv.providers ?? []
+        const style = providerStyle(provs[0] ?? conv.title ?? '')
+        const name = conv.kind === 'group' ? (conv.title || 'Grup') : style.label
+        return {
+          id: n.id,
+          name,
+          role: conv.role || '',
+          accent: style.accent,
+          glyph: style.glyph,
+        }
+      })
+  }, [allNodes, id])
+
+  const filteredMentions = useMemo(() => {
+    if (mentionQuery === null) return []
+    const q = mentionQuery.toLowerCase().trim()
+    if (!q) return mentionCandidates
+    return mentionCandidates.filter(
+      (c) => c.name.toLowerCase().includes(q) || (c.role && c.role.toLowerCase().includes(q)),
+    )
+  }, [mentionCandidates, mentionQuery])
+
+  const handleSelectMention = useCallback(
+    (candidate: MentionCandidate) => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+      const cursor = textarea.selectionStart ?? draft.length
+      const before = draft.slice(0, cursor)
+      const after = draft.slice(cursor)
+      const atIdx = before.lastIndexOf('@')
+      if (atIdx === -1) return
+
+      const nextDraft = before.slice(0, atIdx) + `@${candidate.name} ` + after
+      setDraft(nextDraft)
+      setMentionQuery(null)
+
+      setTimeout(() => {
+        textarea.focus()
+        const nextPos = atIdx + candidate.name.length + 2
+        textarea.setSelectionRange(nextPos, nextPos)
+      }, 0)
+    },
+    [draft],
+  )
   // A card is working while any provider on any turn is still queued or
   // running. That is what a stop applies to, so the button follows it exactly.
   const working = turns.some((turn) =>
@@ -102,12 +162,36 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
       // Enter sends; Shift+Enter is a newline. Stop propagation so the canvas
       // never treats a keystroke as a shortcut.
       event.stopPropagation()
+
+      if (filteredMentions.length > 0) {
+        if (event.key === 'ArrowDown') {
+          event.preventDefault()
+          setMentionIndex((i) => (i + 1) % filteredMentions.length)
+          return
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault()
+          setMentionIndex((i) => (i - 1 + filteredMentions.length) % filteredMentions.length)
+          return
+        }
+        if (event.key === 'Enter' || event.key === 'Tab') {
+          event.preventDefault()
+          handleSelectMention(filteredMentions[mentionIndex])
+          return
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          setMentionQuery(null)
+          return
+        }
+      }
+
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault()
         void send()
       }
     },
-    [send],
+    [filteredMentions, handleSelectMention, mentionIndex, send],
   )
 
   return (
@@ -346,12 +430,32 @@ export const ConversationNode = memo(function ConversationNode({ id, data, selec
       )}
 
       <div className="node__composer">
+        {filteredMentions.length > 0 && (
+          <MentionPopup
+            candidates={filteredMentions}
+            selectedIndex={mentionIndex}
+            onSelect={handleSelectMention}
+          />
+        )}
         <textarea
+          ref={textareaRef}
           className="node__input nodrag nowheel"
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            const val = event.target.value
+            setDraft(val)
+            const cursor = event.target.selectionStart ?? val.length
+            const before = val.slice(0, cursor)
+            const match = /@([a-zA-Z0-9_-ğüşıöçĞÜŞİÖÇ]*)$/.exec(before)
+            if (match) {
+              setMentionQuery(match[1])
+              setMentionIndex(0)
+            } else {
+              setMentionQuery(null)
+            }
+          }}
           onKeyDown={onKeyDown}
-          placeholder={sending ? 'Gönderiliyor…' : 'Mesaj yaz, Enter ile gönder'}
+          placeholder={sending ? 'Gönderiliyor…' : 'Mesaj yaz (@ ile etiketle), Enter ile gönder'}
           rows={2}
           spellCheck={false}
           disabled={sending}
