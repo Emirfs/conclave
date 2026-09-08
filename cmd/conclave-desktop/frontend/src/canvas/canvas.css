@@ -346,6 +346,18 @@
   min-height: 0;
   padding: 12px;
   overflow-y: auto;
+  animation: panel-enter 160ms var(--ease-out) both;
+}
+
+@keyframes panel-enter {
+  from {
+    opacity: 0.75;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .node__placeholder {
@@ -1367,9 +1379,12 @@
     box-shadow var(--duration-fast) var(--ease);
 }
 
-.node__input:focus {
+.node__input:focus,
+.node__input:focus-visible {
+  outline: none;
   border-color: var(--node-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 12%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 25%, transparent),
+              inset 0 0 0 1px color-mix(in srgb, var(--node-accent) 40%, transparent);
 }
 
 .node__input::placeholder {
@@ -1745,6 +1760,27 @@
 
 .node__tab:disabled {
   opacity: 0.4;
+}
+
+.node__project:focus-visible,
+.node__access:focus-visible,
+.node__tab:focus-visible,
+.node__role-chip:focus-visible,
+.node__preview-toggle:focus-visible,
+.changes__pin:focus-visible,
+.changes__file:focus-visible,
+.pipeline__add:focus-visible,
+.pipeline__run:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.node__project:active:not(:disabled),
+.node__access:active:not(:disabled),
+.node__tab:active:not(:disabled),
+.node__role-chip:active,
+.node__preview-toggle:active {
+  transform: scale(0.96);
 }
 
 /* ---------- changes and diff ---------- */
@@ -2507,6 +2543,14 @@
   border-color: var(--line-strong);
 }
 
+.node--pipeline.node--working {
+  border-color: color-mix(in srgb, var(--accent) 75%, var(--line));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent),
+              0 0 28px -4px color-mix(in srgb, var(--accent) 35%, transparent),
+              var(--shadow-panel);
+  animation: node-working-pulse 2.4s var(--ease) infinite;
+}
+
 .node__pipeline-title {
   flex: 1;
   min-width: 0;
@@ -2519,10 +2563,12 @@
   font-size: var(--text-sm);
 }
 
-.node__pipeline-title:focus {
+.node__pipeline-title:focus,
+.node__pipeline-title:focus-visible {
   outline: none;
-  border-color: var(--line-strong);
+  border-color: var(--accent);
   background: var(--surface-input);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .node__chip {
@@ -2615,9 +2661,17 @@
 }
 
 .pipeline__name:focus,
-.pipeline__command:focus {
+.pipeline__name:focus-visible,
+.pipeline__command:focus,
+.pipeline__command:focus-visible {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.pipeline__drop:focus-visible {
+  outline: 2px solid var(--negative);
+  outline-offset: -1px;
 }
 
 .pipeline__drop {
@@ -2711,8 +2765,26 @@
 }
 
 .pipeline__stage-status {
-  font-size: var(--text-xs);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
   color: var(--text-muted);
+}
+
+.pipeline__stage-result--passed .pipeline__stage-status {
+  color: var(--positive);
+  background: color-mix(in srgb, var(--positive) 14%, transparent);
+}
+
+.pipeline__stage-result--failed .pipeline__stage-status {
+  color: var(--negative);
+  background: color-mix(in srgb, var(--negative) 14%, transparent);
+}
+
+.pipeline__stage-result--running .pipeline__stage-status {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .pipeline__output {
