@@ -1,19 +1,12 @@
-# cmd interpreter reads an LF-terminated batch file by splitting commands
-# mid-token: "setlocal" arrives as "tlocal". These files must stay CRLF
-# wherever they are checked out.
-*.cmd text eol=crlf
-*.bat text eol=crlf
+# Depoda satir sonu LF olarak saklanir, calisma alaninda platformun
+# yerlisi olarak acilir. Ayni dosyanin farkli gorunmesini engeller.
+* text=auto
 
-# PowerShell is content with either, but the installer is the file users are
-# most likely to open in Notepad.
-*.ps1 text eol=crlf
-
-# A shell script with CRLF line endings fails on its own shebang line.
-*.sh text eol=lf
-
-*.go text eol=lf
-*.ts text eol=lf
-*.tsx text eol=lf
-*.css text eol=lf
-*.md text eol=lf
-*.yml text eol=lf
+# Ikili dosyalar
+*.hex -text
+*.bin binary
+*.elf binary
+*.map -text
+*.pdf binary
+*.png binary
+*.jpg binary
