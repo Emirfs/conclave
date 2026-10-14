@@ -160,7 +160,6 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 	return nil
 }
 
-
 // cancelPollInterval is how often a running provider is checked against a stop
 // request. A client writes the request to SQLite; this is the only way a worker
 // hears about it.

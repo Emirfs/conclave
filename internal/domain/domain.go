@@ -689,10 +689,10 @@ type CanvasLink struct {
 	// SourceHandle is the port the link leaves by. Empty for every ordinary
 	// card, which has only one way out; a gate uses it to tell its two apart.
 	SourceHandle string `json:"source_handle,omitempty"`
-	Mode      string `json:"mode"`
-	MaxRounds int    `json:"max_rounds"`
-	UntilDone bool   `json:"until_done"`
-	Briefing  string `json:"briefing,omitempty"`
+	Mode         string `json:"mode"`
+	MaxRounds    int    `json:"max_rounds"`
+	UntilDone    bool   `json:"until_done"`
+	Briefing     string `json:"briefing,omitempty"`
 }
 
 // Link modes decide how a relayed answer is presented to the receiving card.
@@ -759,10 +759,10 @@ type NewLink struct {
 	SourceID     int64  `json:"source_id"`
 	TargetID     int64  `json:"target_id"`
 	SourceHandle string `json:"source_handle,omitempty"`
-	Mode      string `json:"mode,omitempty"`
-	MaxRounds int    `json:"max_rounds,omitempty"`
-	UntilDone bool   `json:"until_done,omitempty"`
-	Briefing  string `json:"briefing,omitempty"`
+	Mode         string `json:"mode,omitempty"`
+	MaxRounds    int    `json:"max_rounds,omitempty"`
+	UntilDone    bool   `json:"until_done,omitempty"`
+	Briefing     string `json:"briefing,omitempty"`
 	// Pair also creates the reverse link, so the two cards answer each other.
 	Pair bool `json:"pair,omitempty"`
 }
