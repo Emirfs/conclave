@@ -9,6 +9,8 @@ import { useCanvas } from './canvas/useCanvas'
 import { UpdateBanner } from './UpdateBanner'
 import { UsagePanel } from './UsagePanel'
 import './canvas/canvas.css'
+import { GrantChatWorkspace } from './components/chat/GrantChatWorkspace'
+import './components/chat/grant.css'
 
 type Connection = 'connecting' | 'online' | 'offline'
 
@@ -20,6 +22,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
+  const [viewMode, setViewMode] = useState<'chat' | 'canvas'>('chat')
   // Guards against a slow response from a previous poll overwriting a newer one.
   const generation = useRef(0)
 
@@ -118,76 +121,108 @@ export function App() {
 
   return (
     <div className="shell">
-      <TitleBar connection={connection} version={snapshot?.version} />
+      <TitleBar
+        connection={connection}
+        version={snapshot?.version}
+        viewMode={viewMode}
+        onToggleViewMode={() => setViewMode((m) => (m === 'chat' ? 'canvas' : 'chat'))}
+      />
       <UpdateBanner online={connection === 'online'} />
-      <div className="body">
-        <aside className="rail">
-          <ProviderGroup heading="Sağlayıcılar" providers={providers} onPick={addSolo} />
-          <section className="rail__group">
-            <h2 className="rail__heading">Panoya ekle</h2>
-            <button className="button button--block" onClick={addGroup} disabled={ready.length === 0}>
-              Grup konuşması
-            </button>
-            <button className="button button--block" onClick={addNote}>
-              Not
-            </button>
-            <button className="button button--block" onClick={addPipeline}>
-              Pipeline
-            </button>
-            <button className="button button--block" onClick={addJoin}>
-              Birleştirici
-            </button>
-            <button className="button button--block" onClick={addTrigger}>
-              Tetikleyici
-            </button>
-            <button className="button button--block" onClick={addGate}>
-              Kapı
-            </button>
-          </section>
-          <section className="rail__group">
-            <h2 className="rail__heading">Pano</h2>
-            <button className="button button--block" onClick={() => void canvas.exportBoard()}>
-              Dışa aktar
-            </button>
-            <button className="button button--block" onClick={() => void canvas.importBoard()}>
-              İçe aktar
-            </button>
-            <button className="button button--block" onClick={() => setUsageOpen((open) => !open)}>
-              {usageOpen ? 'Kullanımı gizle' : 'Kullanım'}
-            </button>
-            <p className="rail__hint">
-              İçe aktarma hiçbir şeyin yerine geçmez: dosyadaki kartlar panoda
-              duranların yanına eklenir.
-            </p>
-            <p className="rail__hint">
-              Sağlayıcıya tıkla: tekil konuşma. Boş zemine çift tıkla: not.
-              Boş zeminde sürükle: toplu seç. Ctrl+A: hepsi. Orta/sağ tuş: panoyu kaydır.
-              İki kart seç, bağlama düğmeleri çıksın.
-            </p>
-          </section>
-          {usageOpen && (
-            <UsagePanel online={connection === 'online'} onClose={() => setUsageOpen(false)} />
-          )}
-          {memory.length > 0 && <ProviderGroup heading="Bellek" providers={memory} />}
-        </aside>
-        <main className={connection === 'online' ? 'stage stage--board' : 'stage'}>
-          {connection === 'online' ? (
-            <Board canvas={canvas} providers={ready} />
-          ) : (
-            <Stage
-              connection={connection}
-              error={error}
-              starting={starting}
-              onStart={startDaemon}
-            />
-          )}
-        </main>
+      <div className={`body ${viewMode === 'chat' ? 'body--chat' : ''}`}>
+        {viewMode === 'chat' ? (
+          <GrantChatWorkspace
+            availableProviders={ready}
+            onSwitchToCanvas={() => setViewMode('canvas')}
+          />
+        ) : (
+          <>
+            <aside className="rail">
+              <section className="rail__group">
+                <button
+                  className="button button--block button--primary"
+                  onClick={() => setViewMode('chat')}
+                >
+                  💬 Başvuru Masasına Dön
+                </button>
+              </section>
+              <ProviderGroup heading="Sağlayıcılar" providers={providers} onPick={addSolo} />
+              <section className="rail__group">
+                <h2 className="rail__heading">Panoya ekle</h2>
+                <button className="button button--block" onClick={addGroup} disabled={ready.length === 0}>
+                  Grup konuşması
+                </button>
+                <button className="button button--block" onClick={addNote}>
+                  Not
+                </button>
+                <button className="button button--block" onClick={addPipeline}>
+                  Pipeline
+                </button>
+                <button className="button button--block" onClick={addJoin}>
+                  Birleştirici
+                </button>
+                <button className="button button--block" onClick={addTrigger}>
+                  Tetikleyici
+                </button>
+                <button className="button button--block" onClick={addGate}>
+                  Kapı
+                </button>
+              </section>
+              <section className="rail__group">
+                <h2 className="rail__heading">Pano</h2>
+                <button className="button button--block" onClick={() => void canvas.exportBoard()}>
+                  Dışa aktar
+                </button>
+                <button className="button button--block" onClick={() => void canvas.importBoard()}>
+                  İçe aktar
+                </button>
+                <button className="button button--block" onClick={() => setUsageOpen((open) => !open)}>
+                  {usageOpen ? 'Kullanımı gizle' : 'Kullanım'}
+                </button>
+                <p className="rail__hint">
+                  İçe aktarma hiçbir şeyin yerine geçmez: dosyadaki kartlar panoda
+                  duranların yanına eklenir.
+                </p>
+                <p className="rail__hint">
+                  Sağlayıcıya tıkla: tekil konuşma. Boş zemine çift tıkla: not.
+                  Boş zeminde sürükle: toplu seç. Ctrl+A: hepsi. Orta/sağ tuş: panoyu kaydır.
+                  İki kart seç, bağlama düğmeleri çıksın.
+                </p>
+              </section>
+              {usageOpen && (
+                <UsagePanel online={connection === 'online'} onClose={() => setUsageOpen(false)} />
+              )}
+              {memory.length > 0 && <ProviderGroup heading="Bellek" providers={memory} />}
+            </aside>
+            <main className={connection === 'online' ? 'stage stage--board' : 'stage'}>
+              {connection === 'online' ? (
+                <Board canvas={canvas} providers={ready} />
+              ) : (
+                <Stage
+                  connection={connection}
+                  error={error}
+                  starting={starting}
+                  onStart={startDaemon}
+                />
+              )}
+            </main>
+          </>
+        )}
       </div>
     </div>
   )
 }
 
-function TitleBar({ connection, version }: { connection: Connection; version?: string }) {
+function TitleBar({
+  connection,
+  version,
+  viewMode,
+  onToggleViewMode,
+}: {
+  connection: Connection
+  version?: string
+  viewMode?: 'chat' | 'canvas'
+  onToggleViewMode?: () => void
+}) {
   const label =
     connection === 'online'
       ? `daemon ${version ?? ''}`.trim()
@@ -203,6 +238,24 @@ function TitleBar({ connection, version }: { connection: Connection; version?: s
         {label}
       </span>
       <span className="titlebar__spacer" />
+      {onToggleViewMode && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '14px' }}>
+          <button
+            className={`button button--sm ${viewMode === 'chat' ? 'button--primary' : ''}`}
+            onClick={() => onToggleViewMode()}
+            style={{ fontSize: '11px', padding: '2px 10px' }}
+          >
+            {viewMode === 'chat' ? '✓ Başvuru Masası' : 'Başvuru Masası'}
+          </button>
+          <button
+            className={`button button--sm ${viewMode === 'canvas' ? 'button--primary' : ''}`}
+            onClick={() => onToggleViewMode()}
+            style={{ fontSize: '11px', padding: '2px 10px' }}
+          >
+            {viewMode === 'canvas' ? '✓ Pano (Canvas)' : 'Pano (Canvas)'}
+          </button>
+        </div>
+      )}
       <div className="titlebar__controls">
         <button className="titlebar__button" onClick={WindowMinimise} title="Küçült">
           <CaptionIcon d="M2 8h12" />
