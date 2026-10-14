@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -33,6 +34,7 @@ type Server struct {
 	// updates may be nil: a daemon built without a release check still serves
 	// everything else, it just has nothing to say about newer versions.
 	updates *update.Checker
+	grantMu sync.Mutex
 }
 
 func NewServer(store *store.Store, token string, updates *update.Checker) *Server {
@@ -83,6 +85,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/canvas/conversations/{id}/branch", s.branch)
 	mux.HandleFunc("GET /v1/update", s.updateStatus)
 	mux.HandleFunc("POST /v1/update/check", s.checkUpdate)
+	s.registerGrantCatalogue(mux)
+	s.registerGrantProjects(mux)
 	return s.authenticate(mux)
 }
 

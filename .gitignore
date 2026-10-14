@@ -10,6 +10,7 @@ config.local.*
 
 # desktop app
 /cmd/conclave-desktop/build/bin/
+/cmd/conclave-desktop/*.exe
 # Wails regenerates these from its own version; only project.nsi is ours.
 /cmd/conclave-desktop/build/windows/installer/wails_tools.nsh
 /cmd/conclave-desktop/build/windows/installer/tmp/

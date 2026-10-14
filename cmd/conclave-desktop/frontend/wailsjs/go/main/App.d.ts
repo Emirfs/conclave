@@ -3,6 +3,7 @@
 import {domain} from '../models';
 import {update} from '../models';
 import {vcs} from '../models';
+import type * as grant from '../../../src/logic/grantProduct';
 
 export function ApplyUpdate():Promise<void>;
 
@@ -95,3 +96,29 @@ export function UpdateLink(arg1:number,arg2:string,arg3:number,arg4:boolean,arg5
 export function UpdateStatus():Promise<update.Status>;
 
 export function Usage(arg1:number):Promise<domain.UsageReport>;
+
+export function GrantCatalogue():Promise<grant.Catalogue>;
+
+export function RefreshGrantCatalogue():Promise<grant.Catalogue>;
+
+export function AddGrantProgram(arg1:grant.Program):Promise<grant.Catalogue>;
+
+export function GrantProjects():Promise<Array<grant.ProjectSummary>>;
+
+export function CreateGrantProject(arg1:grant.ProjectInput):Promise<grant.GrantProject>;
+
+export function GrantProject(arg1:number):Promise<grant.GrantProject>;
+
+export function ApproveGrantSend(arg1:number,arg2:grant.SendApproval):Promise<grant.GrantProject>;
+
+export function ApproveGrantResearch(arg1:number,arg2:grant.ResearchApproval):Promise<grant.GrantProject>;
+
+export function StopGrantProject(arg1:number):Promise<grant.GrantProject>;
+
+export function RetryGrantProject(arg1:number):Promise<grant.GrantProject>;
+
+export function ExtractGrantDocuments(arg1:Array<grant.DocumentInput>):Promise<Array<grant.ImportedDocument>>;
+
+export function ExportGrantDossiers(arg1:number):Promise<Array<string>>;
+
+export function ExportGrantResearch(arg1:number):Promise<string>;

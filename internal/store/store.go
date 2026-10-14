@@ -346,6 +346,27 @@ ALTER TABLE flow_runs ADD COLUMN origin_kind TEXT NOT NULL DEFAULT 'user';
 ALTER TABLE flow_runs ADD COLUMN reported INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX flow_runs_recent_idx ON flow_runs(id DESC);
 `,
+	// 20: daemon-owned grant projects and the official programme catalogue.
+	`
+CREATE TABLE grant_projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version INTEGER NOT NULL DEFAULT 1,
+    payload TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX grant_projects_recent_idx ON grant_projects(updated_at DESC, id DESC);
+CREATE TABLE grant_catalogue (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    payload TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE grant_conversations (
+    conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+    project_id INTEGER NOT NULL REFERENCES grant_projects(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    UNIQUE(project_id, provider)
+);
+`,
 }
 
 func (s *Store) init() error {
@@ -401,6 +422,9 @@ func (s *Store) applyMigration(version int) error {
 // CreateConversationTurn records a prompt against a conversation and queues one
 // response per provider the conversation targets.
 func (s *Store) CreateConversationTurn(ctx context.Context, conversationID int64, prompt string) (int64, error) {
+	if err := s.requireOrdinaryConversation(ctx, conversationID); err != nil {
+		return 0, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -494,7 +518,8 @@ func (s *Store) ClaimChatResponse(ctx context.Context) (*domain.ChatJob, error) 
 SELECT r.id, r.turn_id, r.provider, t.prompt, COALESCE(t.conversation_id, 0),
        COALESCE(c.project_path, ''), COALESCE(c.access, 'edit'),
        COALESCE(ps.session_id, ''), COALESCE(cm.model, ''), COALESCE(ps.model, ''),
-       COALESCE(c.role, ''), COALESCE(ps.context_tokens, 0)
+       COALESCE(c.role, ''), COALESCE(ps.context_tokens, 0),
+       EXISTS(SELECT 1 FROM grant_conversations g WHERE g.conversation_id=c.id)
 FROM chat_responses r
 JOIN chat_turns t ON t.id = r.turn_id
 LEFT JOIN conversations c ON c.id = t.conversation_id
@@ -511,7 +536,7 @@ WHERE r.status = ?
 ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
 		Scan(&job.ResponseID, &job.TurnID, &job.Provider, &job.Prompt, &job.ConversationID,
 			&job.ProjectPath, &job.Access, &job.SessionID, &chosenModel, &sessionModel,
-			&role, &contextTokens)
+			&role, &contextTokens, &job.WebResearch)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -556,7 +581,7 @@ ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
 	// history; replaying a transcript into the prompt would send it twice. The
 	// transcript is only what stands in for a session the provider does not
 	// keep, or has not started yet.
-	if job.SessionID == "" {
+	if job.SessionID == "" && !job.WebResearch {
 		job.Prompt, err = s.chatContext(ctx, job.ConversationID, job.Provider, job.TurnID)
 		if err != nil {
 			_ = s.RequeueChatResponse(context.WithoutCancel(ctx), job.ResponseID)
@@ -566,7 +591,7 @@ ORDER BY r.id LIMIT 1`, domain.StatusQueued, domain.StatusRunning).
 	// Deep into a long session a card drifts from what it was asked to be. One
 	// line costs almost nothing next to a window this full, and it is only sent
 	// once the window is actually large.
-	if role != "" && contextTokens >= contextRemindAt {
+	if role != "" && contextTokens >= contextRemindAt && !job.WebResearch {
 		job.Prompt = "Hatırlatma — senin rolün: " + role + "\n\n" + job.Prompt
 	}
 	return &job, nil
@@ -1196,7 +1221,9 @@ func (s *Store) listConversations(ctx context.Context) ([]domain.Conversation, e
 		        COALESCE(loop_mode, 'off'), COALESCE(loop_interval_seconds, 5),
 		        COALESCE(loop_running, 0),
 		        COALESCE(role, ''), COALESCE(dialogue_state, '')
-		 FROM conversations ORDER BY id`)
+		 FROM conversations WHERE NOT EXISTS (
+		     SELECT 1 FROM grant_conversations g WHERE g.conversation_id = conversations.id
+		 ) ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -1458,6 +1485,13 @@ const maxRelayDepth = 3
 func (s *Store) CreateLink(ctx context.Context, sourceID, targetID int64, options domain.LinkOptions) (domain.CanvasLink, error) {
 	if sourceID == targetID {
 		return domain.CanvasLink{}, errors.New("a card cannot be linked to itself")
+	}
+	var grantEndpoints int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM canvas_nodes n JOIN grant_conversations g ON g.conversation_id=n.conversation_id WHERE n.id IN (?,?)", sourceID, targetID).Scan(&grantEndpoints); err != nil {
+		return domain.CanvasLink{}, err
+	}
+	if grantEndpoints != 0 {
+		return domain.CanvasLink{}, errors.New("başvuru konuşmaları otomatik bağlantı kullanamaz; her gönderim başvuru ekranından onaylanmalı")
 	}
 	options = options.Normalised()
 	// A link carries an answer, so both ends must be something an answer can
@@ -2298,6 +2332,9 @@ func (s *Store) recycleSession(ctx context.Context, conversationID int64, provid
 // SetConversationRole says what this card is meant to do when it works with
 // another card. Changing it re-briefs the card before its next relayed message.
 func (s *Store) SetConversationRole(ctx context.Context, conversationID int64, role string) error {
+	if err := s.requireOrdinaryConversation(ctx, conversationID); err != nil {
+		return err
+	}
 	result, err := s.db.ExecContext(ctx,
 		"UPDATE conversations SET role = ?, briefed = 0 WHERE id = ?", role, conversationID)
 	if err != nil {
@@ -2402,6 +2439,9 @@ func (s *Store) ResumeDialogue(ctx context.Context, conversationID int64) error 
 
 // SetConversationProject points a card at a project directory and access level.
 func (s *Store) SetConversationProject(ctx context.Context, conversationID int64, path, access string) error {
+	if err := s.requireOrdinaryConversation(ctx, conversationID); err != nil {
+		return err
+	}
 	result, err := s.db.ExecContext(ctx,
 		"UPDATE conversations SET project_path = ?, access = ? WHERE id = ?",
 		path, access, conversationID)

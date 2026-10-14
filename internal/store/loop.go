@@ -14,6 +14,9 @@ const recentRuns = 8
 
 // SetLoop replaces a card's step list and cycle settings.
 func (s *Store) SetLoop(ctx context.Context, conversationID int64, config domain.LoopConfig) error {
+	if err := s.requireOrdinaryConversation(ctx, conversationID); err != nil {
+		return err
+	}
 	config = config.Normalised()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -58,6 +61,9 @@ VALUES(?, ?, ?, ?, ?)`,
 
 // SetLoopRunning arms or disarms a card's cycle. Arming makes it due at once.
 func (s *Store) SetLoopRunning(ctx context.Context, conversationID int64, running bool) error {
+	if err := s.requireOrdinaryConversation(ctx, conversationID); err != nil {
+		return err
+	}
 	due := ""
 	value := 0
 	if running {

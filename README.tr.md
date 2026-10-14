@@ -269,6 +269,24 @@ SQLite migration'ları yalnızca sona eklenir ve `PRAGMA user_version` ile izlen
 
 `edit` erişimi bilinçli olarak güçlüdür. Bir kart seçili projeyi değiştirmemeliyse `read` kullanın.
 
+## Destek Başvuruları
+
+Masaüstü destek çalışma alanı, projeleri ve iş akışı durumunu daemon içinde saklar.
+Başlamadan önce Claude, Codex ve Gemini/Antigravity CLI oturumlarını hazırlayın.
+
+- Resmî ulusal ve uluslararası kaynakları arayın, yenileyin veya resmî program adresi ekleyin. Öneriler uygunluk garantisi vermez.
+- Metin içeren PDF, DOCX veya XLSX yükleyin. Çıkarılan bilgileri, çelişkileri ve eksik formül sonuçlarını inceleyin. Taranmış PDF için haricî OCR gerekir.
+- Proje paylaşım kapsamını ve her maskelenmiş sağlayıcı iletisini ayrı onaylayın. Maskeyi kontrol edin; özgün proje bilgileri yerelde kalır.
+- Üç sağlayıcı araştırır ve tartışır. Yazımdan önce kaynakları, bilgileri, resmî bölümleri ve uzunluk sınırlarını onaylayın. Üç sağlayıcı taslağı inceler.
+- Başvuruyu ve AI araştırma/denetim kaydını ayrı DOCX dosyalarına aktarın. Tamamlanan başvuru, onaylanan yerel bilgileri geri getirir.
+
+Uzunluk denetimi, geri getirilen yerel bilgileri de sayar.
+Sağlayıcı hataları ve engelleyici incelemeler başvurunun hazır sayılmasını önler.
+Üç düzeltme turundan sonra kalan sorunları açık kurtarma işlemiyle çözün.
+Kaynak denetimi, erişimi ve alıntı eşleşmesini doğrular; doğruluk veya kabul garantisi vermez.
+Katalog dünya çapında eksiksizlik garantisi vermez.
+Durdurma işlemi, önceden onaylanan paylaşımları geri alamaz.
+
 ## Proje Yapısı
 
 | Yol | Sorumluluk |
@@ -278,6 +296,7 @@ SQLite migration'ları yalnızca sona eklenir ve `PRAGMA user_version` ile izlen
 | `internal/api/` | Kimlik doğrulamalı yerel HTTP API ve Go istemcisi |
 | `internal/daemon/` | Pipeline ve sağlayıcı worker yaşam döngüsü |
 | `internal/domain/` | Paylaşılan aktarım ve domain tipleri |
+| `internal/grants/` | Program kataloğu, kaynak güvenliği, belge çıkarımı, başvuru akışı ve DOCX çıktısı |
 | `internal/provider/` | CLI keşfi, çağırma ve akış çözümleme |
 | `internal/statedir/` | Durum yolları ve token yönetimi |
 | `internal/store/` | SQLite kalıcılığı, migration'lar ve kurtarma |

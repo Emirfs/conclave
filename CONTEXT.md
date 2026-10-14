@@ -90,3 +90,35 @@ nodes the daemon persists, so a layout survives a restart.
 - SQLite is operational state; Mnemo is shared semantic memory. Neither stores credentials.
 - Schema changes are append-only migrations tracked with `PRAGMA user_version`. Never edit an applied
   migration.
+
+## Grant application product
+
+The daemon persists project facts, imported document text, masking terms, workflow versions and provider contributions.
+Grant conversations are isolated, read-only and excluded from ordinary canvas controls.
+The desktop uses canonical Wails bindings; it never holds the daemon token.
+
+The extensible catalogue starts from official national and international directories.
+Successful public-source refreshes remain cached; source failures remain visible.
+Refresh normally runs after 24 hours, or after one hour when sources fail.
+Manual additions do not postpone refresh. Matching is advisory, not confirmed eligibility or exhaustive coverage.
+Source fetching rejects private addresses, credential-bearing URLs and oversized responses.
+Evidence verification checks reachable pages and matching quotations, not factual truth.
+
+Searchable PDF, DOCX and cached XLSX values become reviewable project inputs.
+Scanned PDFs require external OCR; unavailable formula results and extraction failures remain explicit.
+The user confirms facts, resolves conflicts and approves official sections and length limits before writing.
+Claude, Codex and Gemini independently research and discuss findings.
+Claude researches, Codex writes, and Gemini leads review; all three review each draft.
+Blocking reviews trigger at most three revision rounds, then explicit human recovery.
+
+The desktop requests project-scope consent and separate approval of every exact masked provider prompt.
+Scope consent never authorizes automatic sending; stale or duplicate approvals fail closed.
+Additional masking terms persist with the local project; editing them resets pending approval.
+Masking is best-effort, not anonymity: review names, addresses, trade secrets and unsupported formats manually.
+Credentials are scrubbed before persistence or sharing; partial grant output text is not persisted.
+Locally approved identifiers return only in the completed application and its Word export.
+Official length checks use restored local values, without revealing them to providers.
+
+The application and research/debate/audit record export as separate real DOCX files.
+Canceling consent or stopping work cannot recall previously shared data.
+These approval controls apply to the grant workspace, not ordinary canvas chats or independent headless clients.

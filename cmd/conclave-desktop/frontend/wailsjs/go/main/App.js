@@ -185,3 +185,55 @@ export function UpdateStatus() {
 export function Usage(arg1) {
   return window['go']['main']['App']['Usage'](arg1);
 }
+
+export function GrantCatalogue() {
+  return window['go']['main']['App']['GrantCatalogue']();
+}
+
+export function RefreshGrantCatalogue() {
+  return window['go']['main']['App']['RefreshGrantCatalogue']();
+}
+
+export function AddGrantProgram(arg1) {
+  return window['go']['main']['App']['AddGrantProgram'](arg1);
+}
+
+export function GrantProjects() {
+  return window['go']['main']['App']['GrantProjects']();
+}
+
+export function CreateGrantProject(arg1) {
+  return window['go']['main']['App']['CreateGrantProject'](arg1);
+}
+
+export function GrantProject(arg1) {
+  return window['go']['main']['App']['GrantProject'](arg1);
+}
+
+export function ApproveGrantSend(arg1, arg2) {
+  return window['go']['main']['App']['ApproveGrantSend'](arg1, arg2);
+}
+
+export function ApproveGrantResearch(arg1, arg2) {
+  return window['go']['main']['App']['ApproveGrantResearch'](arg1, arg2);
+}
+
+export function StopGrantProject(arg1) {
+  return window['go']['main']['App']['StopGrantProject'](arg1);
+}
+
+export function RetryGrantProject(arg1) {
+  return window['go']['main']['App']['RetryGrantProject'](arg1);
+}
+
+export function ExtractGrantDocuments(arg1) {
+  return window['go']['main']['App']['ExtractGrantDocuments'](arg1);
+}
+
+export function ExportGrantDossiers(arg1) {
+  return window['go']['main']['App']['ExportGrantDossiers'](arg1);
+}
+
+export function ExportGrantResearch(arg1) {
+  return window['go']['main']['App']['ExportGrantResearch'](arg1);
+}
