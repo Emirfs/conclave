@@ -290,6 +290,22 @@ SQLite migrations are append-only and tracked with `PRAGMA user_version`. Jobs l
 
 `edit` access is intentionally powerful. Use `read` unless a card should be allowed to modify its selected project.
 
+## Grant Applications
+
+The desktop grant workspace keeps projects and workflow state in the daemon.
+Install and authenticate Claude, Codex and the Gemini/Antigravity CLI before starting.
+
+- Search official national and international directories, refresh sources, or add an official programme URL. Recommendations do not guarantee eligibility.
+- Import searchable PDF, DOCX or XLSX files. Review extracted facts, conflicts, missing information and uncached formulas; scanned PDFs require external OCR.
+- Approve project sharing scope and every exact masked provider prompt. Review masking manually; original project data remains local.
+- All three providers research and debate. Confirm sources, facts, official sections and length limits before Codex writes; all three review.
+- Export separate application and AI research/audit DOCX files. Completed applications restore approved local identifiers and enforce official length limits.
+
+Failed providers and blocking reviews cannot mark an application ready.
+After three revision rounds, resolve remaining issues through explicit recovery.
+Source checks prove page access and matching quotations, not truth, complete worldwide coverage or funding acceptance.
+Stopping work cannot recall previously approved sharing.
+
 ## Project Layout
 
 | Path | Responsibility |
@@ -299,6 +315,7 @@ SQLite migrations are append-only and tracked with `PRAGMA user_version`. Jobs l
 | `internal/api/` | Authenticated local HTTP API and Go client |
 | `internal/daemon/` | Pipeline and provider worker lifecycle |
 | `internal/domain/` | Shared transport and domain types |
+| `internal/grants/` | Programme catalogue, source safety, document extraction, grant workflow and DOCX output |
 | `internal/provider/` | CLI discovery, invocation, and stream decoding |
 | `internal/statedir/` | State paths and token management |
 | `internal/store/` | SQLite persistence, migrations, and recovery |
