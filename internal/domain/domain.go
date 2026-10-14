@@ -276,6 +276,7 @@ type ChatJob struct {
 	Access         string
 	SessionID      string
 	Model          string
+	WebResearch    bool
 }
 
 // Conversation kinds. A solo conversation talks to exactly one provider; a

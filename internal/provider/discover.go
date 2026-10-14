@@ -66,6 +66,8 @@ type Request struct {
 	// SessionID continues a provider-side conversation when it is already known.
 	SessionID string
 	Model     string
+	// WebResearch enables read-only web tools for a consented grant conversation.
+	WebResearch bool
 }
 
 // ChatInvocation builds the command line for one turn.
@@ -83,7 +85,10 @@ func ChatInvocation(request Request) (Invocation, error) {
 			// Matches a normal session that accepts its own edits.
 			command = append(command, "--permission-mode", "acceptEdits")
 		} else {
-			command = append(command, "--permission-mode", "plan", "--tools", "")
+			command = append(command, "--permission-mode", "plan")
+		}
+		if request.WebResearch {
+			command = append(command, "--bare", "--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch")
 		}
 		if request.Model != "" {
 			command = append(command, "--model", request.Model)
@@ -111,6 +116,9 @@ func ChatInvocation(request Request) (Invocation, error) {
 		}
 		if request.Model != "" {
 			command = append(command, "--model", request.Model)
+		}
+		if request.WebResearch {
+			command = append(command, "-c", `web_search="live"`)
 		}
 		// A lone dash makes codex read the prompt from stdin.
 		command = append(command, "-")

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Emirfs/conclave/internal/domain"
+	"github.com/Emirfs/conclave/internal/grants"
 	"github.com/Emirfs/conclave/internal/provider"
 	"github.com/Emirfs/conclave/internal/store"
 )
@@ -103,11 +104,12 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 	}
 	persist := context.WithoutCancel(ctx)
 	invocation, err := provider.ChatInvocation(provider.Request{
-		Provider:  job.Provider,
-		Prompt:    job.Prompt,
-		Access:    provider.Access(job.Access),
-		SessionID: job.SessionID,
-		Model:     job.Model,
+		Provider:    job.Provider,
+		Prompt:      job.Prompt,
+		Access:      provider.Access(job.Access),
+		SessionID:   job.SessionID,
+		Model:       job.Model,
+		WebResearch: job.WebResearch,
 	})
 	if err != nil {
 		return d.store.FinishChatResponse(persist, job.ResponseID, domain.StatusFailed, "", err.Error())
@@ -117,7 +119,17 @@ func (d *Daemon) runNextChat(ctx context.Context) error {
 	// that owns the process watches for it and kills the tree.
 	runCtx, stopRun := context.WithCancel(ctx)
 	stopWatcher := d.watchCancel(runCtx, job.ResponseID, stopRun)
-	outcome := d.executeChat(runCtx, job.ProjectPath, invocation, d.chatProgress(persist, job.ResponseID))
+	progress := d.chatProgress(persist, job.ResponseID)
+	if job.WebResearch {
+		// Do not persist partial credentials split across stream chunks.
+		ordinaryProgress := progress
+		progress = func(_ string, activity string) { ordinaryProgress("", grants.ScrubCredentials(activity)) }
+	}
+	outcome := d.executeChat(runCtx, job.ProjectPath, invocation, progress)
+	if job.WebResearch {
+		outcome.content = grants.ScrubModelOutput(outcome.content)
+		outcome.failure = grants.ScrubCredentials(outcome.failure)
+	}
 	stopWatcher()
 	stopRun()
 	if ctx.Err() != nil {
